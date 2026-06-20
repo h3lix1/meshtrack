@@ -1,0 +1,24 @@
+# SwiftPM / build
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+
+# Coverage / profiling
+*.profraw
+*.profdata
+
+# Mutation testing
+.muter/
+muter-report*
+
+# macOS
+.DS_Store
+
+# Local secrets / config (secrets live in Keychain, never the repo)
+*.local.env
+secrets.json
+
+# Editor
+.vscode/
+.idea/

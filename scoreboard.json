@@ -1,0 +1,17 @@
+{
+  "updated": "2026-06-20",
+  "phase": 0,
+  "gates": {
+    "coverage_min_pct": 70,
+    "mutation_min_score": 60
+  },
+  "metrics": {
+    "coverage_pct": 100.0,
+    "mutation_score": null,
+    "ingestion_msgs_per_sec": null,
+    "p95_query_latency_ms": null,
+    "todo_fixme_count": 0,
+    "doc_coverage_pct": null
+  },
+  "policy": "Metrics ratchet in the good direction only. CI fails on regression: coverage % and mutation score may rise but never fall; latency may fall but never rise. Update gates.*_min only upward."
+}

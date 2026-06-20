@@ -1,0 +1,8 @@
+# Meshtrack progress log — one line per completed task (newest last).
+# Format: <date> <phase> <conventional-commit-subject>
+
+2026-06-20 P0 chore(scaffold): SPM workspace, module dependency rules, gate harness
+2026-06-20 P0 feat(domain): Clock port + Instant + InjectedClock; SystemClock adapter; Date() banned in Domain
+2026-06-20 P0 feat(transport): MeshTransport port + InboundFrame provenance type
+2026-06-20 P0 build: make verify wired (purity, format, lint, build, test, coverage, mutation, protos, perf, secrets) + CI
+2026-06-20 P0 docs: SPEC.md / IMPLEMENTATION_PLAN.md / AGENTS.md + Ralph loop (scripts/loop.sh, stuck-detector)
