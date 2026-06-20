@@ -1,0 +1,9 @@
+{
+  "name": "synthetic-multigateway",
+  "source": "synthetic",
+  "captured_at": "2026-06-18T12:01:40Z",
+  "topic_filter": "msh/US/2/e/#",
+  "frame_count": 2,
+  "synthetic": true,
+  "notes": "Same packet relayed by two gateways within the dedup window — exercises (packet_id, from_num) dedup once decode lands (SPEC §2.4)."
+}

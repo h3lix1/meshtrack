@@ -1,0 +1,2 @@
+{"seq":0,"rx_time_ns":1718712100000000000,"transport":"mqtt","topic":"msh/US/2/e/LongFast/!a1b2c3d4","gateway_id":"!gateway01","payload_b64":"3q2+7w=="}
+{"seq":1,"rx_time_ns":1718712100500000000,"transport":"mqtt","topic":"msh/US/2/e/LongFast/!a1b2c3d4","gateway_id":"!gateway02","payload_b64":"3q2+7w=="}
