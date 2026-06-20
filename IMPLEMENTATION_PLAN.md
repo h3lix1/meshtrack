@@ -15,7 +15,7 @@ dispatched to a worktree agent.
 - [x] `make verify` wired with all gates (purity, format, lint, build, test, coverage, mutation, protos, perf, secrets) + CI workflow
 - [x] Ralph loop wiring: `SPEC.md`, `IMPLEMENTATION_PLAN.md`, `AGENTS.md`, `scripts/loop.sh`, stuck-detector
 - [ ] GRDB store + migration framework + schema v1 (§5)  *(→ Agent B / Persistence)*
-- [ ] Pinned, vendored `meshtastic/protobufs` + reproducible SwiftProtobuf codegen (`scripts/gen-protos.sh`)  *(→ Agent D / MeshProtos)*
+- [x] Pinned, vendored `meshtastic/protobufs` + reproducible SwiftProtobuf codegen (`scripts/gen-protos.sh`)
 - [ ] `ReplayAdapter` + golden-corpus format + 3 captured recordings  *(→ Agent C / Transport)*
 - [ ] Scenario DSL parser + runner  *(→ Agent E / Scenario)*
 
