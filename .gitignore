@@ -22,3 +22,6 @@ secrets.json
 # Editor
 .vscode/
 .idea/
+
+# Claude Code local state (settings + transient agent worktrees)
+.claude/
