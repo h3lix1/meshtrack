@@ -1,0 +1,9 @@
+{
+  "name": "synthetic-mixed-transport",
+  "source": "synthetic",
+  "captured_at": "2026-06-18T12:03:20Z",
+  "topic_filter": null,
+  "frame_count": 3,
+  "synthetic": true,
+  "notes": "Frames across serial, MQTT and BLE transports — exercises provenance across all local + broker sources."
+}

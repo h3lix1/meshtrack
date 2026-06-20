@@ -1,0 +1,9 @@
+{
+  "name": "synthetic-basic",
+  "source": "synthetic",
+  "captured_at": "2026-06-18T12:00:00Z",
+  "topic_filter": "msh/US/2/e/#",
+  "frame_count": 3,
+  "synthetic": true,
+  "notes": "Opaque raw payloads for byte-level replay (no protobuf decode). Two nodes over MQTT."
+}

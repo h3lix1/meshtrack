@@ -16,7 +16,7 @@ dispatched to a worktree agent.
 - [x] Ralph loop wiring: `SPEC.md`, `IMPLEMENTATION_PLAN.md`, `AGENTS.md`, `scripts/loop.sh`, stuck-detector
 - [x] GRDB store + migration framework + schema v1 (§5)
 - [x] Pinned, vendored `meshtastic/protobufs` + reproducible SwiftProtobuf codegen (`scripts/gen-protos.sh`)
-- [ ] `ReplayAdapter` + golden-corpus format + 3 captured recordings  *(→ Agent C / Transport)*
+- [x] `ReplayAdapter` + golden-corpus format + 3 recordings (synthetic; real captures deferred to Phase 1)
 - [ ] Scenario DSL parser + runner  *(→ Agent E / Scenario)*
 
 **Done when:** a replayed corpus produces persisted nodes; full gate suite green
