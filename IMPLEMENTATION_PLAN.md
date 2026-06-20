@@ -17,7 +17,7 @@ dispatched to a worktree agent.
 - [x] GRDB store + migration framework + schema v1 (§5)
 - [x] Pinned, vendored `meshtastic/protobufs` + reproducible SwiftProtobuf codegen (`scripts/gen-protos.sh`)
 - [x] `ReplayAdapter` + golden-corpus format + 3 recordings (synthetic; real captures deferred to Phase 1)
-- [ ] Scenario DSL parser + runner  *(→ Agent E / Scenario)*
+- [x] Scenario DSL parser + runner
 
 **Done when:** a replayed corpus produces persisted nodes; full gate suite green
 from a cold checkout.
