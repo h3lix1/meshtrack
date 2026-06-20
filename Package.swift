@@ -58,6 +58,11 @@ let package = Package(
             dependencies: ["Domain", "MeshProtos"],
             swiftSettings: strict
         ),
+        .target(
+            name: "Ingest",
+            dependencies: ["Domain", "Transport", "Persistence", "MeshProtos"],
+            swiftSettings: strict
+        ),
 
         // ---- Test/acceptance harness -------------------------------------------
         .target(
@@ -79,7 +84,7 @@ let package = Package(
             name: "meshtrackd",
             dependencies: [
                 "Domain", "Persistence", "Transport", "RuleEngine",
-                "Provisioning", "MeshProtos"
+                "Provisioning", "Ingest", "MeshProtos"
             ],
             swiftSettings: strict
         ),
@@ -94,7 +99,12 @@ let package = Package(
             dependencies: ["Provisioning", "Domain"],
             swiftSettings: strict
         ),
-        .testTarget(name: "ScenarioTests", dependencies: ["Scenario"], swiftSettings: strict)
+        .testTarget(name: "ScenarioTests", dependencies: ["Scenario"], swiftSettings: strict),
+        .testTarget(
+            name: "IngestTests",
+            dependencies: ["Ingest", "Transport", "Persistence", "Domain"],
+            swiftSettings: strict
+        )
     ],
     swiftLanguageModes: [.v6]
 )
