@@ -1,0 +1,33 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Meshtrack targets macOS 26 / Swift 6.2 (Xcode 26). Select the newest
+      # Xcode the runner provides; until GitHub images ship Xcode 26 this may
+      # require a self-hosted runner (see AGENTS.md).
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.app 2>/dev/null \
+            || sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+
+      - name: Bootstrap dev tooling
+        run: make bootstrap
+
+      # CI installs everything and enforces every gate (no skips).
+      - name: make verify
+        run: make verify

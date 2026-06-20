@@ -1,0 +1,7 @@
+# Tests may force-unwrap / try! / as! fixtures, use short local names, and carry
+# raw-identifier @Test display names. Everything else still applies.
+disabled_rules:
+  - force_unwrapping
+  - force_try
+  - force_cast
+  - identifier_name
