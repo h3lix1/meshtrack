@@ -6,7 +6,7 @@
     "mutation_min_score": 60
   },
   "metrics": {
-    "coverage_pct": 100.0,
+    "coverage_pct": 88.4,
     "mutation_score": null,
     "ingestion_msgs_per_sec": null,
     "p95_query_latency_ms": null,

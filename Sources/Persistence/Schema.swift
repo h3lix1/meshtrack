@@ -1,0 +1,81 @@
+// Schema vocabulary: table names, the enums persisted as TEXT, and the typed
+// error surface. Kept free of GRDB so the names can be referenced from tests and
+// future query helpers without dragging in the driver.
+
+/// Canonical SQLite table names for schema v1 (SPEC §5).
+///
+/// Centralising the strings keeps record `databaseTableName`s, the migration,
+/// and index creation in lock-step — a typo can only happen in one place.
+public enum Table {
+    public static let node = "node"
+    public static let nodeConfig = "node_config"
+    public static let observation = "observation"
+    public static let positionFix = "position_fix"
+    public static let telemetry = "telemetry"
+    public static let arming = "arming"
+    public static let alertRule = "alert_rule"
+    public static let alert = "alert"
+    public static let template = "template"
+}
+
+/// Node classification (SPEC §2.1). Drives default alert behaviour, is
+/// user-overridable, and may be inferred. Persisted as TEXT via its `rawValue`.
+public enum NodeClass: String, Codable, Sendable, CaseIterable {
+    case fixed
+    case mobile
+    case gateway
+    case unknown
+}
+
+/// How an observation reached us (SPEC §2.4 provenance). Persisted as TEXT.
+public enum Transport: String, Codable, Sendable, CaseIterable {
+    /// Locally-attached node over USB serial.
+    case serial
+    /// Locally-attached node over Bluetooth Low Energy.
+    case ble
+    /// Public/region MQTT broker.
+    case mqtt
+    /// Deterministic replay of a captured corpus (test/CI ingestion).
+    case replay
+}
+
+/// Telemetry family (SPEC §5 telemetry taxonomy). The concrete `key`
+/// (e.g. `battery_pct`, `temp`) lives in its own column; `kind` groups them so a
+/// query can pull "all device telemetry" without enumerating keys. Persisted as
+/// TEXT.
+public enum TelemetryKind: String, Codable, Sendable, CaseIterable {
+    /// battery_pct, voltage, channel_util, air_util_tx, uptime.
+    case device
+    /// temp, humidity, pressure, lux.
+    case environment
+    /// per-channel current/voltage from a power-metering module.
+    case power
+}
+
+/// Movement-detection state for an armed node (SPEC §2.3 hysteresis). Persisted
+/// as TEXT.
+public enum ArmingState: String, Codable, Sendable, CaseIterable {
+    /// Armed, anchored, inside the threshold.
+    case anchored
+    /// Confirmed movement past the threshold.
+    case moved
+    /// Came back inside `threshold * return_ratio`.
+    case returned
+}
+
+/// Lifecycle of a fired alert (SPEC §2.6 state machine). Persisted as TEXT.
+public enum AlertState: String, Codable, Sendable, CaseIterable {
+    case firing
+    case acknowledged
+    case resolved
+}
+
+/// Typed errors surfaced by the store. No `try!`/force-unwrap in production code;
+/// callers get a precise, `Sendable` failure instead.
+public enum StoreError: Error, Equatable, Sendable {
+    /// A fetch keyed by `node_num` found no matching row.
+    case nodeNotFound(nodeNum: Int64)
+    /// A unique constraint (e.g. the observation dedup index) rejected a write.
+    /// `details` carries the underlying SQLite message for diagnostics.
+    case duplicate(details: String)
+}

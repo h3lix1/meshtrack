@@ -19,6 +19,13 @@ opt_in_rules:
   - first_where
   - last_where
 
+# Universally-fine short names: GRDB closure params (db, t) and record ids.
+identifier_name:
+  excluded:
+    - id
+    - db
+    - t
+
 # `try!` and `as!` are banned everywhere by the default force_try / force_cast
 # rules; force_unwrapping (opt-in) bans `!`. Tests relax these via the nested
 # Tests/.swiftlint.yml so test code may force-unwrap fixtures.

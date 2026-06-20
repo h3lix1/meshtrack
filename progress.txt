@@ -7,3 +7,4 @@
 2026-06-20 P0 build: make verify wired (purity, format, lint, build, test, coverage, mutation, protos, perf, secrets) + CI
 2026-06-20 P0 docs: SPEC.md / IMPLEMENTATION_PLAN.md / AGENTS.md + Ralph loop (scripts/loop.sh, stuck-detector)
 2026-06-20 P0 chore(protos): vendor pinned meshtastic/protobufs (da60cee) + reproducible SwiftProtobuf codegen (25 protos)
+2026-06-20 P0 feat(persistence): GRDB WAL store + DatabaseMigrator schema v1 (9 tables, dedup index) + MeshStore
