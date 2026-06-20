@@ -10,3 +10,4 @@
 2026-06-20 P0 feat(persistence): GRDB WAL store + DatabaseMigrator schema v1 (9 tables, dedup index) + MeshStore
 2026-06-20 P0 feat(transport): ReplayAdapter + golden-corpus loader (typed errors) + 3 synthetic recordings
 2026-06-20 P0 feat(scenario): YAML scenario DSL parser + acceptance runner (pluggable evaluator, NoOpEvaluator)
+2026-06-20 P0 feat(ingest): replay→persist pipeline (Ingest module) — replayed corpus produces persisted nodes [PHASE 0 DONE]

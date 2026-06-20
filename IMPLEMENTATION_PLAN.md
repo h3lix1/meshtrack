@@ -18,9 +18,10 @@ dispatched to a worktree agent.
 - [x] Pinned, vendored `meshtastic/protobufs` + reproducible SwiftProtobuf codegen (`scripts/gen-protos.sh`)
 - [x] `ReplayAdapter` + golden-corpus format + 3 recordings (synthetic; real captures deferred to Phase 1)
 - [x] Scenario DSL parser + runner
+- [x] Replay → persist integration (`Ingest` module): a replayed corpus produces persisted nodes
 
 **Done when:** a replayed corpus produces persisted nodes; full gate suite green
-from a cold checkout.
+from a cold checkout. ✅ **Phase 0 complete (2026-06-20).**
 
 ## Phase 1 — Ingestion & node store
 
