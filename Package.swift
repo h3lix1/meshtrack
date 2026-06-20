@@ -71,6 +71,7 @@ let package = Package(
                 "Domain", "RuleEngine", "Persistence", "Transport",
                 .product(name: "Yams", package: "Yams")
             ],
+            exclude: ["SCHEMA.md"],
             swiftSettings: strict
         ),
 
