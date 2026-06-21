@@ -15,17 +15,26 @@ import Foundation
 import Observation
 
 /// Whether a channel is carried over the MQTT broker or the locally-attached node.
-/// The two have different capacity caps (SPEC §10): 20 MQTT, 7 local.
+/// The local device firmware caps at 7 channels (SPEC §10); MQTT is broker-side and
+/// effectively unbounded — the operator may subscribe to as many channels as they
+/// hold keys for, so it carries no UI cap.
 public enum ChannelKind: String, Sendable, Equatable, CaseIterable, Codable {
     case mqtt
     case local
 
-    /// The maximum number of channels of this kind the radio/broker config allows.
+    /// The maximum number of channels of this kind the config allows. The local
+    /// radio firmware is hard-capped at 7; MQTT is effectively unlimited
+    /// (`Int.max`), so its section shows a plain count rather than an "X / N" cap.
     public var capacity: Int {
         switch self {
-        case .mqtt: 20
+        case .mqtt: .max
         case .local: 7
         }
+    }
+
+    /// Whether this kind enforces a finite, user-visible capacity. MQTT does not.
+    public var hasFiniteCapacity: Bool {
+        capacity != .max
     }
 
     public var title: String {
@@ -68,20 +77,24 @@ public struct ChannelEntry: Sendable, Equatable, Identifiable {
 /// Secrets contract (SPEC §2.5): implementations persist PSKs in the Keychain only,
 /// never the DB, and never log them. The view model passes `ChannelKey` straight
 /// through and never retains it.
+/// All methods are `async` so the port can be backed by the Keychain and an
+/// asynchronous channel registry (`app_config`) without blocking the `@MainActor`
+/// view model — the previous synchronous shape is exactly what kept this tab
+/// from being wired to the real `KeychainKeyStore`.
 public protocol ChannelKeyManaging: Sendable {
     /// Every channel the operator has configured, in stable order.
-    func channels() -> [ChannelEntry]
+    func channels() async throws -> [ChannelEntry]
     /// Register (or replace) a channel by `name`/`hash`/`kind`. Does not set a key.
-    func addChannel(name: String, hash: UInt32, kind: ChannelKind)
+    func addChannel(name: String, hash: UInt32, kind: ChannelKind) async throws
     /// Remove a channel and any key held for it.
-    func removeChannel(hash: UInt32)
+    func removeChannel(hash: UInt32) async throws
     /// Whether a PSK is currently held for `hash`.
-    func hasKey(forChannelHash hash: UInt32) -> Bool
+    func hasKey(forChannelHash hash: UInt32) async -> Bool
     /// Store or rotate the PSK for `hash`. Throws to surface a precise failure
     /// without ever including the secret bytes.
-    func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) throws
+    func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) async throws
     /// Remove the PSK for `hash`, leaving the channel registered but keyless.
-    func clearKey(forChannelHash hash: UInt32) throws
+    func clearKey(forChannelHash hash: UInt32) async throws
 }
 
 /// Typed failures surfaced to the UI. None of these carry secret material.
@@ -90,8 +103,10 @@ public enum ChannelsSettingsError: Error, Equatable, Sendable {
     case capacityReached(ChannelKind)
     /// The channel name was empty after trimming.
     case emptyName
-    /// A channel with the derived hash already exists.
+    /// A channel with the derived/entered hash already exists.
     case duplicateChannel
+    /// The entered channel hash was not a byte value (hex/decimal in `0...255`).
+    case invalidChannelHash
     /// The supplied PSK text was not valid base64 / a known shortcut.
     case invalidKey
     /// The underlying key store failed (e.g. Keychain error). Carries a redacted
@@ -123,6 +138,31 @@ public enum ChannelKeyMath {
             hash ^= byte
         }
         return UInt32(hash)
+    }
+
+    /// Parse user-entered channel-hash text into the on-wire hash byte. Accepts
+    /// hex (`"0x1F"`, `"1f"`, `"#1f"`) or decimal (`"31"`). The Meshtastic channel
+    /// hash is a single byte, so the value must be in `0...255`; anything else (or
+    /// unparseable text) throws `invalidChannelHash`. Empty text is *not* an error
+    /// here — callers treat it as "derive from the name" instead.
+    public static func parseChannelHash(_ text: String) throws -> UInt32 {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isHex: Bool
+        if trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
+            trimmed = String(trimmed.dropFirst(2))
+            isHex = true
+        } else if trimmed.hasPrefix("#") {
+            trimmed = String(trimmed.dropFirst())
+            isHex = true
+        } else {
+            isHex = false
+        }
+        guard let value = isHex ? UInt32(trimmed, radix: 16) : UInt32(trimmed, radix: 10),
+              value <= 0xFF
+        else {
+            throw ChannelsSettingsError.invalidChannelHash
+        }
+        return value
     }
 
     /// Parse user-entered PSK text into raw bytes. Accepts the Meshtastic
@@ -162,7 +202,12 @@ public final class ChannelsSettingsViewModel {
 
     public init(keys: any ChannelKeyManaging) {
         self.keys = keys
-        reload()
+    }
+
+    /// Load (or refresh) the channel list from the port. Call this from `.task` /
+    /// `.onAppear`. Failures surface in `lastError` rather than throwing to the UI.
+    public func load() async {
+        await reload()
     }
 
     // MARK: - Derived state
@@ -172,9 +217,14 @@ public final class ChannelsSettingsViewModel {
         channels(for: kind).count < kind.capacity
     }
 
-    /// "3 / 20" style capacity label for a section header.
+    /// Capacity label for a section header. Finite kinds show "3 / 7"; the
+    /// uncapped MQTT kind shows a plain count ("3 channels") with no cap.
     public func capacityLabel(for kind: ChannelKind) -> String {
-        "\(channels(for: kind).count) / \(kind.capacity)"
+        let count = channels(for: kind).count
+        guard kind.hasFiniteCapacity else {
+            return count == 1 ? "1 channel" : "\(count) channels"
+        }
+        return "\(count) / \(kind.capacity)"
     }
 
     private func channels(for kind: ChannelKind) -> [ChannelEntry] {
@@ -186,10 +236,14 @@ public final class ChannelsSettingsViewModel {
 
     // MARK: - Mutations
 
-    /// Add a channel by name. The hash is derived from the name with the default
-    /// PSK so a fresh channel decodes default traffic until a key is rotated in;
-    /// the channel starts keyless (`hasKey == false`) until a PSK is set.
-    public func addChannel(name: String, kind: ChannelKind) {
+    /// Add a channel by `name`, optionally with an explicit on-wire hash.
+    ///
+    /// When `hashText` is empty the hash is *derived* from the name with the default
+    /// PSK, so a fresh channel decodes default traffic until a key is rotated in.
+    /// When `hashText` is non-empty it is parsed (hex or decimal byte), letting the
+    /// operator match a channel they have already observed on the wire. The channel
+    /// starts keyless (`hasKey == false`) until a PSK is set.
+    public func addChannel(name: String, hashText: String = "", kind: ChannelKind) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             lastError = .emptyName
@@ -199,18 +253,30 @@ public final class ChannelsSettingsViewModel {
             lastError = .capacityReached(kind)
             return
         }
-        let hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+        let hash: UInt32
+        if hashText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+        } else {
+            do {
+                hash = try ChannelKeyMath.parseChannelHash(hashText)
+            } catch let error as ChannelsSettingsError {
+                lastError = error
+                return
+            } catch {
+                lastError = .invalidChannelHash
+                return
+            }
+        }
         guard !channelExists(hash: hash) else {
             lastError = .duplicateChannel
             return
         }
-        keys.addChannel(name: trimmed, hash: hash, kind: kind)
-        clearErrorAndReload()
+        await perform { try await keys.addChannel(name: trimmed, hash: hash, kind: kind) }
     }
 
     /// Set or rotate the PSK for `hash` from user-entered text. Accepts base64 or
     /// the `"AQ=="` default-key shortcut. The plaintext never returns to the UI.
-    public func setKey(forChannelHash hash: UInt32, pskText: String) {
+    public func setKey(forChannelHash hash: UInt32, pskText: String) async {
         let psk: [UInt8]
         do {
             psk = try ChannelKeyMath.parsePSK(pskText)
@@ -221,39 +287,39 @@ public final class ChannelsSettingsViewModel {
             lastError = .invalidKey
             return
         }
-        store(ChannelKey(psk: psk), forChannelHash: hash)
+        await store(ChannelKey(psk: psk), forChannelHash: hash)
     }
 
     /// Apply the well-known default PSK to `hash` (the "use default PSK" toggle /
     /// shortcut). Equivalent to entering `"AQ=="`.
-    public func useDefaultKey(forChannelHash hash: UInt32) {
-        store(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
+    public func useDefaultKey(forChannelHash hash: UInt32) async {
+        await store(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
     }
 
     /// Remove the PSK for `hash`, leaving the channel registered but keyless.
-    public func clearKey(forChannelHash hash: UInt32) {
-        do {
-            try keys.clearKey(forChannelHash: hash)
-            clearErrorAndReload()
-        } catch {
-            lastError = .storeFailed(String(describing: error))
-        }
+    public func clearKey(forChannelHash hash: UInt32) async {
+        await perform { try await keys.clearKey(forChannelHash: hash) }
     }
 
     /// Remove a channel entirely (and any key held for it).
-    public func removeChannel(hash: UInt32) {
-        keys.removeChannel(hash: hash)
-        clearErrorAndReload()
+    public func removeChannel(hash: UInt32) async {
+        await perform { try await keys.removeChannel(hash: hash) }
     }
 
     // MARK: - Helpers
 
-    private func store(_ key: ChannelKey, forChannelHash hash: UInt32) {
+    private func store(_ key: ChannelKey, forChannelHash hash: UInt32) async {
+        await perform { try await keys.setKey(key, forChannelHash: hash) }
+    }
+
+    /// Run a port mutation, then refresh. On failure, surface a redacted
+    /// `storeFailed` — `String(describing:)` of our typed errors carries no secret.
+    private func perform(_ mutation: () async throws -> Void) async {
         do {
-            try keys.setKey(key, forChannelHash: hash)
-            clearErrorAndReload()
+            try await mutation()
+            lastError = nil
+            await reload()
         } catch {
-            // String(describing:) of our typed store errors carries no secret.
             lastError = .storeFailed(String(describing: error))
         }
     }
@@ -262,79 +328,70 @@ public final class ChannelsSettingsViewModel {
         mqttChannels.contains { $0.hash == hash } || localChannels.contains { $0.hash == hash }
     }
 
-    private func clearErrorAndReload() {
-        lastError = nil
-        reload()
-    }
-
-    private func reload() {
-        let all = keys.channels()
-        mqttChannels = all.filter { $0.kind == .mqtt }
-        localChannels = all.filter { $0.kind == .local }
+    private func reload() async {
+        do {
+            let all = try await keys.channels()
+            mqttChannels = all.filter { $0.kind == .mqtt }
+            localChannels = all.filter { $0.kind == .local }
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+        }
     }
 }
 
 /// In-memory `ChannelKeyManaging` for tests and the preview. Holds channel
 /// metadata and PSK bytes in process memory only — no Keychain, no logging. The
 /// production path is the lead's `KeychainKeyStore` adapter.
-public final class InMemoryChannelKeyManager: ChannelKeyManaging, @unchecked Sendable {
-    private struct State {
-        var order: [UInt32] = []
-        var entries: [UInt32: (name: String, kind: ChannelKind)] = [:]
-        var keysByHash: [UInt32: ChannelKey] = [:]
-    }
-
-    private let lock = NSLock()
-    private var state = State()
+///
+/// Implemented as an `actor` so its mutable state is isolated without locks and it
+/// satisfies the now-`async` `ChannelKeyManaging` port directly.
+public actor InMemoryChannelKeyManager: ChannelKeyManaging {
+    private var order: [UInt32] = []
+    private var entries: [UInt32: (name: String, kind: ChannelKind)] = [:]
+    private var keysByHash: [UInt32: ChannelKey] = [:]
 
     public init() {}
 
     public func channels() -> [ChannelEntry] {
-        lock.withLock {
-            state.order.compactMap { hash in
-                guard let meta = state.entries[hash] else { return nil }
-                return ChannelEntry(
-                    name: meta.name,
-                    hash: hash,
-                    kind: meta.kind,
-                    hasKey: state.keysByHash[hash] != nil
-                )
-            }
+        order.compactMap { hash in
+            guard let meta = entries[hash] else { return nil }
+            return ChannelEntry(
+                name: meta.name,
+                hash: hash,
+                kind: meta.kind,
+                hasKey: keysByHash[hash] != nil
+            )
         }
     }
 
     public func addChannel(name: String, hash: UInt32, kind: ChannelKind) {
-        lock.withLock {
-            if state.entries[hash] == nil {
-                state.order.append(hash)
-            }
-            state.entries[hash] = (name, kind)
+        if entries[hash] == nil {
+            order.append(hash)
         }
+        entries[hash] = (name, kind)
     }
 
     public func removeChannel(hash: UInt32) {
-        lock.withLock {
-            state.entries[hash] = nil
-            state.keysByHash[hash] = nil
-            state.order.removeAll { $0 == hash }
-        }
+        entries[hash] = nil
+        keysByHash[hash] = nil
+        order.removeAll { $0 == hash }
     }
 
     public func hasKey(forChannelHash hash: UInt32) -> Bool {
-        lock.withLock { state.keysByHash[hash] != nil }
+        keysByHash[hash] != nil
     }
 
-    public func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) throws {
-        lock.withLock { state.keysByHash[hash] = key }
+    public func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) {
+        keysByHash[hash] = key
     }
 
-    public func clearKey(forChannelHash hash: UInt32) throws {
-        lock.withLock { state.keysByHash[hash] = nil }
+    public func clearKey(forChannelHash hash: UInt32) {
+        keysByHash[hash] = nil
     }
 
     /// Test-only inspection of the stored PSK, to assert the plaintext round-trips
     /// to the *store* even though it never returns to the UI.
     public func storedKey(forChannelHash hash: UInt32) -> ChannelKey? {
-        lock.withLock { state.keysByHash[hash] }
+        keysByHash[hash]
     }
 }
