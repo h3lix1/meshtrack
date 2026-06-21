@@ -73,4 +73,55 @@ struct RuleEvaluatorTests {
         )
         #expect(RuleEvaluator.conditions(for: snapshot, rules: RuleSet([]), now: at(99999)).isEmpty)
     }
+
+    // MARK: Ownership gating (ADR 0008 / SPEC §2.10)
+
+    private var lowBatterySnapshot: NodeSnapshot {
+        NodeSnapshot(
+            nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
+            expectedInterval: 900, batteryPercent: 5, voltage: 3.0
+        )
+    }
+
+    private var ownershipRules: RuleSet {
+        RuleSet([
+            AlertRule(type: .batteryBelow, scope: .global, threshold: 20),
+            AlertRule(type: .voltageBelow, scope: .global, threshold: 3.3),
+            AlertRule(type: .stale, scope: .global, threshold: 3600)
+        ])
+    }
+
+    @Test
+    func `an unmanaged node with low battery raises NO alert (no false alarms)`() {
+        let conditions = RuleEvaluator.conditions(
+            for: lowBatterySnapshot, rules: ownershipRules, now: at(10000),
+            management: NodeManagement(isMine: true, isManaged: false)
+        )
+        #expect(conditions.isEmpty)
+    }
+
+    @Test
+    func `a managed node with low battery raises exactly one battery alert`() {
+        let conditions = RuleEvaluator.conditions(
+            for: lowBatterySnapshot, rules: ownershipRules, now: at(1),
+            management: NodeManagement(isManaged: true)
+        )
+        #expect(conditions.count(where: { $0.type == .batteryBelow }) == 1)
+    }
+
+    @Test
+    func `the default management evaluates ownership rules (single-fleet back-compat)`() {
+        // No `management:` argument → defaults to managed, so the gate is open.
+        let conditions = RuleEvaluator.conditions(for: lowBatterySnapshot, rules: ownershipRules, now: at(1))
+        #expect(conditions.contains { $0.type == .batteryBelow })
+    }
+
+    @Test
+    func `an unmanaged node skips stale and voltage too, not just battery`() {
+        let conditions = RuleEvaluator.conditions(
+            for: lowBatterySnapshot, rules: ownershipRules, now: at(10000),
+            management: .unowned
+        )
+        #expect(conditions.isEmpty) // stale + voltage + battery all gated off
+    }
 }
