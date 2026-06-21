@@ -74,6 +74,115 @@ struct VizLegendTests {
     }
 }
 
+@Suite("PacketFocus")
+struct PacketFocusTests {
+    private let nodes = SampleNetwork.nodes
+    private let traces = SampleNetwork.traces
+
+    /// The 3-hop San Jose trace: source 0x5A1B_0303, touching Palo Alto, Oakland, SF.
+    private let focusID: UInt32 = 0x2A3B_4C5D
+    private let touchedByFocus: Set<Int64> = [
+        0x5A1B_0303, // source: San Jose
+        0x9A10_0404, // Palo Alto (guessed relay endpoint)
+        0x0AC1_5511, // Oakland
+        0xA1B2_C3D4 // SF gateway
+    ]
+
+    @Test
+    func `nil focus is the identity for nodes and traces`() {
+        let outNodes = PacketFocus.focusNodes(nodes, traces: traces, selectedPacketID: nil)
+        let outTraces = PacketFocus.focusTraces(traces, selectedPacketID: nil)
+        #expect(outNodes == nodes)
+        #expect(outTraces == traces)
+    }
+
+    @Test
+    func `focusing a packet yields only that trace`() {
+        let outTraces = PacketFocus.focusTraces(traces, selectedPacketID: focusID)
+        #expect(outTraces.count == 1)
+        #expect(outTraces.first?.id == focusID)
+    }
+
+    @Test
+    func `focusing a packet yields only the nodes it touches`() {
+        let outNodes = PacketFocus.focusNodes(nodes, traces: traces, selectedPacketID: focusID)
+        #expect(Set(outNodes.map(\.id)) == touchedByFocus)
+        // Nodes on other traces are hidden (e.g. Fremont, the source of another packet).
+        #expect(!outNodes.contains { $0.id == 0xF1B8_0606 })
+    }
+
+    @Test
+    func `focused nodes keep their input order`() {
+        let outNodes = PacketFocus.focusNodes(nodes, traces: traces, selectedPacketID: focusID)
+        let expected = nodes.filter { touchedByFocus.contains($0.id) }.map(\.id)
+        #expect(outNodes.map(\.id) == expected)
+    }
+
+    @Test
+    func `focusing an unknown packet hides everything`() {
+        let outNodes = PacketFocus.focusNodes(nodes, traces: traces, selectedPacketID: 0xDEAD_0000)
+        let outTraces = PacketFocus.focusTraces(traces, selectedPacketID: 0xDEAD_0000)
+        #expect(outNodes.isEmpty)
+        #expect(outTraces.isEmpty)
+    }
+
+    @Test
+    func `toggling focus selects then resets`() {
+        let focused = PacketFocus.toggled(focusID, current: nil)
+        #expect(focused == focusID)
+        let reset = PacketFocus.toggled(focusID, current: focusID)
+        #expect(reset == nil)
+        // Toggling a different id while one is focused switches focus.
+        let switched = PacketFocus.toggled(0x7788_99AA, current: focusID)
+        #expect(switched == 0x7788_99AA)
+    }
+
+    @Test
+    func `isFocused reflects the current selection`() {
+        #expect(PacketFocus.isFocused(focusID, selectedPacketID: focusID))
+        #expect(!PacketFocus.isFocused(focusID, selectedPacketID: 0x7788_99AA))
+        #expect(!PacketFocus.isFocused(focusID, selectedPacketID: nil))
+    }
+
+    @Test
+    @MainActor
+    func `focus composes after the channel filter, narrowing further`() {
+        // Stamp the two SF-trace nodes onto one preset, the rest onto another, so the
+        // channel filter and the focus overlap on the same packet.
+        let preset = ChannelPreset.mediumFast
+        let other = ChannelPreset.longFast
+        let stamped = nodes.map { node -> NetworkNode in
+            touchedByFocus.contains(node.id) ? node.withPreset(preset) : node.withPreset(other)
+        }
+        // Channel filter first: keep only the focus packet's nodes/traces' channel.
+        let channelled = ChannelFilter.filterNodes(stamped, selection: preset)
+        let channelledTraces = ChannelFilter.filterTraces(
+            traces, nodes: stamped, selection: preset
+        )
+        // Then focus narrows to the single packet — composition is stable.
+        let focusedNodes = PacketFocus.focusNodes(
+            channelled, traces: channelledTraces, selectedPacketID: focusID
+        )
+        let focusedTraces = PacketFocus.focusTraces(channelledTraces, selectedPacketID: focusID)
+        #expect(Set(focusedNodes.map(\.id)) == touchedByFocus)
+        #expect(focusedTraces.map(\.id) == [focusID])
+    }
+
+    @Test
+    @MainActor
+    func `channel filter hiding the focused packet leaves nothing`() {
+        // Source node on a different channel than the filter → its trace is filtered out,
+        // and focusing it can't resurrect a packet the channel filter already removed.
+        let preset = ChannelPreset.mediumFast
+        let stamped = nodes.map { $0.withPreset(.longFast) }
+        let channelledTraces = ChannelFilter.filterTraces(
+            traces, nodes: stamped, selection: preset
+        )
+        let focusedTraces = PacketFocus.focusTraces(channelledTraces, selectedPacketID: focusID)
+        #expect(focusedTraces.isEmpty)
+    }
+}
+
 @Suite("MapProjection adapter")
 struct MapProjectionTests {
     @Test
