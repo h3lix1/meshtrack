@@ -158,6 +158,26 @@ touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShe
 - [x] `make verify` green end-to-end: 474 tests, coverage 91.6%
 - [ ] *Follow-ups:* live `IngestHealth` push from the coordinator; `relay_node` on observations for guessed-hop replay; per-node picker for telemetry/analytics; surface VCR overlay + ⌘K + theme in the live shell; signing/notarization (Phase 6 carry-over)
 
+## Phase 8 — Configuration & onboarding (no more env vars)  ← in progress
+
+Replace environment-variable config with proper macOS Settings screens (⌘,) and a
+first-run onboarding flow. Non-secret config persists in the shared store; secrets
+(MQTT password, channel PSKs) live in the Keychain (SPEC §2.5). Env vars remain only
+as a headless fallback for `meshtrackd`/CI. Built by a parallel worktree team off the
+committed contracts (`Domain/AppConfig.swift`: `BrokerConfig`, `AppSettings`,
+`ConfigGateway`, `CredentialStore`; `App/SettingsModel.swift`: `SettingsTab` registry).
+
+- [x] Contracts: Domain config types + `ConfigGateway`/`CredentialStore` ports + `SettingsModel`/`SettingsTab` registry (lead)
+- [ ] **T-Persist**: `ConfigGateway` on `MeshStore` (migration v4 `app_config`) + Keychain `CredentialStore` adapter (+ tests)
+- [ ] **T-Compose**: macOS `Settings {}` scene + ⌘, + first-run onboarding wizard; `LiveCoordinator`/`MeshtrackApp` read `BrokerConfig` from the store (env fallback); reconnect-on-change; connection-status indicator
+- [ ] **T-Connection**: Connection tab — broker host/port/TLS/cert/topics + username + Keychain password + Test Connection + Connect/Disconnect + status
+- [ ] **T-Channels**: Channels & Keys tab — MQTT (≤20) + local (≤7) channels, PSK entry/rotation via `KeyStore`, default-PSK toggle, name→hash
+- [ ] **T-Prefs**: General tab (refresh, units, theme, retention, notifications, start-at-login, auto-connect) + Alerts-rules config tab (battery/voltage/stale thresholds across the node→class→global hierarchy, snooze defaults, delivery)
+
+**Done when:** a fresh launch with no env vars walks the user through onboarding,
+connects to a broker entered in the UI (password in Keychain), and every setting is
+editable from `Settings` (⌘,) and persists across launches; `make verify` green.
+
 **Done when:** `swift run MeshtrackApp` shows a real MapKit map animating live MQTT
 traffic (per-id colours, guessed/observed hops, hop badges, latency); click-to-config
 + safe fleet rollout work; my-nodes/managed segmentation kills false battery/stale
