@@ -18,7 +18,16 @@ public extension AppModel {
 
         #if canImport(MapKit) && os(macOS)
             register(.network) { [self] in
-                AnyView(MeshMapSection(nodes: nodes, traces: traces, settings: viz))
+                // Channel-filter options derived from the presets live nodes have been
+                // seen on; `store` makes the markers tappable (node detail + More Details).
+                let presets = Array(Set(nodes.compactMap(\.preset))).sorted { $0.rawValue < $1.rawValue }
+                return AnyView(MeshMapSection(
+                    nodes: nodes,
+                    traces: traces,
+                    settings: viz,
+                    availablePresets: presets,
+                    store: store
+                ))
             }
         #endif
 

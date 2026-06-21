@@ -7,7 +7,7 @@
     "ingestion_min_msgs_per_sec": 5000
   },
   "metrics": {
-    "coverage_pct": 91.36,
+    "coverage_pct": 91.67,
     "mutation_score": null,
     "ingestion_msgs_per_sec": 5000,
     "p95_query_latency_ms": null,
