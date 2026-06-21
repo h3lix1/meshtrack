@@ -71,18 +71,38 @@ struct ChannelsSettingsViewModelTests {
         #expect(vm.lastError == nil)
     }
 
+    /// 21 channel names whose 1-byte Meshtastic hashes are all distinct, so the
+    /// add path exercises the (un)capacity logic and not the legitimate duplicate
+    /// rejection of two channels that collide to the same on-wire hash byte.
+    private func distinctHashNames(_ count: Int) -> [String] {
+        var names: [String] = []
+        var hashes = Set<UInt32>()
+        var index = 0
+        while names.count < count {
+            let name = "ch\(index)"
+            let hash = ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+            if hashes.insert(hash).inserted {
+                names.append(name)
+            }
+            index += 1
+        }
+        return names
+    }
+
     @Test
-    func `mqtt cap is 20 — the 21st is rejected`() {
+    func `mqtt has no cap — the 21st channel is allowed`() {
         let (vm, _) = makeVM()
-        for i in 0 ..< 20 {
-            vm.addChannel(name: "mqtt-\(i)", kind: .mqtt)
+        let names = distinctHashNames(21)
+        for name in names.prefix(20) {
+            vm.addChannel(name: name, kind: .mqtt)
         }
         #expect(vm.mqttChannels.count == 20)
-        #expect(vm.canAdd(.mqtt) == false)
+        #expect(vm.canAdd(.mqtt)) // still room — MQTT is uncapped
 
-        vm.addChannel(name: "mqtt-overflow", kind: .mqtt)
-        #expect(vm.mqttChannels.count == 20)
-        #expect(vm.lastError == .capacityReached(.mqtt))
+        vm.addChannel(name: names[20], kind: .mqtt)
+        #expect(vm.mqttChannels.count == 21)
+        #expect(vm.lastError == nil)
+        #expect(vm.canAdd(.mqtt))
     }
 
     @Test
@@ -211,11 +231,15 @@ struct ChannelsSettingsViewModelTests {
     }
 
     @Test
-    func `capacity label reflects current counts`() {
+    func `capacity label shows local cap and an uncapped mqtt count`() {
         let (vm, _) = makeVM()
-        #expect(vm.capacityLabel(for: .mqtt) == "0 / 20")
+        // Local enforces and shows its 7-channel cap.
         #expect(vm.capacityLabel(for: .local) == "0 / 7")
+        // MQTT is uncapped: a plain count, pluralised, with no "/ N".
+        #expect(vm.capacityLabel(for: .mqtt) == "0 channels")
         vm.addChannel(name: "x", kind: .mqtt)
-        #expect(vm.capacityLabel(for: .mqtt) == "1 / 20")
+        #expect(vm.capacityLabel(for: .mqtt) == "1 channel")
+        vm.addChannel(name: "y", kind: .mqtt)
+        #expect(vm.capacityLabel(for: .mqtt) == "2 channels")
     }
 }
