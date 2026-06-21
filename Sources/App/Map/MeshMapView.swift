@@ -41,17 +41,27 @@
     public struct MeshMapView: NSViewRepresentable {
         public let nodes: [NetworkNode]
         public let state: MeshMapState
-        /// Whether to auto-fit the camera to the fleet when the node set changes.
+        /// Whether to auto-fit the camera to the fleet — but only ever ONCE, on the
+        /// first-ever launch (Task 1). After that the saved region is restored and the
+        /// camera stays put when nodes are added.
         public var fitToFleet: Bool
+        /// Persists / restores the visible region across restarts (Task 1).
+        public var regionStore: MapRegionStore
 
-        public init(nodes: [NetworkNode], state: MeshMapState, fitToFleet: Bool = true) {
+        public init(
+            nodes: [NetworkNode],
+            state: MeshMapState,
+            fitToFleet: Bool = true,
+            regionStore: MapRegionStore = MapRegionStore()
+        ) {
             self.nodes = nodes
             self.state = state
             self.fitToFleet = fitToFleet
+            self.regionStore = regionStore
         }
 
         public func makeCoordinator() -> Coordinator {
-            Coordinator(state: state)
+            Coordinator(state: state, regionStore: regionStore)
         }
 
         public func makeNSView(context: Context) -> MKMapView {
@@ -71,17 +81,39 @@
                 forAnnotationViewWithReuseIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier
             )
             context.coordinator.attach(map: map)
-            sync(map: map, context: context, initialFit: true)
+            restoreInitialRegion(map: map, context: context)
+            sync(map: map, context: context)
             return map
         }
 
         public func updateNSView(_ map: MKMapView, context: Context) {
-            sync(map: map, context: context, initialFit: false)
+            sync(map: map, context: context)
+        }
+
+        // MARK: Initial region (once)
+
+        /// Set the starting camera exactly once, at view creation:
+        ///  - If a region was saved on a previous run, restore it (camera stays where
+        ///    the user left it).
+        ///  - Otherwise (first-ever launch) start at the SF Bay Area and arm a one-shot
+        ///    auto-fit so the camera frames the fleet as soon as nodes arrive.
+        /// Either way the map never re-zooms when nodes are later added (Task 1).
+        private func restoreInitialRegion(map: MKMapView, context: Context) {
+            if let saved = regionStore.load() {
+                map.setRegion(saved.asCoordinateRegion, animated: false)
+                context.coordinator.armOneShotFit(false)
+            } else {
+                map.setRegion(
+                    PersistedMapRegion.sanFranciscoBayArea.asCoordinateRegion,
+                    animated: false
+                )
+                context.coordinator.armOneShotFit(fitToFleet)
+            }
         }
 
         // MARK: Sync
 
-        private func sync(map: MKMapView, context: Context, initialFit: Bool) {
+        private func sync(map: MKMapView, context: Context) {
             let desired = nodes.map(MeshNodeAnnotation.init(node:))
             let existing = map.annotations.compactMap { $0 as? MeshNodeAnnotation }
 
@@ -99,8 +131,11 @@
             }
             if !toAdd.isEmpty { map.addAnnotations(toAdd) }
 
-            let changed = !toAdd.isEmpty || !toRemove.isEmpty
-            if fitToFleet, !desired.isEmpty, initialFit || changed {
+            // Auto-fit happens at most ONCE ever (first-ever launch, when nodes first
+            // appear). It is NOT re-run when nodes are added later — that was the bug
+            // that re-zoomed the map on every ingest (Task 1). The coordinator clears
+            // the one-shot flag after firing.
+            if !desired.isEmpty, context.coordinator.consumeOneShotFitIfArmed() {
                 fit(map: map, to: desired)
             }
             // Publish the projection on the NEXT main-actor turn — NEVER synchronously
@@ -142,14 +177,46 @@
         @MainActor
         public final class Coordinator: NSObject, MKMapViewDelegate {
             private let state: MeshMapState
+            private let regionStore: MapRegionStore
             private weak var map: MKMapView?
+            /// Armed for a single auto-fit (first-ever launch only); cleared once fired.
+            private var oneShotFitArmed = false
+            /// Debounces persisting the region so a pan/zoom gesture saves once it
+            /// settles, not on every intermediate frame.
+            private var saveWorkItem: DispatchWorkItem?
 
-            init(state: MeshMapState) {
+            init(state: MeshMapState, regionStore: MapRegionStore) {
                 self.state = state
+                self.regionStore = regionStore
             }
 
             func attach(map: MKMapView) {
                 self.map = map
+            }
+
+            /// Arm (or disarm) the one-shot fleet fit. Called once from the initial
+            /// region setup: armed only on the first-ever launch.
+            func armOneShotFit(_ armed: Bool) {
+                oneShotFitArmed = armed
+            }
+
+            /// Returns true (and disarms) exactly once if a one-shot fit is pending.
+            func consumeOneShotFitIfArmed() -> Bool {
+                guard oneShotFitArmed else { return false }
+                oneShotFitArmed = false
+                return true
+            }
+
+            /// Persist the current visible region, debounced. Runs off the observed
+            /// state (UserDefaults), so it never re-enters the SwiftUI update loop.
+            private func scheduleRegionSave() {
+                saveWorkItem?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, let map else { return }
+                    regionStore.save(PersistedMapRegion(region: map.region))
+                }
+                saveWorkItem = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
             }
 
             /// Build a MapProjection from the live map and hand it to the shared state.
@@ -168,6 +235,7 @@
 
             public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
                 publishProjection()
+                scheduleRegionSave()
             }
 
             public func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
@@ -197,6 +265,28 @@
                 (view as? MeshNodeAnnotationView)?.configure(for: node)
                 return view
             }
+        }
+    }
+
+    // MARK: PersistedMapRegion ↔ MapKit bridge
+
+    extension PersistedMapRegion {
+        /// Build from a live MKMapView region (delegate side).
+        init(region: MKCoordinateRegion) {
+            self.init(
+                centerLatitude: region.center.latitude,
+                centerLongitude: region.center.longitude,
+                latitudeSpan: region.span.latitudeDelta,
+                longitudeSpan: region.span.longitudeDelta
+            )
+        }
+
+        /// The MapKit region to restore.
+        var asCoordinateRegion: MKCoordinateRegion {
+            MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude),
+                span: MKCoordinateSpan(latitudeDelta: latitudeSpan, longitudeDelta: longitudeSpan)
+            )
         }
     }
 #endif
