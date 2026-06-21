@@ -21,7 +21,8 @@ let package = Package(
         // Versions are floors; Package.resolved is the reproducible lock.
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
         .package(url: "https://github.com/apple/swift-protobuf", from: "1.28.0"),
-        .package(url: "https://github.com/jpsim/Yams", from: "5.1.0")
+        .package(url: "https://github.com/jpsim/Yams", from: "5.1.0"),
+        .package(url: "https://github.com/emqx/CocoaMQTT", from: "2.1.0")
     ],
     targets: [
         // ---- Domain: PURE. Imports nothing but the standard library. -----------
@@ -45,7 +46,7 @@ let package = Package(
         ),
         .target(
             name: "Transport",
-            dependencies: ["Domain", "MeshProtos"],
+            dependencies: ["Domain", "MeshProtos", .product(name: "CocoaMQTT", package: "CocoaMQTT")],
             swiftSettings: strict
         ),
         .target(

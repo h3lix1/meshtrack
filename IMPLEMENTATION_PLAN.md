@@ -27,7 +27,7 @@ from a cold checkout. ✅ **Phase 0 complete (2026-06-20).**
 
 - [x] `ServiceEnvelope`/`MeshPacket` decode → DecodedPacket → persist observations
 - [x] Provenance + dedup window (10 min, `(packet_id, from_num)`); telemetry taxonomy persisted
-- [ ] MQTT adapter (TLS) → frames  *(→ lead / Transport, after decode)*
+- [x] MQTT adapter (TLS) → frames (CocoaMQTT; topic parser tested, connection best-effort)
 - [x] PSK decryption (AES-CTR) for `/e/` topics; Keychain-backed `KeyStore` (up to 20 MQTT / 7 local channels)
 - [x] Serial + BLE adapters for the local node (SerialFramer tested; port/radio I/O best-effort, HIL-gated)
 - [x] Structured logging (secret-redacting wrapper)
