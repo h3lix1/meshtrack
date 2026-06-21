@@ -46,3 +46,11 @@
 2026-06-20 P7 G4 feat(app): Swift Charts telemetry + node-analytics deep-dive (SNR/RSSI dist, hop histogram, peer graph, hourly heatmap, packet-type breakdown) — pure aggregations + headless render guard
 2026-06-20 P7 G9 feat(app): VCR/time-travel — 24h scrubber + variable-speed replay (pure reconstructor) driving the same map overlay
 2026-06-20 P7 fix(app): VizSettings @Observable didSet recursion (SIGSEGV) caught at integration; merged Wave 1 (G0/G1/G4/G9), make verify green — 319 tests, coverage 90.57%
+2026-06-20 P7 G2 feat(app): re-land live MQTT ingest in MeshtrackApp composition root (MQTT→pipeline→VMs, onDecoded tap, ingest_time latency, env-gated smoke)
+2026-06-20 P7 G3 feat(app): node directory — role tabs, search, My Nodes filter, managed/unmanaged bulk-classify, QR, analytics drill-through
+2026-06-20 P7 G5 feat(app): alerts console (ack/snooze/resolve) + arming flow + end-to-end managed-suppression proof
+2026-06-20 P7 G6 feat(app): packet inspector (byte breakdown, filters) + receive→publish latency (latencyMillis feeds the map overlay)
+2026-06-20 P7 G7 feat(app): fleet rollout UI over FleetApplier — verify-each-then-next, halt-on-failure, diff preview
+2026-06-20 P7 G8 feat(app): monitor-only Channels view (sender, @mentions, DM/broadcast) — ADR 0006
+2026-06-20 P7 G10 feat(app): observability dashboard + ⌘K search + theme customizer + node-id collision matrix
+2026-06-20 P7 feat(app): wire all sections into the shell (AppComposition.registerLiveSections; headline MapKit map live; +Analytics/+Messages sections) — make verify green, 474 tests, coverage 91.6% [PHASE 7 GUI INTEGRATED]
