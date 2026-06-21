@@ -26,6 +26,7 @@ identifier_name:
     - db
     - t
     - to
+    - at
 
 # `try!` and `as!` are banned everywhere by the default force_try / force_cast
 # rules; force_unwrapping (opt-in) bans `!`. Tests relax these via the nested
