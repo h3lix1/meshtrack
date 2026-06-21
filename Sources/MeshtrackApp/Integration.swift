@@ -4,6 +4,7 @@
 // outer-ring modules; the `App` library stays snapshot-pure.
 
 import App
+import Crypto
 import Domain
 import Foundation
 import Persistence
@@ -117,5 +118,76 @@ struct MeshStoreAlertRuleStore: App.AlertRuleStore {
     private static func decodeThreshold(_ json: String?) -> Double? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return (try? JSONDecoder().decode(Params.self, from: data))?.threshold
+    }
+}
+
+/// Adapts `KeychainKeyStore` (channel PSKs, in the Keychain) + the `app_config`
+/// channel registry (names/hashes/kinds, non-secret) to the App-layer async
+/// `ChannelKeyManaging` port the Channels & Keys screen programs to. PSKs never
+/// enter the registry or any log; `hasKey` is derived from the Keychain.
+actor KeychainChannelManager: ChannelKeyManaging {
+    private let keys: KeychainKeyStore
+    private let store: MeshStore
+    private static let registryKey = "channel_registry"
+
+    init(keys: KeychainKeyStore = KeychainKeyStore(), store: MeshStore) {
+        self.keys = keys
+        self.store = store
+    }
+
+    func channels() async throws -> [ChannelEntry] {
+        try await registry().map {
+            ChannelEntry(
+                name: $0.name, hash: $0.hash, kind: $0.kind,
+                hasKey: keys.key(forChannelHash: $0.hash) != nil
+            )
+        }
+    }
+
+    func addChannel(name: String, hash: UInt32, kind: ChannelKind) async throws {
+        var stored = try await registry()
+        guard !stored.contains(where: { $0.hash == hash }) else { return }
+        stored.append(StoredChannel(name: name, hash: hash, kind: kind))
+        try await save(stored)
+    }
+
+    func removeChannel(hash: UInt32) async throws {
+        var stored = try await registry()
+        stored.removeAll { $0.hash == hash }
+        try await save(stored)
+        try? keys.removeKey(forChannelHash: hash)
+    }
+
+    func hasKey(forChannelHash hash: UInt32) async -> Bool {
+        keys.key(forChannelHash: hash) != nil
+    }
+
+    func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) async throws {
+        try keys.store(key, forChannelHash: hash)
+    }
+
+    func clearKey(forChannelHash hash: UInt32) async throws {
+        try keys.removeKey(forChannelHash: hash)
+    }
+
+    // MARK: Registry (non-secret) persisted as JSON in app_config
+
+    private struct StoredChannel: Codable {
+        let name: String
+        let hash: UInt32
+        let kind: ChannelKind
+    }
+
+    private func registry() async throws -> [StoredChannel] {
+        guard let json = try await store.appConfigValue(forKey: Self.registryKey),
+              let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([StoredChannel].self, from: data)) ?? []
+    }
+
+    private func save(_ stored: [StoredChannel]) async throws {
+        let data = try JSONEncoder().encode(stored)
+        // JSONEncoder output is always valid UTF-8, so this conversion never fails.
+        // swiftlint:disable:next optional_data_string_conversion
+        try await store.setAppConfigValue(String(decoding: data, as: UTF8.self), forKey: Self.registryKey)
     }
 }
