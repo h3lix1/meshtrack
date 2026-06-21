@@ -35,50 +35,38 @@ public enum AppSection: String, CaseIterable, Identifiable {
     }
 }
 
+/// The top-level shell. Each `AppSection` delegates to a view resolved from the
+/// `AppModel` registry, so feature streams add sections by registering a provider
+/// (never editing this switch). The sample-data path builds a default `AppModel`.
 public struct RootView: View {
-    @State private var section: AppSection = .network
-    public let nodes: [NetworkNode]
-    public let traces: [PacketTrace]
+    @State private var section: AppSection
+    @State private var model: AppModel
 
-    public let live: Bool
-
-    public init(nodes: [NetworkNode], traces: [PacketTrace], live: Bool = true) {
-        self.nodes = nodes
-        self.traces = traces
-        self.live = live
+    /// The primary initializer: drive the shell from an `AppModel` (live or sample).
+    public init(model: AppModel, section: AppSection = .network) {
+        _model = State(initialValue: model)
+        _section = State(initialValue: section)
     }
 
+    /// Convenience: build a default (sample-fed) `AppModel` from nodes/traces.
+    public init(nodes: [NetworkNode], traces: [PacketTrace], live: Bool = true) {
+        self.init(model: AppModel(nodes: nodes, traces: traces, live: live))
+    }
+
+    /// Convenience used by the snapshot harness: pin the section and use the
+    /// deterministic Canvas-only Network map (`live: false`).
     public init(section: AppSection, nodes: [NetworkNode], traces: [PacketTrace], live: Bool = false) {
-        _section = State(initialValue: section)
-        self.nodes = nodes
-        self.traces = traces
-        self.live = live
+        self.init(model: AppModel(nodes: nodes, traces: traces, live: live), section: section)
     }
 
     public var body: some View {
         HStack(spacing: 0) {
             SidebarView(section: $section)
-            detail.frame(maxWidth: .infinity, maxHeight: .infinity)
+            model.view(for: section).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 1100, minHeight: 720)
         .background(Color(red: 0.03, green: 0.04, blue: 0.10))
-    }
-
-    @ViewBuilder private var detail: some View {
-        switch section {
-        case .network:
-            if live {
-                LiveNetworkScreen(nodes: nodes, traces: traces)
-            } else {
-                DashboardView(nodes: nodes, traces: traces, clock: 1.6)
-            }
-        case .nodes: NodesView(nodes: nodes)
-        case .packets: PacketsView(packets: SampleNetwork.packets)
-        case .telemetry: TelemetryChartView(series: SampleNetwork.telemetry)
-        case .alerts: AlertsView(alerts: SampleNetwork.alerts)
-        case .health: ObservabilityView(metrics: SampleNetwork.metrics)
-        case .fleet: FleetConfigView(rows: SampleNetwork.rollout)
-        }
+        .environment(model)
     }
 }
 
