@@ -18,13 +18,8 @@ enum Snapshot {
         let nodes = SampleNetwork.nodes
         let traces = SampleNetwork.traces
         write(
-            NetworkMapView(nodes: nodes, traces: traces).frame(width: 1400, height: 900),
-            to: "\(outputDir)/network.png"
-        )
-        write(
-            NetworkMapView(nodes: nodes, traces: traces, clock: 1.6, hopDuration: 1.2)
-                .frame(width: 1400, height: 900),
-            to: "\(outputDir)/network-anim.png"
+            DashboardView(nodes: nodes, traces: traces, clock: 1.6).frame(width: 1400, height: 900),
+            to: "\(outputDir)/dashboard.png"
         )
         print("snapshots written to \(outputDir)/")
     }
