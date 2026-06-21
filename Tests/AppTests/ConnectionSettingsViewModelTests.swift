@@ -21,7 +21,9 @@ struct ConnectionSettingsViewModelTests {
     }
 
     /// Build a view model over fresh fakes plus a test closure. The closure
-    /// records what it was handed so tests can assert the probe inputs.
+    /// records what it was handed so tests can assert the probe inputs. (The
+    /// data-source/serial fakes default to the in-memory store + empty enumerator;
+    /// data-source behavior is exercised in `ConnectionSettingsDataSourceTests`.)
     private func makeHarness(
         broker: BrokerConfig? = nil,
         seedPassword: SeedPassword? = nil,
@@ -35,7 +37,8 @@ struct ConnectionSettingsViewModelTests {
         let model = ConnectionSettingsViewModel(
             gateway: gateway,
             credentials: credentials,
-            test: test
+            test: test,
+            dataSourceStore: InMemoryDataSourceStore()
         )
         return Harness(model: model, gateway: gateway, credentials: credentials)
     }
