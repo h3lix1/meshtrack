@@ -58,7 +58,7 @@ the App.
 ## Phase 3 — Map, arming & movement
 
 - [ ] MapKit view: nodes, clustering, track polylines, geofence overlays
-- [ ] Arming: anchor capture; `MovementDetector` (confirmation + accuracy margin + hysteresis)
+- [x] Arming: anchor capture (arming table) + `MovementDetector` (confirmation + accuracy margin + hysteresis + escape factor)
 - [ ] Node classification + class-based movement semantics (geofence-exit for mobile)
 - [ ] `moved` / `returned` / `geofence_exit` rules
 
