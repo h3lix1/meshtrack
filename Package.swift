@@ -98,7 +98,7 @@ let package = Package(
         // ---- UI + composition roots --------------------------------------------
         .target(
             name: "App",
-            dependencies: ["Domain", "Persistence", "RuleEngine"],
+            dependencies: ["Domain", "Persistence", "RuleEngine", "Provisioning"],
             swiftSettings: strict
         ),
         .executableTarget(
@@ -116,7 +116,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "MeshtrackApp",
-            dependencies: ["App"],
+            dependencies: [
+                "App", "Ingest", "Transport", "Persistence", "Crypto",
+                "RuleEngine", "Provisioning", "Domain", "MeshProtos"
+            ],
             swiftSettings: strict
         ),
 
