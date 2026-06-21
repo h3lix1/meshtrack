@@ -36,14 +36,8 @@ public struct IngestPipeline: Sendable {
         self.dedupWindowSeconds = dedupWindowSeconds
     }
 
-    /// Run the pipeline over a transport. `onDecoded` is called for every decoded
-    /// packet (every gateway reception, before dedup) so a live consumer — e.g. the
-    /// network visualization — can tap the stream while the pipeline persists.
     @discardableResult
-    public func run(
-        _ transport: any MeshTransport,
-        onDecoded: @Sendable (DecodedPacket, InboundFrame) async -> Void = { _, _ in }
-    ) async throws -> IngestSummary {
+    public func run(_ transport: any MeshTransport) async throws -> IngestSummary {
         var summary = IngestSummary()
         var dedup = DedupWindow(windowSeconds: dedupWindowSeconds)
 
@@ -59,7 +53,6 @@ public struct IngestPipeline: Sendable {
             }
             guard let packet = decoded else { continue }
             summary.packetsDecoded += 1
-            await onDecoded(packet, frame)
             let node = Int64(packet.from)
 
             try await store.markHeard(nodeNum: node, at: packet.rxTime)

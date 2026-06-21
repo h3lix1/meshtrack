@@ -41,42 +41,6 @@ struct IngestPipelineTests {
         )
     }
 
-    private actor Tapped {
-        var ids: [UInt32] = []
-        func add(_ id: UInt32) {
-            ids.append(id)
-        }
-    }
-
-    @Test
-    func `onDecoded taps every decoded packet (the live visualization stream)`() async throws {
-        let store = try MeshStore(DatabaseConnection.inMemory())
-        let frames = [
-            frame(
-                from: 0xA1,
-                packetID: 1,
-                gateway: "!gw1",
-                port: .telemetryApp,
-                payload: telemetryPayload(battery: 80, voltage: 4.0),
-                at: at(0)
-            ),
-            frame(
-                from: 0xA1,
-                packetID: 1,
-                gateway: "!gw2",
-                port: .telemetryApp,
-                payload: telemetryPayload(battery: 80, voltage: 4.0),
-                at: at(1)
-            )
-        ]
-        let tapped = Tapped()
-        _ = try await pipeline(store).run(StubTransport(queued: frames)) { packet, _ in
-            await tapped.add(packet.packetID)
-        }
-        let ids = await tapped.ids
-        #expect(ids == [1, 1]) // both gateway receptions tapped, before dedup
-    }
-
     private func at(_ seconds: Double) -> Instant {
         Instant.epoch.adding(seconds: seconds)
     }
