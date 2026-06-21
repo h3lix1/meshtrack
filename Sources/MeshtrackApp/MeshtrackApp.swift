@@ -142,10 +142,11 @@ struct MeshtrackApp: App {
                 test: { await probeBrokerConnection($0, password: $1) }
             )))
         }
-        // Channels: the screen + Keychain key store exist; wiring its (synchronous)
-        // ChannelKeyManaging port to a persistent registry needs an async revision —
-        // tracked as a follow-up. Placeholder until then.
-        settingsModel.register(.channels) { AnyView(PlaceholderSettingsTab(tab: .channels)) }
+        settingsModel.register(.channels) {
+            AnyView(ChannelsSettingsView(viewModel: ChannelsSettingsViewModel(
+                keys: KeychainChannelManager(store: store)
+            )))
+        }
         settingsModel.register(.general) {
             AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(
                 gateway: gateway,

@@ -98,3 +98,5 @@ freezing shared files:
   CI may require a self-hosted runner.
 - `make verify` degrades gracefully for absent local tools (warns + skips); CI
   installs everything and enforces every gate with no skips.
+
+## Imported Claude Cowork project instructions
