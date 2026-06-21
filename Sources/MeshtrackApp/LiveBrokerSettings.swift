@@ -22,7 +22,7 @@ import Foundation
 import Transport
 
 /// Broker connection settings, with the secret password resolved into memory.
-struct LiveBrokerSettings: Equatable, Sendable {
+struct LiveBrokerSettings: Equatable {
     var host: String
     var port: UInt16
     var username: String?
@@ -36,7 +36,9 @@ struct LiveBrokerSettings: Equatable, Sendable {
 
     /// The broker host surfaced to the UI (status indicator, onboarding). Never the
     /// credentials.
-    var displayHost: String { host }
+    var displayHost: String {
+        host
+    }
 
     /// Build from a saved, non-secret `BrokerConfig` plus the resolved password from
     /// the `CredentialStore`. This is the PRIMARY Phase 8 path. Empty/blank topics
