@@ -52,7 +52,9 @@ public struct ChannelsSettingsView: View {
         case .emptyName:
             "Enter a channel name."
         case .duplicateChannel:
-            "A channel with that name already exists."
+            "A channel with that name or hash already exists."
+        case .invalidChannelHash:
+            "Enter a channel hash as a byte: hex (0x1F) or decimal (0–255)."
         case .invalidKey:
             "Enter a valid base64 PSK (16 or 32 bytes) or \"AQ==\" for the default key."
         case .storeFailed:
@@ -68,6 +70,7 @@ private struct ChannelSection: View {
     let viewModel: ChannelsSettingsViewModel
 
     @State private var newName = ""
+    @State private var newHash = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -107,6 +110,13 @@ private struct ChannelSection: View {
                 .padding(.horizontal, 10).padding(.vertical, 7)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                 .onSubmit(add)
+            TextField("Hash (optional)", text: $newHash)
+                .textFieldStyle(.plain)
+                .foregroundStyle(.white)
+                .frame(width: 110)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .onSubmit(add)
             Button(action: add) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
@@ -121,11 +131,13 @@ private struct ChannelSection: View {
 
     private func add() {
         let name = newName
+        let hash = newHash
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         Task {
-            await viewModel.addChannel(name: name, kind: kind)
+            await viewModel.addChannel(name: name, hashText: hash, kind: kind)
             if viewModel.lastError == nil {
                 newName = ""
+                newHash = ""
             }
         }
     }

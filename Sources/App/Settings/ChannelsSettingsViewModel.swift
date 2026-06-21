@@ -103,8 +103,10 @@ public enum ChannelsSettingsError: Error, Equatable, Sendable {
     case capacityReached(ChannelKind)
     /// The channel name was empty after trimming.
     case emptyName
-    /// A channel with the derived hash already exists.
+    /// A channel with the derived/entered hash already exists.
     case duplicateChannel
+    /// The entered channel hash was not a byte value (hex/decimal in `0...255`).
+    case invalidChannelHash
     /// The supplied PSK text was not valid base64 / a known shortcut.
     case invalidKey
     /// The underlying key store failed (e.g. Keychain error). Carries a redacted
@@ -136,6 +138,31 @@ public enum ChannelKeyMath {
             hash ^= byte
         }
         return UInt32(hash)
+    }
+
+    /// Parse user-entered channel-hash text into the on-wire hash byte. Accepts
+    /// hex (`"0x1F"`, `"1f"`, `"#1f"`) or decimal (`"31"`). The Meshtastic channel
+    /// hash is a single byte, so the value must be in `0...255`; anything else (or
+    /// unparseable text) throws `invalidChannelHash`. Empty text is *not* an error
+    /// here — callers treat it as "derive from the name" instead.
+    public static func parseChannelHash(_ text: String) throws -> UInt32 {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isHex: Bool
+        if trimmed.hasPrefix("0x") || trimmed.hasPrefix("0X") {
+            trimmed = String(trimmed.dropFirst(2))
+            isHex = true
+        } else if trimmed.hasPrefix("#") {
+            trimmed = String(trimmed.dropFirst())
+            isHex = true
+        } else {
+            isHex = false
+        }
+        guard let value = isHex ? UInt32(trimmed, radix: 16) : UInt32(trimmed, radix: 10),
+              value <= 0xFF
+        else {
+            throw ChannelsSettingsError.invalidChannelHash
+        }
+        return value
     }
 
     /// Parse user-entered PSK text into raw bytes. Accepts the Meshtastic
@@ -209,10 +236,14 @@ public final class ChannelsSettingsViewModel {
 
     // MARK: - Mutations
 
-    /// Add a channel by name. The hash is derived from the name with the default
-    /// PSK so a fresh channel decodes default traffic until a key is rotated in;
-    /// the channel starts keyless (`hasKey == false`) until a PSK is set.
-    public func addChannel(name: String, kind: ChannelKind) async {
+    /// Add a channel by `name`, optionally with an explicit on-wire hash.
+    ///
+    /// When `hashText` is empty the hash is *derived* from the name with the default
+    /// PSK, so a fresh channel decodes default traffic until a key is rotated in.
+    /// When `hashText` is non-empty it is parsed (hex or decimal byte), letting the
+    /// operator match a channel they have already observed on the wire. The channel
+    /// starts keyless (`hasKey == false`) until a PSK is set.
+    public func addChannel(name: String, hashText: String = "", kind: ChannelKind) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             lastError = .emptyName
@@ -222,7 +253,20 @@ public final class ChannelsSettingsViewModel {
             lastError = .capacityReached(kind)
             return
         }
-        let hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+        let hash: UInt32
+        if hashText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+        } else {
+            do {
+                hash = try ChannelKeyMath.parseChannelHash(hashText)
+            } catch let error as ChannelsSettingsError {
+                lastError = error
+                return
+            } catch {
+                lastError = .invalidChannelHash
+                return
+            }
+        }
         guard !channelExists(hash: hash) else {
             lastError = .duplicateChannel
             return

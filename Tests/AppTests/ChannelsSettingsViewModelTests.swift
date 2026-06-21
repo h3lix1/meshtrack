@@ -75,7 +75,55 @@ struct ChannelsSettingsViewModelTests {
         #expect(vm.lastError == nil)
     }
 
+    // MARK: - Channel-hash parsing
+
+    @Test
+    func `parseChannelHash accepts hex and decimal byte values`() throws {
+        #expect(try ChannelKeyMath.parseChannelHash("0x1F") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("0X1f") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("#1f") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("31") == 31)
+        #expect(try ChannelKeyMath.parseChannelHash(" 255 ") == 255)
+        #expect(try ChannelKeyMath.parseChannelHash("0") == 0)
+    }
+
+    @Test
+    func `parseChannelHash rejects out-of-range and non-numeric text`() {
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("256") // > one byte
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("0x100") // > one byte
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("nope")
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("-1")
+        }
+    }
+
     // MARK: - Add + caps
+
+    @Test
+    func `adding with an explicit hash uses the entered byte not the derived one`() async throws {
+        let (vm, _) = makeVM()
+        await vm.addChannel(name: "Observed", hashText: "0x2A", kind: .mqtt)
+        #expect(vm.lastError == nil)
+        let entry = try #require(vm.mqttChannels.first)
+        #expect(entry.hash == 0x2A)
+        // Confirm it did NOT fall back to the name-derived hash.
+        let derived = ChannelKeyMath.channelHash(name: "Observed", psk: ChannelKeyMath.defaultPSK)
+        #expect(entry.hash != derived || derived == 0x2A)
+    }
+
+    @Test
+    func `adding with an invalid hash surfaces an error and adds nothing`() async {
+        let (vm, _) = makeVM()
+        await vm.addChannel(name: "Bad", hashText: "0x100", kind: .mqtt)
+        #expect(vm.lastError == .invalidChannelHash)
+        #expect(vm.mqttChannels.isEmpty)
+    }
 
     @Test
     func `adding channels splits them into mqtt and local`() async {
