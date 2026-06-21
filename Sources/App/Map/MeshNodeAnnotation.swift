@@ -64,8 +64,12 @@
 
         func configure(for annotation: MeshNodeAnnotation) {
             self.annotation = annotation
-            clusteringIdentifier = "mesh-node"
-            displayPriority = annotation.isGateway ? .required : .defaultHigh
+            // Co-located nodes are de-collided by Spiderfier (Task 3), not MapKit's
+            // built-in clustering — clustering would collapse a stacked site into a
+            // single bubble you can't tap into. We fan them out instead, so no
+            // clusteringIdentifier and every marker is always individually selectable.
+            clusteringIdentifier = nil
+            displayPriority = .required
             toolTip = annotation.title
             guard let layer else { return }
             let color = Self.color(for: annotation)
