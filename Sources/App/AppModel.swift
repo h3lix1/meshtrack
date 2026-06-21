@@ -31,6 +31,13 @@ public final class AppModel {
     /// built-in sections; feature streams override/extend via `register(_:_:)`.
     @ObservationIgnored private var registry: [AppSection: SectionProvider] = [:]
 
+    /// A fresh in-memory store backing the default Fleet section so it renders the
+    /// real `FleetConfigConsole` engine (empty/seeded) instead of fabricated rows —
+    /// even in sample / first-run mode where no live store has been wired. Built once
+    /// per model so the section keeps a stable view model across re-renders.
+    @ObservationIgnored private lazy var sampleFleetStore: MeshStore? =
+        try? MeshStore(DatabaseConnection.inMemory())
+
     public init(
         nodes: [NetworkNode] = SampleNetwork.nodes,
         traces: [PacketTrace] = SampleNetwork.traces,
@@ -88,7 +95,20 @@ public final class AppModel {
             ))
         }
         register(.health) { AnyView(ObservabilityView(metrics: SampleNetwork.metrics)) }
-        register(.fleet) { AnyView(FleetConfigView(rows: SampleNetwork.rollout)) }
+        // Fleet shows the REAL engine everywhere — never the SF-Gate demo. Without a
+        // live store (sample / first-run), back the console with a fresh in-memory
+        // store so it renders the genuine empty/seeded engine UI (templates editor +
+        // node targeting + rollout) rather than fabricated rows.
+        register(.fleet) { [self] in
+            if let store = sampleFleetStore {
+                AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(store: store)))
+            } else {
+                AnyView(SectionMessageView(
+                    title: "Fleet Configuration",
+                    message: "Fleet configuration is unavailable — the local store could not be opened."
+                ))
+            }
+        }
     }
 }
 
