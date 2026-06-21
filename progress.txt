@@ -14,3 +14,6 @@
 2026-06-20 P1 feat(domain): DedupWindow — sliding-window (packet_id, from_num) dedup (SPEC §2.4)
 2026-06-20 P1 feat(crypto): AES-CTR PacketDecryptor (CommonCrypto) + Keychain/in-memory KeyStore [agent, integrated]
 2026-06-20 P1 chore(coverage): count Ingest/Crypto/Logging in the coverage CORE set
+2026-06-20 P1 feat(transport): SerialFramer codec (tested) + serial/BLE adapters (best-effort I/O) [agent, integrated]
+2026-06-20 P1 feat(logging): secret-redacting structured logger (redact + RedactingLogger) [agent, integrated]
+2026-06-20 P1 chore(coverage): exclude hardware-I/O adapters (SerialAdapter/BLEAdapter) from the metric
