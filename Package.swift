@@ -130,7 +130,7 @@ let package = Package(
         .testTarget(name: "RuleEngineTests", dependencies: ["RuleEngine", "Domain"], swiftSettings: strict),
         .testTarget(
             name: "ProvisioningTests",
-            dependencies: ["Provisioning", "Domain"],
+            dependencies: ["Provisioning", "Domain", "MeshProtos"],
             swiftSettings: strict
         ),
         .testTarget(name: "ScenarioTests", dependencies: ["Scenario"], swiftSettings: strict),
