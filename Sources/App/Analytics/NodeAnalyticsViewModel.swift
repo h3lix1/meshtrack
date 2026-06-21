@@ -29,7 +29,9 @@ public enum NodeAnalyticsTab: String, Sendable, CaseIterable, Identifiable {
     case activity
     case packetTypes
 
-    public var id: String { rawValue }
+    public var id: String {
+        rawValue
+    }
 
     public var label: String {
         switch self {
@@ -74,7 +76,9 @@ public final class NodeAnalyticsViewModel {
     }
 
     /// Whether any analytics input has arrived.
-    public var hasData: Bool { observationCount > 0 || packetCount > 0 }
+    public var hasData: Bool {
+        observationCount > 0 || packetCount > 0
+    }
 
     /// The node's display name (best-effort; falls back to the hex id).
     public private(set) var nodeName: String?

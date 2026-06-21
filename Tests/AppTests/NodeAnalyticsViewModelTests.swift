@@ -36,8 +36,14 @@ struct NodeAnalyticsViewModelTests {
         viewModel.setObservations([
             observation(snr: -4, rssi: -90, hopStart: 3, hopLimit: 1, gateway: "gw-a", rxNanos: 0),
             observation(snr: -6, rssi: -88, hopStart: 3, hopLimit: 1, gateway: "gw-a", rxNanos: 0),
-            observation(snr: -12, rssi: -100, hopStart: 2, hopLimit: 2, gateway: "gw-b",
-                        rxNanos: 5 * 3_600 * 1_000_000_000)
+            observation(
+                snr: -12,
+                rssi: -100,
+                hopStart: 2,
+                hopLimit: 2,
+                gateway: "gw-b",
+                rxNanos: 5 * 3600 * 1_000_000_000
+            )
         ])
 
         #expect(viewModel.hasData)

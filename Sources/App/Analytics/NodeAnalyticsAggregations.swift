@@ -24,10 +24,14 @@ public struct HistogramBin: Sendable, Equatable, Identifiable {
     public let upperBound: Double
     public let count: Int
 
-    public var id: Double { lowerBound }
+    public var id: Double {
+        lowerBound
+    }
 
     /// Bin centre, handy for axis labels.
-    public var midpoint: Double { (lowerBound + upperBound) / 2 }
+    public var midpoint: Double {
+        (lowerBound + upperBound) / 2
+    }
 
     public init(lowerBound: Double, upperBound: Double, count: Int) {
         self.lowerBound = lowerBound
@@ -64,15 +68,15 @@ public enum NodeAnalytics {
     /// span) is widened to one unit so it still renders one populated bin.
     public static func distribution(of values: [Double], binCount: Int = 12) -> SignalDistribution {
         guard !values.isEmpty, binCount > 0 else { return .empty }
-        let lo = values.min() ?? 0
-        var hi = values.max() ?? 0
-        var low = lo
-        if hi - low < 1e-9 {
+        let dataMin = values.min() ?? 0
+        var high = values.max() ?? 0
+        var low = dataMin
+        if high - low < 1e-9 {
             // Degenerate single-value span — widen so the value lands mid-range.
             low -= 0.5
-            hi += 0.5
+            high += 0.5
         }
-        let span = hi - low
+        let span = high - low
         let width = span / Double(binCount)
         var counts = [Int](repeating: 0, count: binCount)
         for value in values {
@@ -92,7 +96,7 @@ public enum NodeAnalytics {
         return SignalDistribution(
             bins: bins,
             sampleCount: values.count,
-            minValue: lo,
+            minValue: dataMin,
             maxValue: values.max(),
             mean: sum / Double(values.count)
         )
@@ -130,7 +134,9 @@ public enum NodeAnalytics {
         let hops = observations.compactMap(hopCount)
         guard let maxHop = hops.max() else { return [] }
         var counts = [Int](repeating: 0, count: maxHop + 1)
-        for hop in hops { counts[hop] += 1 }
+        for hop in hops {
+            counts[hop] += 1
+        }
         return counts.enumerated().map { HopBucket(hops: $0.offset, count: $0.element) }
     }
 
@@ -180,12 +186,12 @@ public enum NodeAnalytics {
     /// Hour-of-day (0…23, UTC) for a nanoseconds-since-epoch timestamp. Pure
     /// integer maths so it stays Foundation-free and deterministic.
     public static func hourOfDay(nanoseconds: Int64) -> Int {
-        let secondsPerDay: Int64 = 86_400
+        let secondsPerDay: Int64 = 86400
         let seconds = nanoseconds / 1_000_000_000
         // Floor-mod so pre-epoch timestamps still land in 0…86399.
         var secondsOfDay = seconds % secondsPerDay
         if secondsOfDay < 0 { secondsOfDay += secondsPerDay }
-        return Int(secondsOfDay / 3_600)
+        return Int(secondsOfDay / 3600)
     }
 
     // MARK: - Packet-type breakdown
@@ -196,7 +202,9 @@ public enum NodeAnalytics {
         // `MeshPort` is Equatable but not Hashable (Domain owns it), so key the
         // tally by the canonical raw port number and rebuild the port from it.
         var counts: [Int: Int] = [:]
-        for packet in packets { counts[packet.port.portNumRawValue, default: 0] += 1 }
+        for packet in packets {
+            counts[packet.port.portNumRawValue, default: 0] += 1
+        }
         return counts
             .map { PacketTypeCount(port: MeshPort(portNumRawValue: $0.key), count: $0.value) }
             .sorted { lhs, rhs in
@@ -213,7 +221,9 @@ public enum NodeAnalytics {
 public struct HopBucket: Sendable, Equatable, Identifiable {
     public let hops: Int
     public let count: Int
-    public var id: Int { hops }
+    public var id: Int {
+        hops
+    }
 
     public init(hops: Int, count: Int) {
         self.hops = hops
@@ -226,7 +236,9 @@ public struct PeerSummary: Sendable, Equatable, Identifiable {
     public let gatewayID: String
     public let receptionCount: Int
     public let averageSNR: Double?
-    public var id: String { gatewayID }
+    public var id: String {
+        gatewayID
+    }
 
     public init(gatewayID: String, receptionCount: Int, averageSNR: Double?) {
         self.gatewayID = gatewayID
@@ -239,7 +251,9 @@ public struct PeerSummary: Sendable, Equatable, Identifiable {
 public struct HourBucket: Sendable, Equatable, Identifiable {
     public let hour: Int
     public let count: Int
-    public var id: Int { hour }
+    public var id: Int {
+        hour
+    }
 
     public init(hour: Int, count: Int) {
         self.hour = hour
@@ -251,7 +265,9 @@ public struct HourBucket: Sendable, Equatable, Identifiable {
 public struct PacketTypeCount: Sendable, Equatable, Identifiable {
     public let port: MeshPort
     public let count: Int
-    public var id: Int { port.portNumRawValue }
+    public var id: Int {
+        port.portNumRawValue
+    }
 
     public init(port: MeshPort, count: Int) {
         self.port = port
@@ -259,7 +275,9 @@ public struct PacketTypeCount: Sendable, Equatable, Identifiable {
     }
 
     /// Human-readable port label for the legend.
-    public var label: String { MeshPortLabel.name(port) }
+    public var label: String {
+        MeshPortLabel.name(port)
+    }
 }
 
 /// Stable display names for `MeshPort` (used by the breakdown legend + tooltips).
