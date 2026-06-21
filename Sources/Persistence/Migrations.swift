@@ -25,7 +25,56 @@ public enum MeshtrackMigrator {
             try createTelemetryRollup(db, named: Table.telemetryHourly)
             try createTelemetryRollup(db, named: Table.telemetryDaily)
         }
+        // Phase 7: node ownership (ADR 0008), monitor-only messaging (ADR 0006),
+        // and reception→publish latency provenance (SPEC §2.11).
+        migrator.registerMigration("v3") { db in
+            try addNodeOwnership(db)
+            try addObservationIngestTime(db)
+            try createMessage(db)
+        }
         return migrator
+    }
+
+    /// `node` ownership flags (ADR 0008). `is_mine` drives the "My Nodes" filter
+    /// (visibility); `is_managed` gates ownership-sensitive rules (battery/voltage/
+    /// stale). Both default false so pre-v3 rows stay unmanaged/unowned.
+    private static func addNodeOwnership(_ db: Database) throws {
+        try db.alter(table: Table.node) { t in
+            t.add(column: "is_mine", .boolean).notNull().defaults(to: false)
+            t.add(column: "is_managed", .boolean).notNull().defaults(to: false)
+        }
+    }
+
+    /// `observation.ingest_time` — our `Clock` wall-clock at frame receipt
+    /// (SPEC §2.11). Nullable for back-compat: pre-v3 rows have no ingest time, so
+    /// latency (`ingest_time − rx_time`) is simply unknown for them.
+    private static func addObservationIngestTime(_ db: Database) throws {
+        try db.alter(table: Table.observation) { t in
+            t.add(column: "ingest_time", .integer)
+        }
+    }
+
+    /// `message` — decoded `TEXT_MESSAGE_APP` payloads for the read-only Channels
+    /// view (ADR 0006). Append-only; the pipeline counts once per dedup key like
+    /// telemetry/position. Indexed for per-channel and recency queries.
+    private static func createMessage(_ db: Database) throws {
+        try db.create(table: Table.message) { t in
+            t.autoIncrementedPrimaryKey("id")
+            t.column("packet_id", .integer).notNull()
+            t.column("from_num", .integer).notNull()
+            t.column("to_num", .integer).notNull()
+            t.column("channel", .integer).notNull()
+            t.column("channel_name", .text)
+            t.column("body", .text).notNull()
+            t.column("rx_time", .integer).notNull()
+            t.column("is_dm", .boolean).notNull().defaults(to: false)
+        }
+        try db.create(
+            index: "idx_message_channel_time",
+            on: Table.message,
+            columns: ["channel", "rx_time"]
+        )
+        try db.create(index: "idx_message_time", on: Table.message, columns: ["rx_time"])
     }
 
     /// Downsampled telemetry rollup table (hourly/daily): one row per

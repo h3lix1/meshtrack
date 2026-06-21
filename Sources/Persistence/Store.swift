@@ -68,6 +68,72 @@ public struct MeshStore: Sendable {
         }
     }
 
+    // MARK: Ownership (ADR 0008)
+
+    /// Set a node's ownership flags (single or bulk). Updating only the columns
+    /// that are provided (`nil` leaves a flag unchanged), so callers can flip
+    /// "mine" without touching "managed" and vice-versa. Throws
+    /// `StoreError.nodeNotFound` for an unknown node.
+    public func setOwnership(nodeNum: Int64, isMine: Bool? = nil, isManaged: Bool? = nil) async throws {
+        try await writer.write { db in
+            guard var node = try NodeRecord.fetchOne(db, key: nodeNum) else {
+                throw StoreError.nodeNotFound(nodeNum: nodeNum)
+            }
+            if let isMine { node.is_mine = isMine }
+            if let isManaged { node.is_managed = isManaged }
+            try node.update(db)
+        }
+    }
+
+    /// Apply ownership flags to many nodes at once (bulk-classify UI). Unknown
+    /// node_nums are skipped; returns the count actually updated.
+    @discardableResult
+    public func setOwnership(
+        nodeNums: [Int64],
+        isMine: Bool? = nil,
+        isManaged: Bool? = nil
+    ) async throws -> Int {
+        try await writer.write { db in
+            var updated = 0
+            for nodeNum in nodeNums {
+                guard var node = try NodeRecord.fetchOne(db, key: nodeNum) else { continue }
+                if let isMine { node.is_mine = isMine }
+                if let isManaged { node.is_managed = isManaged }
+                try node.update(db)
+                updated += 1
+            }
+            return updated
+        }
+    }
+
+    /// Whether a node is managed (gates ownership-sensitive rules). Unknown nodes
+    /// are unmanaged.
+    public func isManaged(nodeNum: Int64) async throws -> Bool {
+        try await writer.read { db in
+            try NodeRecord.fetchOne(db, key: nodeNum)?.is_managed ?? false
+        }
+    }
+
+    /// The node_nums of every managed node (the rule engine's eligibility set).
+    public func managedNodeNums() async throws -> [Int64] {
+        try await writer.read { db in
+            try Int64.fetchAll(
+                db,
+                sql: "SELECT node_num FROM \(Table.node) WHERE is_managed = 1"
+            )
+        }
+    }
+
+    /// Every node the operator marked as theirs ("My Nodes" filter, ADR 0008).
+    public func myNodes() async throws -> [NodeRecord] {
+        try await writer.read { db in
+            try NodeRecord
+                .filter(Column("is_mine") == true)
+                .order(Column("last_heard_at").desc)
+                .fetchAll(db)
+        }
+    }
+
     // MARK: Observations (provenance + dedup)
 
     /// Record one observation. Throws `StoreError.duplicate` if the
@@ -82,6 +148,40 @@ public struct MeshStore: Sendable {
             }
         } catch let error as DatabaseError where error.resultCode == .SQLITE_CONSTRAINT {
             throw StoreError.duplicate(details: error.message ?? "unique constraint violation")
+        }
+    }
+
+    // MARK: Messages (monitor-only, ADR 0006)
+
+    /// Append a decoded text message. Returns the row id.
+    @discardableResult
+    public func recordMessage(_ message: MessageRecord) async throws -> Int64 {
+        try await writer.write { db in
+            var record = message
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
+        }
+    }
+
+    /// Messages on a channel, oldest-first (the Channels view feed).
+    public func messages(channel: Int64, limit: Int = 200) async throws -> [MessageRecord] {
+        try await writer.read { db in
+            try MessageRecord
+                .filter(Column("channel") == channel)
+                .order(Column("rx_time").desc)
+                .limit(limit)
+                .fetchAll(db)
+                .reversed()
+        }
+    }
+
+    /// The most-recent messages across all channels, newest-first.
+    public func recentMessages(limit: Int = 200) async throws -> [MessageRecord] {
+        try await writer.read { db in
+            try MessageRecord
+                .order(Column("rx_time").desc)
+                .limit(limit)
+                .fetchAll(db)
         }
     }
 
