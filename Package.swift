@@ -109,6 +109,11 @@ let package = Package(
             ],
             swiftSettings: strict
         ),
+        .executableTarget(
+            name: "MeshtrackSnapshot",
+            dependencies: ["App", "Domain", "Persistence"],
+            swiftSettings: strict
+        ),
 
         // ---- Tests --------------------------------------------------------------
         .testTarget(name: "DomainTests", dependencies: ["Domain"], swiftSettings: strict),
