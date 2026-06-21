@@ -135,6 +135,24 @@ struct ChannelsViewModelTests {
     }
 
     @Test
+    func `attributed body highlights mention runs and preserves the full text`() {
+        let display = ChannelsViewModel.display(
+            MessageRecord(packet_id: 1, from_num: 1, to_num: 0, channel: 7,
+                          body: "ping @ops now", rx_time: 0),
+            senders: [:]
+        )
+        let attributed = ChannelsView.attributedBody(display)
+        // Round-trips to the original body.
+        #expect(String(attributed.characters) == "ping @ops now")
+        // The mention run carries the highlight colour; plain runs do not.
+        let mentionRun = attributed.runs.first { $0.foregroundColor == .yellow }
+        #expect(mentionRun != nil)
+        if let mentionRun {
+            #expect(String(attributed[mentionRun.range].characters) == "@ops")
+        }
+    }
+
+    @Test
     @MainActor
     func `selectedSummary defaults to the first channel and follows selection`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())
