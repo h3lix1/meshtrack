@@ -39,7 +39,17 @@ public typealias ConnectionTest =
 @Observable
 @MainActor
 public final class ConnectionSettingsViewModel {
-    // MARK: Editable fields (bound by the view)
+    // MARK: Data source (MQTT broker vs locally-attached node)
+
+    /// The active data source. `.mqtt` shows the broker fields below; `.serial`/`.ble`
+    /// show the local-node fields. Persisted via `DataSourceStore` on `save`.
+    public var dataSourceKind: DataSourceKind = .mqtt
+    /// The selected/entered `/dev/cu.*` device path (serial source only).
+    public var serialDevicePath: String = ""
+    /// Optional BLE peripheral name filter (BLE source only).
+    public var bleDeviceName: String = ""
+
+    // MARK: Broker fields (bound by the view; used when `dataSourceKind == .mqtt`)
 
     public var host: String = ""
     public var portText: String = ""
@@ -60,23 +70,58 @@ public final class ConnectionSettingsViewModel {
     @ObservationIgnored private let gateway: any ConfigGateway
     @ObservationIgnored private let credentials: any CredentialStore
     @ObservationIgnored private let test: ConnectionTest
+    @ObservationIgnored private let dataSourceStore: any DataSourceStore
+    @ObservationIgnored private let serialDevices: any SerialDeviceEnumerator
 
     public init(
         gateway: any ConfigGateway,
         credentials: any CredentialStore,
-        test: @escaping ConnectionTest
+        test: @escaping ConnectionTest,
+        dataSourceStore: any DataSourceStore = UserDefaultsDataSourceStore(),
+        serialDevices: any SerialDeviceEnumerator = POSIXSerialDeviceEnumerator()
     ) {
         self.gateway = gateway
         self.credentials = credentials
         self.test = test
+        self.dataSourceStore = dataSourceStore
+        self.serialDevices = serialDevices
+    }
+
+    // MARK: Data-source helpers
+
+    /// The data-source selection assembled from the current edits (non-secret).
+    public func currentDataSource() -> DataSourceConfig {
+        DataSourceConfig(
+            kind: dataSourceKind,
+            serialDevicePath: serialDevicePath.trimmingCharacters(in: .whitespaces),
+            bleDeviceName: bleDeviceName.trimmingCharacters(in: .whitespaces)
+        )
+    }
+
+    /// `/dev/cu.*` devices currently visible on the host (empty when none attached).
+    /// Re-enumerated on demand so plugging a node in then re-opening the picker shows
+    /// it without a relaunch.
+    public func availableSerialDevices() -> [String] {
+        serialDevices.availableDevices()
+    }
+
+    /// Select a data source kind, clearing any stale probe result.
+    public func selectDataSource(_ kind: DataSourceKind) {
+        guard dataSourceKind != kind else { return }
+        dataSourceKind = kind
+        testResult = .untested
     }
 
     // MARK: Derived
 
     /// Whether the current edits form a config complete enough to connect — drives
-    /// the enabled state of Test / Save. Mirrors `BrokerConfig.isConnectable`.
+    /// the enabled state of Test / Save. For MQTT this mirrors
+    /// `BrokerConfig.isConnectable`; for a local node it checks the device selection.
     public var isConnectable: Bool {
-        currentConfig().isConnectable
+        switch dataSourceKind {
+        case .mqtt: currentConfig().isConnectable
+        case .serial, .ble: currentDataSource().isConnectable
+        }
     }
 
     /// The parsed port, or `nil` when the text isn't a valid UInt16. Surfaced so the
@@ -87,13 +132,20 @@ public final class ConnectionSettingsViewModel {
 
     // MARK: Load
 
-    /// Read the saved `BrokerConfig` (or defaults) and the stored password into the
-    /// editable fields.
+    /// Read the saved `BrokerConfig` (or defaults), the stored password, and the
+    /// saved data-source selection into the editable fields.
     public func load() async throws {
         let config = try await gateway.loadBrokerConfig() ?? BrokerConfig()
         apply(config)
         password = credentials.password(host: config.host, username: config.username) ?? ""
+        apply(dataSourceStore.load())
         testResult = .untested
+    }
+
+    private func apply(_ source: DataSourceConfig) {
+        dataSourceKind = source.kind
+        serialDevicePath = source.serialDevicePath
+        bleDeviceName = source.bleDeviceName
     }
 
     private func apply(_ config: BrokerConfig) {
@@ -124,9 +176,12 @@ public final class ConnectionSettingsViewModel {
 
     // MARK: Save
 
-    /// Persist the broker config (non-secret) via the gateway and the password via
-    /// the credential store. The password is NEVER written into `BrokerConfig`.
+    /// Persist the data-source selection plus the broker config (non-secret) via the
+    /// gateway and the password via the credential store. The broker fields persist
+    /// exactly as before regardless of the active source, so switching back to MQTT
+    /// keeps the saved broker. The password is NEVER written into `BrokerConfig`.
     public func save() async throws {
+        dataSourceStore.save(currentDataSource())
         let config = currentConfig()
         try await gateway.saveBrokerConfig(config)
         // A blank password clears any stored secret for this host/username.
@@ -140,10 +195,37 @@ public final class ConnectionSettingsViewModel {
 
     // MARK: Test connection
 
-    /// Run the injected probe against the current edits and surface the result.
+    /// Run the appropriate check against the current edits and surface the result.
+    /// For MQTT this is the injected broker probe; for a local node it is a
+    /// device-presence check (the real serial/BLE I/O is hardware-in-the-loop, so the
+    /// view model only confirms the device is selectable/visible — connecting happens
+    /// at Save). No secret is ever surfaced.
     public func testConnection() async {
         testResult = .testing
-        testResult = await test(currentConfig(), password.isEmpty ? nil : password)
+        switch dataSourceKind {
+        case .mqtt:
+            testResult = await test(currentConfig(), password.isEmpty ? nil : password)
+        case .serial:
+            testResult = serialTestResult()
+        case .ble:
+            testResult = .success(detail: bleDeviceName.isEmpty
+                ? "will scan for the first Meshtastic node over BLE"
+                : "will connect to BLE node \"\(bleDeviceName)\"")
+        }
+    }
+
+    /// Confirm the selected serial device is present (degrades gracefully to a clear
+    /// failure when nothing is attached — never a crash).
+    private func serialTestResult() -> ConnectionTestResult {
+        let path = serialDevicePath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else {
+            return .failure(reason: "select or enter a /dev/cu.* device first")
+        }
+        let present = availableSerialDevices().contains(path)
+            || FileManager.default.fileExists(atPath: path)
+        return present
+            ? .success(detail: "device present — \(path)")
+            : .failure(reason: "no device at \(path) — is the node plugged in?")
     }
 
     // MARK: Config assembly
