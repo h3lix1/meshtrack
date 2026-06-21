@@ -199,6 +199,16 @@ public final class ChannelsSettingsViewModel {
     public private(set) var lastError: ChannelsSettingsError?
 
     @ObservationIgnored private let keys: any ChannelKeyManaging
+    /// Set once we've seeded (or attempted to seed) the out-of-the-box default
+    /// channel, so a subsequent `load()` over an empty registry never re-seeds —
+    /// in particular after the operator deletes the default channel this session.
+    @ObservationIgnored private var didSeedDefault = false
+
+    /// The channel seeded on first run so the app decodes public traffic out of the
+    /// box: the public **MediumFast** channel keyed with the well-known `"AQ=="`
+    /// default PSK (SPEC §1, §10). MQTT-kind so it rides the broker.
+    public static let defaultChannelName = "MediumFast"
+    public static let defaultChannelKind: ChannelKind = .mqtt
 
     public init(keys: any ChannelKeyManaging) {
         self.keys = keys
@@ -206,8 +216,14 @@ public final class ChannelsSettingsViewModel {
 
     /// Load (or refresh) the channel list from the port. Call this from `.task` /
     /// `.onAppear`. Failures surface in `lastError` rather than throwing to the UI.
+    ///
+    /// On the very first load over an empty registry this seeds a default
+    /// MediumFast channel keyed with the default PSK so the app works out of the
+    /// box. The seed runs at most once per session (`didSeedDefault`), so deleting
+    /// the default channel does not bring it back on the next refresh.
     public func load() async {
         await reload()
+        await seedDefaultChannelIfNeeded()
     }
 
     // MARK: - Derived state
@@ -232,6 +248,18 @@ public final class ChannelsSettingsViewModel {
         case .mqtt: mqttChannels
         case .local: localChannels
         }
+    }
+
+    /// A live preview of the on-wire hash the add flow will derive for `name`,
+    /// using the default PSK (a fresh channel is keyless until a key is rotated in,
+    /// so it decodes default traffic). Returns `nil` for an empty/whitespace name so
+    /// the UI can hide the preview until the operator has typed something. This is
+    /// the same value `addChannel` computes when no explicit hash is entered, so the
+    /// preview never disagrees with what actually gets added.
+    public func derivedHash(forName name: String) -> UInt32? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
     }
 
     // MARK: - Mutations
@@ -328,6 +356,29 @@ public final class ChannelsSettingsViewModel {
         mqttChannels.contains { $0.hash == hash } || localChannels.contains { $0.hash == hash }
     }
 
+    /// First-run seeding: when the registry is empty (and we have not already seeded
+    /// this session) register the default MediumFast channel and key it with the
+    /// default PSK, so a fresh install decodes public traffic immediately. Idempotent
+    /// — guarded by `didSeedDefault` so it never re-runs, and a no-op when the
+    /// operator already has any channels.
+    private func seedDefaultChannelIfNeeded() async {
+        guard !didSeedDefault else { return }
+        didSeedDefault = true
+        guard mqttChannels.isEmpty, localChannels.isEmpty else { return }
+
+        let name = Self.defaultChannelName
+        let kind = Self.defaultChannelKind
+        let hash = ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+        do {
+            try await keys.addChannel(name: name, hash: hash, kind: kind)
+            try await keys.setKey(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
+            lastError = nil
+            await reload()
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+        }
+    }
+
     private func reload() async {
         do {
             let all = try await keys.channels()
@@ -336,62 +387,5 @@ public final class ChannelsSettingsViewModel {
         } catch {
             lastError = .storeFailed(String(describing: error))
         }
-    }
-}
-
-/// In-memory `ChannelKeyManaging` for tests and the preview. Holds channel
-/// metadata and PSK bytes in process memory only — no Keychain, no logging. The
-/// production path is the lead's `KeychainKeyStore` adapter.
-///
-/// Implemented as an `actor` so its mutable state is isolated without locks and it
-/// satisfies the now-`async` `ChannelKeyManaging` port directly.
-public actor InMemoryChannelKeyManager: ChannelKeyManaging {
-    private var order: [UInt32] = []
-    private var entries: [UInt32: (name: String, kind: ChannelKind)] = [:]
-    private var keysByHash: [UInt32: ChannelKey] = [:]
-
-    public init() {}
-
-    public func channels() -> [ChannelEntry] {
-        order.compactMap { hash in
-            guard let meta = entries[hash] else { return nil }
-            return ChannelEntry(
-                name: meta.name,
-                hash: hash,
-                kind: meta.kind,
-                hasKey: keysByHash[hash] != nil
-            )
-        }
-    }
-
-    public func addChannel(name: String, hash: UInt32, kind: ChannelKind) {
-        if entries[hash] == nil {
-            order.append(hash)
-        }
-        entries[hash] = (name, kind)
-    }
-
-    public func removeChannel(hash: UInt32) {
-        entries[hash] = nil
-        keysByHash[hash] = nil
-        order.removeAll { $0 == hash }
-    }
-
-    public func hasKey(forChannelHash hash: UInt32) -> Bool {
-        keysByHash[hash] != nil
-    }
-
-    public func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) {
-        keysByHash[hash] = key
-    }
-
-    public func clearKey(forChannelHash hash: UInt32) {
-        keysByHash[hash] = nil
-    }
-
-    /// Test-only inspection of the stored PSK, to assert the plaintext round-trips
-    /// to the *store* even though it never returns to the UI.
-    public func storedKey(forChannelHash hash: UInt32) -> ChannelKey? {
-        keysByHash[hash]
     }
 }
