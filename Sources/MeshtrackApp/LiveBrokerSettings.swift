@@ -15,7 +15,7 @@ import Foundation
 import Transport
 
 /// Broker connection settings decoded from the environment.
-struct LiveBrokerSettings: Sendable, Equatable {
+struct LiveBrokerSettings: Equatable {
     var host: String
     var port: UInt16
     var username: String?
