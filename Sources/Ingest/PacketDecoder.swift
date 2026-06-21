@@ -72,7 +72,16 @@ public struct PacketDecoder: Sendable {
             rxSnr: packet.rxSnr != 0 ? Double(packet.rxSnr) : nil,
             hopStart: packet.hopStart != 0 ? UInt8(truncatingIfNeeded: packet.hopStart) : nil,
             hopLimit: packet.hopLimit != 0 ? UInt8(truncatingIfNeeded: packet.hopLimit) : nil,
+            relayNode: packet.relayNode != 0 ? UInt8(truncatingIfNeeded: packet.relayNode) : nil,
+            nextHop: packet.nextHop != 0 ? UInt8(truncatingIfNeeded: packet.nextHop) : nil,
+            gatewayID: Self.parseGatewayID(envelope.gatewayID),
             wasEncrypted: wasEncrypted
         )
+    }
+
+    /// Parse a `ServiceEnvelope.gateway_id` (`"!aabbccdd"`) into a node number.
+    static func parseGatewayID(_ raw: String) -> UInt32? {
+        guard raw.hasPrefix("!") else { return nil }
+        return UInt32(raw.dropFirst(), radix: 16)
     }
 }

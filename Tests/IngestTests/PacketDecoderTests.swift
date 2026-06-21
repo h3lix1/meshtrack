@@ -73,6 +73,26 @@ struct PacketDecoderTests {
     }
 
     @Test
+    func `carries relay-node + next-hop + gateway id for trace reconstruction`() throws {
+        let bytes = try envelope { packet in
+            packet.decoded = dataMessage(port: .telemetryApp, payload: [0x01])
+            packet.relayNode = 0xAB
+            packet.nextHop = 0xCD
+        }
+        let decoder = PacketDecoder(keyStore: FakeKeyStore(), decryptor: FixedDecryptor(plaintext: []))
+        let packet = try #require(try decoder.decode(serviceEnvelope: bytes, receivedAt: at(5)))
+        #expect(packet.relayNode == 0xAB)
+        #expect(packet.nextHop == 0xCD)
+        #expect(packet.gatewayID == 0xA1B2_C3D4) // parsed from "!a1b2c3d4"
+    }
+
+    @Test
+    func `gateway id parsing requires the bang prefix`() {
+        #expect(PacketDecoder.parseGatewayID("!a1b2c3d4") == 0xA1B2_C3D4)
+        #expect(PacketDecoder.parseGatewayID("a1b2c3d4") == nil)
+    }
+
+    @Test
     func `decrypts an encrypted packet using the channel key + decryptor`() throws {
         let inner = dataMessage(port: .positionApp, payload: [0xAA, 0xBB])
         let innerBytes = try [UInt8](inner.serializedData())
