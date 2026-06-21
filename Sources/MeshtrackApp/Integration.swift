@@ -130,13 +130,19 @@ actor KeychainChannelManager: ChannelKeyManaging {
     private let store: MeshStore
     private static let registryKey = "channel_registry"
 
+    /// Set once we've seeded (or attempted to seed) the out-of-the-box default
+    /// channel, so subsequent reads over an empty registry never re-seed — in
+    /// particular after the operator deletes the default channel this run.
+    private var didSeedDefault = false
+
     init(keys: KeychainKeyStore = KeychainKeyStore(), store: MeshStore) {
         self.keys = keys
         self.store = store
     }
 
     func channels() async throws -> [ChannelEntry] {
-        try await registry().map {
+        try await seedDefaultChannelIfNeeded()
+        return try await registry().map {
             ChannelEntry(
                 name: $0.name, hash: $0.hash, kind: $0.kind,
                 hasKey: keys.key(forChannelHash: $0.hash) != nil
@@ -168,6 +174,31 @@ actor KeychainChannelManager: ChannelKeyManaging {
 
     func clearKey(forChannelHash hash: UInt32) async throws {
         try keys.removeKey(forChannelHash: hash)
+    }
+
+    // MARK: First-run seeding (consistent with the Channels tab's in-VM seed)
+
+    /// On first read over an empty registry, register the default **MediumFast**
+    /// channel keyed with the well-known `"AQ=="` default PSK so the live app
+    /// shows/decodes the public channel out of the box — not only after the
+    /// operator opens Settings. Idempotent: guarded by `didSeedDefault` so it
+    /// never re-runs (deleting the default this run does not resurrect it), and a
+    /// no-op when the operator already has any channels. Reuses the same public
+    /// constants + `ChannelKeyMath` as `ChannelsSettingsViewModel`, so the two
+    /// seeding paths agree on name/hash/kind/PSK and never collide.
+    private func seedDefaultChannelIfNeeded() async throws {
+        guard !didSeedDefault else { return }
+        didSeedDefault = true
+        guard try await registry().isEmpty else { return }
+
+        // The defaults live on the (main-actor) settings VM; read them there so the
+        // two seeding paths share one source of truth for name/kind.
+        let (name, kind) = await MainActor.run {
+            (ChannelsSettingsViewModel.defaultChannelName, ChannelsSettingsViewModel.defaultChannelKind)
+        }
+        let hash = ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+        try await save([StoredChannel(name: name, hash: hash, kind: kind)])
+        try keys.store(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
     }
 
     // MARK: Registry (non-secret) persisted as JSON in app_config
