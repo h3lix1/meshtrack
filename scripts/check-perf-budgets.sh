@@ -4,5 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "ℹ️  performance budgets are defined from Phase 1; skipping (see scoreboard.json)"
+# The decode-throughput budget is enforced as a unit test (DecodePerfTests, run by
+# `make test`); p95 query-latency budgets land with the query layer. This gate is
+# the human-facing reminder — the hard enforcement is the test + scoreboard.json.
+echo "ℹ️  decode-throughput budget enforced via DecodePerfTests; p95 query budget TBD"
 exit 0

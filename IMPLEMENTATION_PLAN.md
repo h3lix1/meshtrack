@@ -94,6 +94,6 @@ green; flag off by default.
 - [ ] Observability dashboard (ingestion lag, transport health)
 - [ ] App sandbox + entitlements (serial/BLE/network/notifications); code signing + notarization
 - [ ] Export/backup; DocC docs; ADRs in `/docs/adr`
-- [ ] Performance budgets finalized; scoreboard ratcheted
+- [x] Performance budgets: decode-throughput gate (DecodePerfTests, ≥ 5000 msgs/sec) wired into make verify + scoreboard; coverage floor ratcheted 70→80
 
 **Done when:** signed/notarized build; all budgets met; docs complete.
