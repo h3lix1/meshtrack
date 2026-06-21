@@ -22,6 +22,7 @@
 //     MESHTRACK_MQTT_TLS=1 MESHTRACK_MQTT_TOPIC=msh/US/bayarea/2/e/# swift run MeshtrackApp
 
 import App
+import AppKit
 import Crypto
 import Domain
 import Foundation
@@ -46,6 +47,12 @@ struct MeshtrackApp: App {
     /// The live theme applied across the app's chrome; seeded from the saved
     /// `AppSettings.themeID` and updated when the General picker selects a preset.
     @State private var themeController = ThemeController()
+
+    /// Promotes the process to a regular foreground GUI app on launch — see
+    /// `MeshtrackAppDelegate`. Required because `swift run MeshtrackApp` starts a bare
+    /// executable, which macOS otherwise treats as a background/accessory process
+    /// (no menu bar, keyboard focus stuck on the launching terminal).
+    @NSApplicationDelegateAdaptor(MeshtrackAppDelegate.self) private var appDelegate
 
     @Environment(\.openSettings) private var openSettings
 
@@ -293,5 +300,18 @@ struct ConnectingOverlay: View {
         }
         .padding(28)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// Promotes the bare SwiftPM executable to a regular foreground GUI app. Launched via
+/// `swift run MeshtrackApp` the process starts as a background/accessory app: no menu
+/// bar and keyboard focus stays with the launching terminal. Setting the activation
+/// policy to `.regular` and activating gives it the standard menu bar (incl. the ⌘,
+/// Settings item) and moves keyboard focus to the app window.
+@MainActor
+final class MeshtrackAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
     }
 }
