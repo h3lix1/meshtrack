@@ -22,6 +22,7 @@ public struct IngestSummary: Sendable, Equatable {
     public var telemetryPointsRecorded = 0
     public var positionFixesRecorded = 0
     public var messagesRecorded = 0
+    public var nodeInfoRecorded = 0
     public var extractionsDeduped = 0
     public init() {}
 }
@@ -106,6 +107,8 @@ public struct IngestPipeline: Sendable {
             if try await extractMessage(packet, channelName: Self.channelName(from: frame.topic)) {
                 summary.messagesRecorded += 1
             }
+        case .nodeInfo:
+            if try await extractNodeInfo(packet, node: node) { summary.nodeInfoRecorded += 1 }
         default:
             break
         }
@@ -188,6 +191,67 @@ public struct IngestPipeline: Sendable {
             precision_bits: position.precisionBits != 0 ? Int(position.precisionBits) : nil
         ))
         return true
+    }
+
+    /// Decode a `NODEINFO_APP` payload (a `User` protobuf) and fill in the node's
+    /// identity: `short_name`, `long_name`, `hexid`, and `hw_model`/`role` when the
+    /// node advertises them. Fetch-merge-upsert so we never clobber ownership flags
+    /// (`is_mine`/`is_managed`), `node_class`, or the `first_seen_at`/`last_heard_at`
+    /// liveness `markHeard` already maintains. Empty names and an `.unset` hw model
+    /// are left untouched (a sparse NODEINFO must not erase a previously-known name);
+    /// `role` is always reflected since NODEINFO always advertises one (CLIENT is the
+    /// firmware default). Malformed bytes are skipped, never fatal — matching the
+    /// telemetry/position handling. Returns whether a node row was updated.
+    private func extractNodeInfo(_ packet: DecodedPacket, node: Int64) async throws -> Bool {
+        guard let user = try? User(serializedBytes: Data(packet.payload)) else { return false }
+        // `markHeard` ran first, so the row exists; fall back to a fresh record if not.
+        let t = packet.rxTime.nanosecondsSinceEpoch
+        var record = try await store.fetchNode(nodeNum: node)
+            ?? NodeRecord(node_num: node, first_seen_at: t, last_heard_at: t)
+
+        if !user.shortName.isEmpty { record.short_name = user.shortName }
+        if !user.longName.isEmpty { record.long_name = user.longName }
+        if !user.id.isEmpty { record.hexid = user.id }
+        if user.hwModel != .unset { record.hw_model = Self.hardwareModelName(user.hwModel) }
+        // Role always carries a value in NODEINFO (CLIENT is the firmware default).
+        record.role = Self.roleName(user.role)
+
+        try await store.upsertNode(record)
+        return true
+    }
+
+    /// Firmware (proto) names for `Config.DeviceConfig.Role`, keyed by raw value.
+    /// An explicit table (rather than reflection) keeps the SCREAMING_SNAKE_CASE the
+    /// App's role inference parses stable across SwiftProtobuf versions and correct
+    /// for the default `.client`, which proto3 JSON would otherwise omit.
+    private static let roleNames: [Int: String] = [
+        0: "CLIENT", 1: "CLIENT_MUTE", 2: "ROUTER", 3: "ROUTER_CLIENT", 4: "REPEATER",
+        5: "TRACKER", 6: "SENSOR", 7: "TAK", 8: "CLIENT_HIDDEN", 9: "LOST_AND_FOUND",
+        10: "TAK_TRACKER", 11: "ROUTER_LATE", 12: "CLIENT_BASE"
+    ]
+
+    /// The firmware (proto) name of a device role — e.g. `ROUTER`, `CLIENT_MUTE`.
+    private static func roleName(_ role: Config.DeviceConfig.Role) -> String {
+        roleNames[role.rawValue] ?? "UNRECOGNIZED_\(role.rawValue)"
+    }
+
+    /// The firmware (proto) name of a hardware model — e.g. `HELTEC_V3`,
+    /// `SEEED_XIAO_S3` — which the App's chip-family inference parses. The model set
+    /// is large and evolving, so we read the proto name from the message's JSON
+    /// (where SwiftProtobuf renders enums by proto name), falling back to the Swift
+    /// case name. `.unset` is filtered by the caller, so a present value is always
+    /// non-default and therefore appears in JSON. Never throws.
+    private static func hardwareModelName(_ model: HardwareModel) -> String {
+        let fallback = String(describing: model)
+        var user = User()
+        user.hwModel = model
+        guard let data = try? user.jsonUTF8Data(),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = object["hwModel"] as? String, !name.isEmpty
+        else {
+            return fallback
+        }
+        return name
     }
 
     /// Decode a `TEXT_MESSAGE_APP` payload (UTF-8 text) into a `message` row
