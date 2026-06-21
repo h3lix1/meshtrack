@@ -113,7 +113,7 @@ let package = Package(
         .testTarget(name: "ScenarioTests", dependencies: ["Scenario"], swiftSettings: strict),
         .testTarget(
             name: "IngestTests",
-            dependencies: ["Ingest", "Transport", "Persistence", "Domain"],
+            dependencies: ["Ingest", "Transport", "Persistence", "Domain", "MeshProtos"],
             swiftSettings: strict
         ),
         .testTarget(name: "CryptoTests", dependencies: ["Crypto", "Domain"], swiftSettings: strict),
