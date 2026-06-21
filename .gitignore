@@ -4,6 +4,9 @@
 *.xcodeproj
 DerivedData/
 
+# Built app bundle (assembled by `make app` / scripts/make-app.sh)
+*.app/
+
 # Coverage / profiling
 *.profraw
 *.profdata
