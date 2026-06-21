@@ -37,6 +37,9 @@ struct MeshtrackApp: App {
     private let store: MeshStore
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
+    /// The persisted data-source selection (MQTT broker vs locally-attached node).
+    /// Non-secret; `UserDefaults`-backed so broker persistence stays untouched.
+    private let dataSourceStore: any DataSourceStore
 
     /// The settings window's tab registry, populated eagerly in `init` (before the
     /// Settings window first renders) so the initially-selected tab shows its content.
@@ -59,8 +62,10 @@ struct MeshtrackApp: App {
         self.store = store
         let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
         let credentials: any CredentialStore = KeychainCredentialStore()
+        let dataSources: any DataSourceStore = UserDefaultsDataSourceStore()
         configGateway = gateway
         credentialStore = credentials
+        dataSourceStore = dataSources
 
         // Register the Settings tabs EAGERLY, before the Settings window first
         // renders. (Doing it in `.onAppear` resolved the initially-selected tab
@@ -68,8 +73,10 @@ struct MeshtrackApp: App {
         let themeController = ThemeController()
         let model = SettingsModel()
         Self.registerTabs(
-            on: model, gateway: gateway, credentials: credentials,
-            store: store, themeController: themeController
+            on: model,
+            ports: ConfigPorts(gateway: gateway, credentials: credentials, dataSources: dataSources),
+            store: store,
+            themeController: themeController
         )
         _settingsModel = State(initialValue: model)
         _themeController = State(initialValue: themeController)
@@ -104,6 +111,7 @@ struct MeshtrackApp: App {
                 store: store,
                 gateway: configGateway,
                 credentials: credentialStore,
+                dataSources: dataSourceStore,
                 openConnectionSettings: openConnectionSettings
             )
             .frame(minWidth: 1100, minHeight: 720)
@@ -139,16 +147,16 @@ struct MeshtrackApp: App {
     @MainActor
     private static func registerTabs(
         on model: SettingsModel,
-        gateway: any ConfigGateway,
-        credentials: any CredentialStore,
+        ports: ConfigPorts,
         store: MeshStore,
         themeController: ThemeController
     ) {
         model.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
-                gateway: gateway,
-                credentials: credentials,
-                test: { await probeBrokerConnection($0, password: $1) }
+                gateway: ports.gateway,
+                credentials: ports.credentials,
+                test: { await probeBrokerConnection($0, password: $1) },
+                dataSourceStore: ports.dataSources
             )))
         }
         model.register(.channels) {
@@ -158,7 +166,7 @@ struct MeshtrackApp: App {
         }
         model.register(.general) {
             AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(
-                gateway: gateway,
+                gateway: ports.gateway,
                 onThemeSelected: { themeController.apply($0) }
             )))
         }
@@ -169,6 +177,16 @@ struct MeshtrackApp: App {
         }
         model.register(.about) { AnyView(AboutSettingsTab()) }
     }
+}
+
+/// The non-secret configuration ports the settings screens + live wiring program
+/// against, bundled so they pass as one argument: the `ConfigGateway` (broker config /
+/// app settings), the `CredentialStore` (the broker password, in Keychain), and the
+/// `DataSourceStore` (the MQTT-vs-local-node selection, in UserDefaults).
+struct ConfigPorts {
+    let gateway: any ConfigGateway
+    let credentials: any CredentialStore
+    let dataSources: any DataSourceStore
 }
 
 /// Holds cross-window navigation state: which Settings tab to show, and whether
@@ -191,6 +209,7 @@ struct ContentView: View {
     let store: MeshStore
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
+    let dataSources: any DataSourceStore
     let openConnectionSettings: () -> Void
 
     @State private var coordinator: LiveCoordinator?
@@ -220,20 +239,28 @@ struct ContentView: View {
         }
     }
 
-    /// Resolve the saved broker config and (re)start the live coordinator. Builds
-    /// the coordinator lazily on first connectable config. Idempotent and
-    /// reconnect-safe: `applyConfig` restarts only when the resolved settings
-    /// change.
+    /// Resolve the saved data source (MQTT broker or a locally-attached node) and
+    /// (re)start the live coordinator. Builds the coordinator lazily on first
+    /// connectable source. Idempotent and reconnect-safe: `applyConfig` restarts only
+    /// when the resolved source changes.
     @MainActor private func resolveAndApply() async {
         defer { resolved = true }
         await seedFromEnvIfNeeded()
-        guard await (try? gateway.loadBrokerConfig())?.isConnectable == true else {
+        // Go live when the active source is connectable: an MQTT broker is configured,
+        // OR a local node is selected with the coordinates it needs.
+        let brokerConfig = try? await gateway.loadBrokerConfig()
+        let connectable = LiveDataSource.resolve(
+            dataSource: dataSources.load(),
+            brokerConfig: brokerConfig,
+            password: { credentials.password(host: $0, username: $1) }
+        ) != nil
+        guard connectable else {
             coordinator?.stop()
             return
         }
         let live = coordinator ?? LiveCoordinator(store: store)
         coordinator = live
-        await live.applyConfig(gateway: gateway, credentials: credentials)
+        await live.applyConfig(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
     }
 
     /// One-time bootstrap: if nothing is saved yet but the legacy `MESHTRACK_MQTT_*`
