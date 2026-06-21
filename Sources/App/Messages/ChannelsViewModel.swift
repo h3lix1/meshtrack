@@ -76,7 +76,10 @@ public struct MessageDisplay: Sendable, Equatable, Identifiable {
 /// A channel and its messages, summarised for the channel list.
 public struct ChannelSummary: Sendable, Equatable, Identifiable {
     /// The channel hash (`MeshPacket.channel`).
-    public var id: Int64 { channel }
+    public var id: Int64 {
+        channel
+    }
+
     public let channel: Int64
     /// Human channel name when known, else a hash-derived label (`#<hex>`).
     public let name: String
@@ -102,7 +105,9 @@ public struct ChannelSummary: Sendable, Equatable, Identifiable {
         messages.last?.rxTime ?? .epoch
     }
 
-    public var messageCount: Int { messages.count }
+    public var messageCount: Int {
+        messages.count
+    }
 }
 
 @Observable
@@ -266,7 +271,7 @@ public final class ChannelsViewModel {
 
     /// A character that may appear inside a mention: a single alphanumeric or
     /// `_` scalar. Mirrors `MeshMessage.mentions`, which scans Unicode scalars.
-    nonisolated private static func isMentionCharacter(_ character: Character) -> Bool {
+    private nonisolated static func isMentionCharacter(_ character: Character) -> Bool {
         guard character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first else {
             return false
         }

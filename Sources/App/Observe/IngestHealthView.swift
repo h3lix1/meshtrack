@@ -57,7 +57,6 @@ public struct IngestHealthView: View {
         .background(ObserveTheme.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
     private var transportCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("TRANSPORTS")
@@ -141,7 +140,9 @@ struct ThroughputSparkline: View {
 
             var line = Path()
             line.move(to: point(0))
-            for index in 1..<samples.count { line.addLine(to: point(index)) }
+            for index in 1 ..< samples.count {
+                line.addLine(to: point(index))
+            }
 
             var area = line
             area.addLine(to: CGPoint(x: size.width, y: size.height))

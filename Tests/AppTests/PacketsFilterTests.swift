@@ -24,7 +24,13 @@ struct PacketsFilterTests {
 
     private var sample: [InspectedPacket] {
         [
-            inspection(from: 0xAA, port: .textMessage, channel: 0, payload: Array("hello world".utf8), sequence: 0),
+            inspection(
+                from: 0xAA,
+                port: .textMessage,
+                channel: 0,
+                payload: Array("hello world".utf8),
+                sequence: 0
+            ),
             inspection(from: 0xBB, port: .telemetry, channel: 8, sequence: 1),
             inspection(from: 0xAA, port: .position, channel: 8, sequence: 2),
             inspection(from: 0xCC, port: .other(99), channel: 0, sequence: 3)

@@ -102,88 +102,85 @@ public enum IngestHealthDerivation {
     /// The ordered metric tiles for the dashboard, each with a qualitative status
     /// driving its tint. This is the single source of truth the view renders.
     public static func metrics(_ health: IngestHealth, now: Instant) -> [HealthMetric] {
-        var tiles: [HealthMetric] = []
+        [
+            lagTile(health, now: now),
+            throughputTile(health, now: now),
+            decodeTile(health),
+            HealthMetric(
+                id: "dedup",
+                label: "DUPES COLLAPSED",
+                value: String(format: "%.0f", dedupRate(health) * 100),
+                unit: "%",
+                status: .good
+            ),
+            countTile(id: "packets", label: "PACKETS", value: "\(health.packetsDecoded)", unit: "decoded"),
+            countTile(id: "messages", label: "MESSAGES", value: "\(health.messagesRecorded)", unit: "text"),
+            countTile(
+                id: "telemetry",
+                label: "TELEMETRY",
+                value: "\(health.telemetryPointsRecorded)",
+                unit: "points"
+            ),
+            transportTile(health)
+        ]
+    }
 
-        // Ingestion lag — the freshness of the feed.
-        if let lag = lagSeconds(health, now: now) {
-            tiles.append(HealthMetric(
-                id: "lag",
-                label: "INGEST LAG",
-                value: formatDuration(lag),
-                unit: "ago",
-                status: lag < 30 ? .good : (lag < 300 ? .warn : .bad)
-            ))
-        } else {
-            tiles.append(HealthMetric(
-                id: "lag", label: "INGEST LAG", value: "—", unit: "no data", status: .neutral
-            ))
+    /// Ingestion lag — the freshness of the feed.
+    private static func lagTile(_ health: IngestHealth, now: Instant) -> HealthMetric {
+        guard let lag = lagSeconds(health, now: now) else {
+            return HealthMetric(id: "lag", label: "INGEST LAG", value: "—", unit: "no data", status: .neutral)
         }
+        return HealthMetric(
+            id: "lag",
+            label: "INGEST LAG",
+            value: formatDuration(lag),
+            unit: "ago",
+            status: lag < 30 ? .good : (lag < 300 ? .warn : .bad)
+        )
+    }
 
-        // Throughput — current sample, falling back to the average.
+    /// Throughput — current sample, falling back to the average.
+    private static func throughputTile(_ health: IngestHealth, now: Instant) -> HealthMetric {
         let current = currentThroughput(health)
         let throughput = current > 0 ? current : (averageThroughput(health, now: now) ?? 0)
-        tiles.append(HealthMetric(
+        return HealthMetric(
             id: "throughput",
             label: "THROUGHPUT",
             value: String(format: "%.1f", throughput),
             unit: "msg/s",
             status: throughput > 0 ? .good : .neutral
-        ))
+        )
+    }
 
-        // Decode success — higher is better.
+    /// Decode success — higher is better.
+    private static func decodeTile(_ health: IngestHealth) -> HealthMetric {
         let success = decodeSuccessRate(health) * 100
-        tiles.append(HealthMetric(
+        return HealthMetric(
             id: "decode",
             label: "DECODE OK",
             value: String(format: "%.1f", success),
             unit: "%",
-            status: health.framesProcessed == 0 ? .neutral : (success >= 95 ? .good : (success >= 80 ? .warn : .bad))
-        ))
+            status: health.framesProcessed == 0
+                ? .neutral : (success >= 95 ? .good : (success >= 80 ? .warn : .bad))
+        )
+    }
 
-        // Dedup rate — how much multi-gateway duplication we collapsed (good).
-        tiles.append(HealthMetric(
-            id: "dedup",
-            label: "DUPES COLLAPSED",
-            value: String(format: "%.0f", dedupRate(health) * 100),
-            unit: "%",
-            status: .good
-        ))
+    /// A plain neutral count tile (packets / messages / telemetry).
+    private static func countTile(id: String, label: String, value: String, unit: String) -> HealthMetric {
+        HealthMetric(id: id, label: label, value: value, unit: unit, status: .neutral)
+    }
 
-        // Raw counts.
-        tiles.append(HealthMetric(
-            id: "packets",
-            label: "PACKETS",
-            value: "\(health.packetsDecoded)",
-            unit: "decoded",
-            status: .neutral
-        ))
-        tiles.append(HealthMetric(
-            id: "messages",
-            label: "MESSAGES",
-            value: "\(health.messagesRecorded)",
-            unit: "text",
-            status: .neutral
-        ))
-        tiles.append(HealthMetric(
-            id: "telemetry",
-            label: "TELEMETRY",
-            value: "\(health.telemetryPointsRecorded)",
-            unit: "points",
-            status: .neutral
-        ))
-
-        // Transport connectivity.
-        let up = connectedTransportCount(health)
+    /// Transport connectivity — how many transports are currently up.
+    private static func transportTile(_ health: IngestHealth) -> HealthMetric {
+        let online = connectedTransportCount(health)
         let total = health.transports.count
-        tiles.append(HealthMetric(
+        return HealthMetric(
             id: "transports",
             label: "TRANSPORTS",
-            value: total > 0 ? "\(up)/\(total)" : "—",
+            value: total > 0 ? "\(online)/\(total)" : "—",
             unit: "up",
-            status: total == 0 ? .neutral : (up == total ? .good : (up > 0 ? .warn : .bad))
-        ))
-
-        return tiles
+            status: total == 0 ? .neutral : (online == total ? .good : (online > 0 ? .warn : .bad))
+        )
     }
 
     /// Compact "12s" / "3m" / "1.2h" duration formatting for the lag tile.

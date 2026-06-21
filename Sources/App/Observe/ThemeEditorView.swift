@@ -103,7 +103,8 @@ public struct ThemeEditorView: View {
 
     private var paletteEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("TRACE PALETTE").font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+            Text("TRACE PALETTE").font(.system(size: 10, weight: .bold)).tracking(1)
+                .foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 ForEach(Array(viewModel.theme.tracePalette.enumerated()), id: \.offset) { index, color in
                     Button { viewModel.removeTraceColor(at: index) } label: {
@@ -130,7 +131,7 @@ public struct ThemeEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("PREVIEW").font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                ForEach(0..<6, id: \.self) { index in
+                ForEach(0 ..< 6, id: \.self) { index in
                     Capsule()
                         .fill(viewModel.theme.traceColor(index))
                         .frame(width: 44, height: 8)
@@ -139,7 +140,8 @@ public struct ThemeEditorView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(viewModel.theme.backgroundColor, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(viewModel.theme.accentColor.opacity(0.4)))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(viewModel.theme.accentColor.opacity(0.4)))
         }
     }
 }
@@ -169,7 +171,8 @@ private struct ThemeColorWell: View {
     /// badly headless) with −/+ step buttons.
     private func channel(_ name: String, value: Binding<Double>, tint: Color) -> some View {
         HStack(spacing: 8) {
-            Text(name).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).frame(width: 12)
+            Text(name).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                .frame(width: 12)
             Button { step(value, by: -0.1) } label: { stepLabel("minus") }.buttonStyle(.plain)
             ChannelBar(fraction: value.wrappedValue, tint: tint)
             Button { step(value, by: 0.1) } label: { stepLabel("plus") }.buttonStyle(.plain)

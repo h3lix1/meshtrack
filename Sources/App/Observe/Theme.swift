@@ -55,11 +55,19 @@ public struct Theme: Codable, Sendable, Equatable, Identifiable {
     }
 
     /// The accent as a SwiftUI colour.
-    public var accentColor: Color { accent.color }
+    public var accentColor: Color {
+        accent.color
+    }
+
     /// The background as a SwiftUI colour.
-    public var backgroundColor: Color { background.color }
+    public var backgroundColor: Color {
+        background.color
+    }
+
     /// The trace palette as SwiftUI colours.
-    public var traceColors: [Color] { tracePalette.map(\.color) }
+    public var traceColors: [Color] {
+        tracePalette.map(\.color)
+    }
 
     /// The trace colour for an index, cycling through the palette. Falls back to
     /// the accent for an empty palette.
@@ -81,7 +89,7 @@ public extension Theme {
             ThemeColor(red: 0.0, green: 0.78, blue: 0.92),
             ThemeColor(red: 0.55, green: 0.36, blue: 0.96),
             ThemeColor(red: 0.96, green: 0.62, blue: 0.16),
-            ThemeColor(red: 0.20, green: 0.84, blue: 0.45),
+            ThemeColor(red: 0.20, green: 0.84, blue: 0.45)
         ]
     )
 
@@ -95,7 +103,7 @@ public extension Theme {
             ThemeColor(red: 0.98, green: 0.45, blue: 0.20),
             ThemeColor(red: 0.95, green: 0.78, blue: 0.10),
             ThemeColor(red: 0.90, green: 0.25, blue: 0.35),
-            ThemeColor(red: 0.55, green: 0.85, blue: 0.95),
+            ThemeColor(red: 0.55, green: 0.85, blue: 0.95)
         ]
     )
 

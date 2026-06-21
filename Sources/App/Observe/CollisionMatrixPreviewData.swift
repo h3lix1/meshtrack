@@ -18,7 +18,7 @@ public enum CollisionMatrixPreviewData {
             CollisionNode(nodeNum: 0x0000_0001, name: "GW-1"),
             CollisionNode(nodeNum: 0x0000_0002, name: "GW-2"),
             CollisionNode(nodeNum: 0xDEAD_BE7F, name: "MOBILE"),
-            CollisionNode(nodeNum: 0xCAFE_F00D, name: "SENSOR"),
+            CollisionNode(nodeNum: 0xCAFE_F00D, name: "SENSOR")
         ]
     }
 

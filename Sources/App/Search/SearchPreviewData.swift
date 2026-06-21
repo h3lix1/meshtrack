@@ -12,7 +12,7 @@ public enum SearchPreviewData {
             SearchViewModel.packetItem(packetID: 4242, fromNum: 0xA1B2_C3D4),
             SearchViewModel.packetItem(packetID: 1001, fromNum: 0x1122_3344),
             SearchViewModel.channelItem(channel: 0, name: "LongFast"),
-            SearchViewModel.channelItem(channel: 1, name: "Ops"),
+            SearchViewModel.channelItem(channel: 1, name: "Ops")
         ]
     }
 

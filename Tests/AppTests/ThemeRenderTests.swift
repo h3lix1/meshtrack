@@ -24,7 +24,8 @@
 
         @Test
         func `theme editor renders for both presets`() {
-            #expect(renderedByteCount(ThemeEditorView(viewModel: ThemeEditorViewModel(theme: .midnight))) > 1000)
+            #expect(renderedByteCount(ThemeEditorView(viewModel: ThemeEditorViewModel(theme: .midnight))) >
+                1000)
             #expect(renderedByteCount(ThemeEditorView(viewModel: ThemeEditorViewModel(theme: .ember))) > 1000)
         }
     }

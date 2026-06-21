@@ -5,7 +5,7 @@
 import SwiftUI
 
 public enum AppSection: String, CaseIterable, Identifiable {
-    case network, nodes, packets, telemetry, alerts, health, fleet
+    case network, nodes, packets, telemetry, analytics, alerts, messages, health, fleet
     public var id: String {
         rawValue
     }
@@ -16,7 +16,9 @@ public enum AppSection: String, CaseIterable, Identifiable {
         case .nodes: "Nodes"
         case .packets: "Packets"
         case .telemetry: "Telemetry"
+        case .analytics: "Analytics"
         case .alerts: "Alerts"
+        case .messages: "Messages"
         case .health: "Health"
         case .fleet: "Fleet Config"
         }
@@ -28,7 +30,9 @@ public enum AppSection: String, CaseIterable, Identifiable {
         case .nodes: "dot.radiowaves.left.and.right"
         case .packets: "doc.text.magnifyingglass"
         case .telemetry: "chart.xyaxis.line"
+        case .analytics: "chart.bar.xaxis"
         case .alerts: "bell.badge"
+        case .messages: "bubble.left.and.bubble.right"
         case .health: "waveform.path.ecg"
         case .fleet: "slider.horizontal.3"
         }

@@ -17,12 +17,16 @@ public enum SearchRanker {
 
     /// Rank `corpus` against `query`, best-first. A blank query returns nothing
     /// (the palette shows its empty state). `limit` caps the result count.
-    public static func rank(query rawQuery: String, in corpus: [SearchItem], limit: Int = 20) -> [SearchResult] {
+    public static func rank(
+        query rawQuery: String,
+        in corpus: [SearchItem],
+        limit: Int = 20
+    ) -> [SearchResult] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return [] }
 
         let results = corpus.compactMap { item -> SearchResult? in
-            let score = self.score(item, query: query)
+            let score = score(item, query: query)
             return score > 0 ? SearchResult(item: item, score: score) : nil
         }
         return Array(results.sorted().prefix(limit))

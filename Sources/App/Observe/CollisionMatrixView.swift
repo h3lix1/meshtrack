@@ -99,7 +99,6 @@ public struct CollisionMatrixView: View {
         .background(ObserveTheme.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
-    @ViewBuilder
     private var shortIDCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("SHORT-ID COLLISIONS")
@@ -163,7 +162,7 @@ struct CollisionHeatmap: View {
                     height: max(0, cellH)
                 )
                 let path = Path(roundedRect: rect, cornerRadius: 2)
-                if bucket.count == 0 {
+                if bucket.nodes.isEmpty {
                     context.fill(path, with: .color(.white.opacity(0.04)))
                 } else {
                     let intensity = Double(bucket.count) / Double(maxCount)

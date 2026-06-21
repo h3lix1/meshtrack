@@ -15,7 +15,9 @@ public struct CollisionNode: Sendable, Equatable, Identifiable {
     public let nodeNum: Int64
     public let name: String
 
-    public var id: Int64 { nodeNum }
+    public var id: Int64 {
+        nodeNum
+    }
 
     public init(nodeNum: Int64, name: String) {
         self.nodeNum = nodeNum
@@ -48,7 +50,9 @@ public struct CollisionBucket: Sendable, Equatable, Identifiable {
     public let byteValue: Int?
     public let nodes: [CollisionNode]
 
-    public var id: String { key }
+    public var id: String {
+        key
+    }
 
     public init(key: String, byteValue: Int?, nodes: [CollisionNode]) {
         self.key = key
@@ -57,10 +61,14 @@ public struct CollisionBucket: Sendable, Equatable, Identifiable {
     }
 
     /// How many nodes fall in this bucket.
-    public var count: Int { nodes.count }
+    public var count: Int {
+        nodes.count
+    }
 
     /// A bucket collides when more than one node shares the key.
-    public var isCollision: Bool { nodes.count > 1 }
+    public var isCollision: Bool {
+        nodes.count > 1
+    }
 }
 
 /// The full collision analysis over a node set.

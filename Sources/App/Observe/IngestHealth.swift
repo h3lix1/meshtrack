@@ -16,7 +16,9 @@ public enum HealthTransport: String, Sendable, CaseIterable, Equatable, Identifi
     case serial
     case ble
 
-    public var id: String { rawValue }
+    public var id: String {
+        rawValue
+    }
 
     /// Human label for the dashboard.
     public var label: String {
@@ -39,7 +41,9 @@ public struct TransportHealth: Sendable, Equatable, Identifiable {
     /// when we have never seen one.
     public let lastFrameAt: Instant?
 
-    public var id: String { transport.id }
+    public var id: String {
+        transport.id
+    }
 
     public init(
         transport: HealthTransport,
