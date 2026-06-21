@@ -30,10 +30,15 @@ public struct ConnectionSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                brokerSection
-                securitySection
-                topicsSection
-                credentialsSection
+                DataSourcePicker(viewModel: viewModel)
+                if viewModel.dataSourceKind == .mqtt {
+                    brokerSection
+                    securitySection
+                    topicsSection
+                    credentialsSection
+                } else {
+                    LocalNodeFields(viewModel: viewModel)
+                }
                 actionsSection
             }
             .padding(22)
@@ -52,8 +57,9 @@ public struct ConnectionSettingsView: View {
                     .foregroundStyle(Palette.accent)
                 Text("Connection").font(.system(size: 18, weight: .bold))
             }
-            Text("MQTT broker the collector subscribes to. Credentials are stored in "
-                + "the Keychain — never in the database or logs.")
+            Text("Where the live feed comes from: an MQTT broker, or a locally-attached "
+                + "node over USB-serial or BLE. Credentials are stored in the Keychain — "
+                + "never in the database or logs.")
                 .font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -302,7 +308,11 @@ public struct ConnectionSettingsView: View {
                 }(),
                 test: { config, _ in
                     .success(detail: "\(config.topics.count) topic(s) subscribed")
-                }
+                },
+                dataSourceStore: InMemoryDataSourceStore(),
+                serialDevices: StaticSerialDeviceEnumerator(
+                    devices: ["/dev/cu.usbmodem3101", "/dev/cu.Bluetooth-Incoming-Port"]
+                )
             )
         )
         .frame(width: 560, height: 760)
