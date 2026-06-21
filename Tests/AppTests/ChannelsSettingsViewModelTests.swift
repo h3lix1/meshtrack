@@ -307,3 +307,51 @@ struct ChannelsSettingsViewModelTests {
         #expect(vm.capacityLabel(for: .mqtt) == "2 channels")
     }
 }
+
+/// Auto-derivation of the Meshtastic channel hash from the channel name (Phase 9,
+/// T-Channels). A separate suite so the main settings suite stays under the body
+/// size cap while these focus on the name → on-wire-hash mapping.
+@Suite("ChannelHashDerivation")
+@MainActor
+struct ChannelHashDerivationTests {
+    private func makeVM() -> ChannelsSettingsViewModel {
+        ChannelsSettingsViewModel(keys: InMemoryChannelKeyManager())
+    }
+
+    @Test
+    func `LongFast and MediumFast derive their well-known Meshtastic hashes`() {
+        // The public channels hash (name ⊕ index-1 default PSK) to the bytes the
+        // firmware advertises: LongFast → 0x08, MediumFast → 0x1F.
+        #expect(ChannelKeyMath.channelHash(name: "LongFast", psk: ChannelKeyMath.defaultPSK) == 0x08)
+        #expect(ChannelKeyMath.channelHash(name: "MediumFast", psk: ChannelKeyMath.defaultPSK) == 0x1F)
+    }
+
+    @Test
+    func `derivedHash previews the name-only hash and is nil for an empty name`() {
+        let vm = makeVM()
+        #expect(vm.derivedHash(forName: "LongFast") == 0x08)
+        #expect(vm.derivedHash(forName: "MediumFast") == 0x1F)
+        // Whitespace is trimmed before deriving, matching the add path.
+        #expect(vm.derivedHash(forName: "  LongFast  ") == 0x08)
+        // Nothing to preview until the operator types a name.
+        #expect(vm.derivedHash(forName: "") == nil)
+        #expect(vm.derivedHash(forName: "   ") == nil)
+    }
+
+    @Test
+    func `adding by name only derives the Meshtastic hash from the name`() async throws {
+        let vm = makeVM()
+        // No hash text → the VM derives it from the name with the default PSK.
+        await vm.addChannel(name: "MediumFast", kind: .mqtt)
+        #expect(vm.lastError == nil)
+        let entry = try #require(vm.mqttChannels.first)
+        #expect(entry.name == "MediumFast")
+        #expect(entry.hash == 0x1F) // well-known MediumFast hash
+        #expect(entry.hasKey == false) // starts keyless until a PSK is set
+
+        // And LongFast lands on its own well-known hash, not a collision.
+        await vm.addChannel(name: "LongFast", kind: .mqtt)
+        #expect(vm.lastError == nil)
+        #expect(vm.mqttChannels.map(\.hash) == [0x1F, 0x08])
+    }
+}
