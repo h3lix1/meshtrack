@@ -43,6 +43,9 @@ struct MeshtrackApp: App {
     /// window always renders. About is owned here.
     @State private var settingsModel = SettingsModel()
     @State private var root = RootCoordinator()
+    /// The live theme applied across the app's chrome; seeded from the saved
+    /// `AppSettings.themeID` and updated when the General picker selects a preset.
+    @State private var themeController = ThemeController()
 
     @Environment(\.openSettings) private var openSettings
 
@@ -86,6 +89,13 @@ struct MeshtrackApp: App {
             )
             .frame(minWidth: 1100, minHeight: 720)
             .preferredColorScheme(.dark)
+            .appTheme(themeController.theme)
+            .task {
+                // Init is synchronous, so resolve the saved theme once on launch.
+                if let settings = try? await configGateway.loadAppSettings() {
+                    themeController.apply(ThemeController.resolve(themeID: settings.themeID))
+                }
+            }
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -94,6 +104,7 @@ struct MeshtrackApp: App {
         Settings {
             SettingsShellView(model: settingsModel, tab: root.settingsTab)
                 .preferredColorScheme(.dark)
+                .appTheme(themeController.theme)
                 .onAppear { registerSettingsTabs() }
         }
     }
@@ -122,6 +133,7 @@ struct MeshtrackApp: App {
         let gateway = configGateway
         let credentials = credentialStore
         let store = store
+        let themeController = themeController
 
         settingsModel.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
@@ -135,7 +147,10 @@ struct MeshtrackApp: App {
         // tracked as a follow-up. Placeholder until then.
         settingsModel.register(.channels) { AnyView(PlaceholderSettingsTab(tab: .channels)) }
         settingsModel.register(.general) {
-            AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(gateway: gateway)))
+            AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(
+                gateway: gateway,
+                onThemeSelected: { themeController.apply($0) }
+            )))
         }
         settingsModel.register(.alerts) {
             AnyView(AlertsConfigView(viewModel: AlertsConfigViewModel(
