@@ -38,26 +38,32 @@
         }
 
         public var body: some View {
-            TimelineView(.animation) { timeline in
-                let clock = timeline.date.timeIntervalSinceReferenceDate
-                ZStack(alignment: .topTrailing) {
-                    MeshMapView(nodes: nodes, state: mapState)
+            ZStack(alignment: .topTrailing) {
+                // The MapKit substrate updates only when the node set changes — it stays
+                // OUTSIDE the TimelineView so it isn't re-created every animation frame
+                // (which spun updateNSView → state mutation → a view-graph beachball).
+                MeshMapView(nodes: nodes, state: mapState)
+
+                // Only the animated trace overlay needs the per-frame clock.
+                TimelineView(.animation) { timeline in
                     TraceOverlayCanvas(
                         nodes: nodes,
                         traces: traces,
                         state: mapState,
-                        clock: clock,
+                        clock: timeline.date.timeIntervalSinceReferenceDate,
                         hopDuration: settings.hopDuration,
                         mode: settings.mode,
                         latencyMillis: latencyMillis
                     )
-                    VizSettingsPanel(
-                        settings: settings,
-                        traces: traces,
-                        relayCandidateCount: relayCandidateCount
-                    )
-                    .padding(16)
                 }
+                .allowsHitTesting(false)
+
+                VizSettingsPanel(
+                    settings: settings,
+                    traces: traces,
+                    relayCandidateCount: relayCandidateCount
+                )
+                .padding(16)
             }
         }
     }

@@ -103,8 +103,12 @@
             if fitToFleet, !desired.isEmpty, initialFit || changed {
                 fit(map: map, to: desired)
             }
-            // Publish a fresh projection so the overlay matches the current camera.
-            context.coordinator.publishProjection()
+            // Publish the projection on the NEXT main-actor turn — NEVER synchronously
+            // here. Mutating the observed `MeshMapState` inside `updateNSView` re-enters
+            // the SwiftUI update and spins the view graph (a startup beachball). The
+            // `fit()` above also triggers the region-change delegate, which publishes.
+            let coordinator = context.coordinator
+            Task { @MainActor in coordinator.publishProjection() }
         }
 
         private func fit(map: MKMapView, to annotations: [MeshNodeAnnotation]) {
