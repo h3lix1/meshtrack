@@ -48,9 +48,20 @@ public final class NetworkViewModel {
     }
 
     /// Feed one decoded packet into the live trace animation.
+    ///
+    /// The arrival is stamped with the current animation-clock instant
+    /// (`Date.timeIntervalSinceReferenceDate`, the same clock the overlay's
+    /// `TimelineView(.animation)` ticks on), so each new packet's hops animate from
+    /// source toward the gateway starting now (Task 2).
     public func ingest(_ packet: DecodedPacket) {
-        collector.ingest(packet)
+        collector.ingest(packet, arrivalClock: Self.animationClockNow())
         traces = collector.traces(positions: positions)
+    }
+
+    /// The current value of the overlay's animation clock: seconds since the reference
+    /// date, matching `TimelineView(.animation)`'s `date.timeIntervalSinceReferenceDate`.
+    nonisolated static func animationClockNow() -> Double {
+        Date().timeIntervalSinceReferenceDate
     }
 
     nonisolated static func displayName(_ record: NodeRecord) -> String {

@@ -65,6 +65,9 @@ public struct TraceRenderer {
             line.addLine(to: tip)
             let dash: [CGFloat] = edge.kind == .guessed ? [7, 6] : []
 
+            // Drawn portion (source → tip): a soft glow under a crisp core. The line
+            // grows from the source toward the gateway as `fraction` advances, so the
+            // packet visibly travels along the hop (Task 2).
             context.drawLayer { layer in
                 layer.addFilter(.blur(radius: 7))
                 layer.stroke(
@@ -73,9 +76,15 @@ public struct TraceRenderer {
                     style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: dash)
                 )
             }
+            // A trailing fade behind the moving head: the line is brightest at the tip
+            // (the "comet" head) and fades back toward the source.
             context.stroke(
                 line,
-                with: .color(color),
+                with: .linearGradient(
+                    Gradient(colors: [color.opacity(0.25), color]),
+                    startPoint: start,
+                    endPoint: tip
+                ),
                 style: StrokeStyle(
                     lineWidth: edge.kind == .guessed ? 1.6 : 2.8,
                     lineCap: .round,
@@ -83,11 +92,10 @@ public struct TraceRenderer {
                 )
             )
 
+            // The moving spark head: a bright blurred halo + a hot white core that
+            // rides the tip while the edge is still drawing.
             if fraction < 1, let head = TraceTiming.headPoint(from: start, to: end, progress: fraction) {
-                context.drawLayer { layer in
-                    layer.addFilter(.blur(radius: 4))
-                    layer.fill(circle(at: head, radius: 5), with: .color(.white))
-                }
+                drawSparkHead(at: head, color: color, in: &context)
             }
         }
         if let badge = badgePoint(trace, projection: projection) {
@@ -97,6 +105,19 @@ public struct TraceRenderer {
                 color: color,
                 in: context
             )
+        }
+    }
+
+    /// The moving "spark" at the head of a still-drawing edge: a coloured halo with a
+    /// hot white core (Task 2).
+    private func drawSparkHead(at head: CGPoint, color: Color, in context: inout GraphicsContext) {
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 6))
+            layer.fill(circle(at: head, radius: 7), with: .color(color))
+        }
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 2))
+            layer.fill(circle(at: head, radius: 3.5), with: .color(.white))
         }
     }
 
