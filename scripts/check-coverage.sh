@@ -18,7 +18,7 @@ if [[ -z "${PROFDATA:-}" || -z "${XCTEST:-}" ]]; then
 fi
 
 EXE="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
-CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine Sources/Provisioning Sources/Scenario Sources/Ingest Sources/Crypto Sources/Logging)
+CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine Sources/Provisioning Sources/Scenario Sources/Ingest Sources/Crypto Sources/Logging Sources/Firmware)
 
 # Hardware-I/O adapters (serial termios, CoreBluetooth radio) carry no
 # unit-testable logic — the testable framing lives in SerialFramer — so they are
