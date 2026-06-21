@@ -165,39 +165,8 @@ public final class ConnectionSettingsViewModel {
 
 // MARK: - In-file fakes (tests + preview)
 
-/// In-memory `ConfigGateway` for tests and previews. Thread-safe via a Mutex so it
-/// is `Sendable` across the actor boundary.
-public final class InMemoryConfigGateway: ConfigGateway {
-    private let state = Mutex<State>(State())
-
-    private struct State {
-        var broker: BrokerConfig?
-        var settings: AppSettings = .default
-    }
-
-    public init(broker: BrokerConfig? = nil, settings: AppSettings = .default) {
-        state.withLock {
-            $0.broker = broker
-            $0.settings = settings
-        }
-    }
-
-    public func loadBrokerConfig() async throws -> BrokerConfig? {
-        state.withLock { $0.broker }
-    }
-
-    public func saveBrokerConfig(_ config: BrokerConfig) async throws {
-        state.withLock { $0.broker = config }
-    }
-
-    public func loadAppSettings() async throws -> AppSettings {
-        state.withLock { $0.settings }
-    }
-
-    public func saveAppSettings(_ settings: AppSettings) async throws {
-        state.withLock { $0.settings = settings }
-    }
-}
+// `InMemoryConfigGateway` is the shared fake in `SettingsFakes.swift` (one per
+// module); this file owns only the credential-store fake below.
 
 /// In-memory `CredentialStore` for tests and previews. Keyed by host + username so
 /// multiple brokers/accounts coexist, exactly like the Keychain adapter.

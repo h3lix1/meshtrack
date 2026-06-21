@@ -22,15 +22,18 @@
 //     MESHTRACK_MQTT_TLS=1 MESHTRACK_MQTT_TOPIC=msh/US/bayarea/2/e/# swift run MeshtrackApp
 
 import App
+import Crypto
 import Domain
+import Foundation
+import Persistence
 import SwiftUI
 
 @main
 struct MeshtrackApp: App {
-    /// The config + credential stores. LEAD: replace with MeshStore/Keychain at
-    /// integration (see `InMemoryConfigStore.swift`); the live wiring already
-    /// programs to the `ConfigGateway` / `CredentialStore` ports, so only these two
-    /// constructions change.
+    /// The shared on-disk store: the `ConfigGateway` (settings persist across
+    /// launches) AND the live-ingest store. Secrets never touch it — the broker
+    /// password lives in the Keychain via `CredentialStore` (SPEC §2.5).
+    private let store: MeshStore
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
 
@@ -44,27 +47,39 @@ struct MeshtrackApp: App {
     @Environment(\.openSettings) private var openSettings
 
     init() {
-        // Seed the in-memory stores from the env fallback (if present) so the
-        // saved-config path can take over uniformly. LEAD: swap for the durable
-        // concretes — the env seeding then becomes a no-op bootstrap for `meshtrackd`.
-        let env = LiveBrokerSettings.fromEnvironment()
-        let gateway = InMemoryConfigGateway(broker: env?.makeBrokerConfig())
-        let credentials: InMemoryCredentialStore
-        if let env, let password = env.password {
-            credentials = InMemoryCredentialStore(
-                seed: .init(host: env.host, username: env.username, password: password)
-            )
-        } else {
-            credentials = InMemoryCredentialStore()
-        }
-        configGateway = gateway
-        credentialStore = credentials
+        let store = Self.openStore()
+        self.store = store
+        configGateway = store // MeshStore conforms to ConfigGateway (Persistence)
+        credentialStore = KeychainCredentialStore()
+    }
+
+    /// Open the durable on-disk store under Application Support, falling back to an
+    /// in-memory store (config won't persist, but the app still runs) if the disk is
+    /// unavailable. Only an utterly-unopenable SQLite — which means the app cannot
+    /// function — is fatal.
+    private static func openStore() -> MeshStore {
+        if let store = try? openOnDisk() { return store }
+        if let memory = try? MeshStore(DatabaseConnection.inMemory()) { return memory }
+        fatalError("Meshtrack: cannot open a database (on-disk or in-memory)")
+    }
+
+    /// Open the store at `~/Library/Application Support/Meshtrack/meshtrack.sqlite`,
+    /// creating the directory if needed.
+    private static func openOnDisk() throws -> MeshStore {
+        let manager = FileManager.default
+        let dir = try manager.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        ).appendingPathComponent("Meshtrack", isDirectory: true)
+        try manager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("meshtrack.sqlite").path
+        return try MeshStore(DatabaseConnection.onDisk(path: path))
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView(
                 root: root,
+                store: store,
                 gateway: configGateway,
                 credentials: credentialStore,
                 openConnectionSettings: openConnectionSettings
@@ -104,10 +119,30 @@ struct MeshtrackApp: App {
     private func registerSettingsTabs() {
         guard !settingsTabsRegistered else { return }
         settingsTabsRegistered = true
-        settingsModel.register(.about) { AnyView(AboutSettingsTab()) }
-        for tab in [SettingsTab.connection, .channels, .general, .alerts] {
-            settingsModel.register(tab) { AnyView(PlaceholderSettingsTab(tab: tab)) }
+        let gateway = configGateway
+        let credentials = credentialStore
+        let store = store
+
+        settingsModel.register(.connection) {
+            AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
+                gateway: gateway,
+                credentials: credentials,
+                test: { await probeBrokerConnection($0, password: $1) }
+            )))
         }
+        // Channels: the screen + Keychain key store exist; wiring its (synchronous)
+        // ChannelKeyManaging port to a persistent registry needs an async revision —
+        // tracked as a follow-up. Placeholder until then.
+        settingsModel.register(.channels) { AnyView(PlaceholderSettingsTab(tab: .channels)) }
+        settingsModel.register(.general) {
+            AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(gateway: gateway)))
+        }
+        settingsModel.register(.alerts) {
+            AnyView(AlertsConfigView(viewModel: AlertsConfigViewModel(
+                rules: MeshStoreAlertRuleStore(store: store)
+            )))
+        }
+        settingsModel.register(.about) { AnyView(AboutSettingsTab()) }
     }
 }
 
@@ -128,6 +163,7 @@ final class RootCoordinator {
 /// config on launch and whenever the saved config changes (reconnect-on-change).
 struct ContentView: View {
     let root: RootCoordinator
+    let store: MeshStore
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
     let openConnectionSettings: () -> Void
@@ -165,19 +201,26 @@ struct ContentView: View {
     /// change.
     @MainActor private func resolveAndApply() async {
         defer { resolved = true }
-        guard (try? await gateway.loadBrokerConfig())?.isConnectable == true else {
+        await seedFromEnvIfNeeded()
+        guard await (try? gateway.loadBrokerConfig())?.isConnectable == true else {
             coordinator?.stop()
             return
         }
-        let live: LiveCoordinator
-        if let coordinator {
-            live = coordinator
-        } else {
-            guard let made = try? LiveCoordinator() else { return }
-            live = made
-            coordinator = made
-        }
+        let live = coordinator ?? LiveCoordinator(store: store)
+        coordinator = live
         await live.applyConfig(gateway: gateway, credentials: credentials)
+    }
+
+    /// One-time bootstrap: if nothing is saved yet but the legacy `MESHTRACK_MQTT_*`
+    /// env fallback is present, persist it into the store (+ Keychain) so the saved-
+    /// config path takes over uniformly — handy for `meshtrackd`/CI/one-shot smokes.
+    @MainActor private func seedFromEnvIfNeeded() async {
+        guard await (try? gateway.loadBrokerConfig()) == nil,
+              let env = LiveBrokerSettings.fromEnvironment() else { return }
+        try? await gateway.saveBrokerConfig(env.makeBrokerConfig())
+        if let password = env.password {
+            try? credentials.setPassword(password, host: env.host, username: env.username)
+        }
     }
 }
 

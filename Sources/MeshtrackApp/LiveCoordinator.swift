@@ -32,7 +32,7 @@ import Transport
 /// The shell-facing connection state. Carries only the broker host — never any
 /// credentials — so the status indicator can show "connecting to mqtt.bayme.sh"
 /// without ever surfacing a secret.
-enum LiveConnectionStatus: Equatable, Sendable {
+enum LiveConnectionStatus: Equatable {
     case offline
     case connecting(host: String)
     case connected(host: String)
@@ -58,7 +58,9 @@ final class LiveCoordinator {
     private(set) var status: LiveConnectionStatus = .offline
 
     /// The broker host, for the "connecting…" affordance (never logs credentials).
-    var brokerHost: String { status.host ?? "" }
+    var brokerHost: String {
+        status.host ?? ""
+    }
 
     /// The shared in-memory store; exposed so the shell can wire the store-backed
     /// section view models (nodes / telemetry / analytics / alerts / messages).
@@ -82,9 +84,9 @@ final class LiveCoordinator {
     /// coordinator exists before any broker is configured (first-run/onboarding).
     /// `refreshInterval` is the cadence of the slow `loadNodes()` loop that surfaces
     /// newly-positioned nodes.
-    init(refreshInterval: Duration = .seconds(3)) throws {
+    init(store: MeshStore, refreshInterval: Duration = .seconds(3)) {
         self.refreshInterval = refreshInterval
-        store = try MeshStore(DatabaseConnection.inMemory())
+        self.store = store
         viewModel = NetworkViewModel(store: store)
     }
 
