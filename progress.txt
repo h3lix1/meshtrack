@@ -17,3 +17,6 @@
 2026-06-20 P1 feat(transport): SerialFramer codec (tested) + serial/BLE adapters (best-effort I/O) [agent, integrated]
 2026-06-20 P1 feat(logging): secret-redacting structured logger (redact + RedactingLogger) [agent, integrated]
 2026-06-20 P1 chore(coverage): exclude hardware-I/O adapters (SerialAdapter/BLEAdapter) from the metric
+2026-06-20 P1 feat(ingest): PacketDecoder (ServiceEnvelope→DecodedPacket, decrypt-aware) + DecodedPacket/MeshPort
+2026-06-20 P1 fix(persistence): observation append-only provenance (relax UNIQUE to packet+node+gateway+transport)
+2026-06-20 P1 feat(ingest): decode→provenance→dedup→persist pipeline + telemetry/position extraction (counted once)
