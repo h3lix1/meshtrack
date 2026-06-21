@@ -21,6 +21,7 @@ public struct IngestSummary: Sendable, Equatable {
     public var duplicateDeliveriesSkipped = 0
     public var telemetryPointsRecorded = 0
     public var positionFixesRecorded = 0
+    public var messagesRecorded = 0
     public var extractionsDeduped = 0
     public init() {}
 }
@@ -36,8 +37,17 @@ public struct IngestPipeline: Sendable {
         self.dedupWindowSeconds = dedupWindowSeconds
     }
 
+    /// Run the pipeline over `transport`'s frames.
+    ///
+    /// - Parameter onDecoded: an optional tap invoked once per successfully
+    ///   decoded packet, BEFORE persistence side-effects, so the live trace feed
+    ///   (G2) can animate every reception even when its extraction is deduped or
+    ///   the packet is a non-extracted port. It is awaited; keep it cheap.
     @discardableResult
-    public func run(_ transport: any MeshTransport) async throws -> IngestSummary {
+    public func run(
+        _ transport: any MeshTransport,
+        onDecoded: (@Sendable (DecodedPacket) async -> Void)? = nil
+    ) async throws -> IngestSummary {
         var summary = IngestSummary()
         var dedup = DedupWindow(windowSeconds: dedupWindowSeconds)
 
@@ -53,6 +63,7 @@ public struct IngestPipeline: Sendable {
             }
             guard let packet = decoded else { continue }
             summary.packetsDecoded += 1
+            await onDecoded?(packet)
             let node = Int64(packet.from)
 
             try await store.markHeard(nodeNum: node, at: packet.rxTime)
@@ -67,21 +78,37 @@ public struct IngestPipeline: Sendable {
                 continue
             }
 
-            // Count telemetry/position once per (packet_id, from) within the window.
+            // Count telemetry/position/message once per (packet_id, from) in window.
             guard dedup.admit(packet.dedupKey, at: packet.rxTime) else {
                 summary.extractionsDeduped += 1
                 continue
             }
-            switch packet.port {
-            case .telemetry:
-                summary.telemetryPointsRecorded += try await extractTelemetry(packet, node: node)
-            case .position:
-                if try await extractPosition(packet, node: node) { summary.positionFixesRecorded += 1 }
-            default:
-                break
-            }
+            try await extract(packet, node: node, frame: frame, into: &summary)
         }
         return summary
+    }
+
+    /// Persist the deduped app-payload extraction for `packet` (telemetry,
+    /// position, or text message), tallying into `summary`. Non-extracted ports
+    /// are no-ops.
+    private func extract(
+        _ packet: DecodedPacket,
+        node: Int64,
+        frame: InboundFrame,
+        into summary: inout IngestSummary
+    ) async throws {
+        switch packet.port {
+        case .telemetry:
+            summary.telemetryPointsRecorded += try await extractTelemetry(packet, node: node)
+        case .position:
+            if try await extractPosition(packet, node: node) { summary.positionFixesRecorded += 1 }
+        case .textMessage:
+            if try await extractMessage(packet, channelName: Self.channelName(from: frame.topic)) {
+                summary.messagesRecorded += 1
+            }
+        default:
+            break
+        }
     }
 
     // MARK: Mapping
@@ -96,7 +123,9 @@ public struct IngestPipeline: Sendable {
             rx_rssi: packet.rxRssi,
             rx_snr: packet.rxSnr,
             hop_start: packet.hopStart.map(Int.init),
-            hop_limit: packet.hopLimit.map(Int.init)
+            hop_limit: packet.hopLimit.map(Int.init),
+            // Our Clock wall-clock at frame receipt — the latency source (SPEC §2.11).
+            ingest_time: frame.receivedAt.nanosecondsSinceEpoch
         )
     }
 
@@ -159,5 +188,47 @@ public struct IngestPipeline: Sendable {
             precision_bits: position.precisionBits != 0 ? Int(position.precisionBits) : nil
         ))
         return true
+    }
+
+    /// Decode a `TEXT_MESSAGE_APP` payload (UTF-8 text) into a `message` row
+    /// (monitor-only, ADR 0006). An empty body is skipped. Counted once per dedup
+    /// key, like telemetry/position. Returns whether a row was recorded.
+    private func extractMessage(_ packet: DecodedPacket, channelName: String?) async throws -> Bool {
+        guard let body = String(bytes: packet.payload, encoding: .utf8), !body.isEmpty else { return false }
+        let message = MeshMessage(
+            packetID: packet.packetID,
+            from: packet.from,
+            to: packet.to,
+            channel: packet.channel,
+            channelName: channelName,
+            body: body,
+            rxTime: packet.rxTime
+        )
+        try await store.recordMessage(MessageRecord(
+            packet_id: Int64(message.packetID),
+            from_num: Int64(message.from),
+            to_num: Int64(message.to),
+            channel: Int64(message.channel),
+            channel_name: message.channelName,
+            body: message.body,
+            rx_time: message.rxTime.nanosecondsSinceEpoch,
+            is_dm: message.isDirectMessage
+        ))
+        return true
+    }
+
+    /// The human channel name from an MQTT topic `msh/REGION/2/e/CHANNEL/USER`
+    /// (the channel is the second-to-last segment). `nil` for serial/BLE or an
+    /// unrecognised topic shape.
+    static func channelName(from topic: String?) -> String? {
+        guard let topic else { return nil }
+        let segments = topic.split(separator: "/", omittingEmptySubsequences: true)
+        // …/<marker>/<channel>/<user> — channel is second-to-last, marker is
+        // fourth-to-last. The `/e/` (encrypted) and `/c/` markers precede the
+        // channel; only treat the segment as a channel name when it follows one.
+        guard segments.count >= 3 else { return nil }
+        let marker = segments[segments.count - 3]
+        guard marker == "e" || marker == "c" else { return nil }
+        return String(segments[segments.count - 2])
     }
 }
