@@ -1,7 +1,7 @@
-// App — SwiftUI viewer/controller over the shared GRDB store (SPEC §3).
-// UI lands from Phase 2 (charts) / Phase 3 (map) onward; Phase 0 placeholder.
-
-/// Module marker; superseded by the SwiftUI app + view models.
-public enum AppModule {
-    public static let name = "App"
-}
+// App — the SwiftUI viewer/controller over the shared GRDB store (SPEC §3).
+//
+// Presentation logic lives in `@Observable` view models (testable, no SwiftUI);
+// the SwiftUI views are thin renderings. The map (MapKit), charts (Swift Charts),
+// and observability dashboard build out on this pattern.
+//
+//   • NodeListViewModel / NodeListView — the node list (this commit).

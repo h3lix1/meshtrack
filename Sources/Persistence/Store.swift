@@ -47,6 +47,13 @@ public struct MeshStore: Sendable {
         try await writer.read { db in try NodeRecord.fetchOne(db, key: nodeNum) }
     }
 
+    /// All nodes, most-recently-heard first (for the node list / dashboard).
+    public func allNodes() async throws -> [NodeRecord] {
+        try await writer.read { db in
+            try NodeRecord.order(Column("last_heard_at").desc).fetchAll(db)
+        }
+    }
+
     /// Mark a node heard at `instant`, creating it if new. Liveness is computed
     /// by the collector, not the UI (SPEC §2.2).
     public func markHeard(nodeNum: Int64, at instant: Instant) async throws {
