@@ -16,11 +16,25 @@ public struct VizSettingsPanel: View {
     private let traces: [PacketTrace]
     /// Worst-case relay-byte candidate count across the shown traces, for the hint.
     private let relayCandidateCount: Int
+    /// The packet id currently isolated on the map (nil = all packets shown). Drives the
+    /// legend-row highlight.
+    private let selectedPacketID: UInt32?
+    /// Tapping a legend row hands its packet id back to focus/toggle it; nil disables
+    /// the interaction (e.g. preview/snapshot composition).
+    private let onSelectPacket: ((UInt32) -> Void)?
 
-    public init(settings: VizSettings, traces: [PacketTrace], relayCandidateCount: Int = 1) {
+    public init(
+        settings: VizSettings,
+        traces: [PacketTrace],
+        relayCandidateCount: Int = 1,
+        selectedPacketID: UInt32? = nil,
+        onSelectPacket: ((UInt32) -> Void)? = nil
+    ) {
         _settings = Bindable(settings)
         self.traces = traces
         self.relayCandidateCount = relayCandidateCount
+        self.selectedPacketID = selectedPacketID
+        self.onSelectPacket = onSelectPacket
     }
 
     public var body: some View {
@@ -93,24 +107,57 @@ public struct VizSettingsPanel: View {
 
     private var legend: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Packets").font(.caption.weight(.bold)).foregroundStyle(.white.opacity(0.7))
+            HStack {
+                Text("Packets").font(.caption.weight(.bold)).foregroundStyle(.white.opacity(0.7))
+                Spacer()
+                if let focused = selectedPacketID, let onSelectPacket {
+                    Button("Show all") { onSelectPacket(focused) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9).weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .help("Show all packets")
+                }
+            }
             let entries = VizLegend.entries(for: traces)
             if entries.isEmpty {
                 Text("no live traces").font(.caption).foregroundStyle(.white.opacity(0.5))
             } else {
                 ForEach(entries) { entry in
-                    HStack(spacing: 8) {
-                        Circle().fill(entry.color).frame(width: 10, height: 10)
-                        Text(entry.label).font(.caption.monospaced())
-                        Spacer()
-                        Text("\(entry.hops)h").font(.system(size: 9).monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.6))
-                        if entry.guessedEdges > 0 {
-                            Text("\u{2248}").font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
-                        }
-                    }
+                    legendRow(entry)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func legendRow(_ entry: VizLegend.Entry) -> some View {
+        let isFocused = PacketFocus.isFocused(entry.id, selectedPacketID: selectedPacketID)
+        let row = HStack(spacing: 8) {
+            Circle().fill(entry.color).frame(width: 10, height: 10)
+            Text(entry.label).font(.caption.monospaced())
+            Spacer()
+            Text("\(entry.hops)h").font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.6))
+            if entry.guessedEdges > 0 {
+                Text("\u{2248}").font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.white.opacity(isFocused ? 0.18 : 0))
+        )
+        .contentShape(Rectangle())
+        .opacity(selectedPacketID == nil || isFocused ? 1 : 0.5)
+
+        if let onSelectPacket {
+            Button { onSelectPacket(entry.id) } label: { row }
+                .buttonStyle(.plain)
+                .help(isFocused ? "Show all packets" : "Isolate this packet")
+        } else {
+            row
         }
     }
 }

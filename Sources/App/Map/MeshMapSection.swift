@@ -30,6 +30,8 @@
         @State private var mapState = MeshMapState()
         @State private var channelFilter = ChannelFilter()
         @State private var selectedNode: NetworkNode?
+        /// The packet id currently isolated on the map (nil = show all packets).
+        @State private var selectedPacketID: UInt32?
 
         public init(
             nodes: [NetworkNode],
@@ -49,12 +51,24 @@
             self.store = store
         }
 
-        /// Nodes / traces visible under the current channel selection (Task 4).
+        /// Nodes visible after the channel filter then the packet focus narrow it: the
+        /// channel filter runs first, the focus (if any) isolates a single packet's
+        /// trace + the nodes it touches.
         private var visibleNodes: [NetworkNode] {
-            channelFilter.nodes(nodes)
+            let channelled = channelFilter.nodes(nodes)
+            return PacketFocus.focusNodes(
+                channelled, traces: channelFilter.traces(traces, nodes: nodes),
+                selectedPacketID: selectedPacketID
+            )
         }
 
         private var visibleTraces: [PacketTrace] {
+            PacketFocus.focusTraces(channelledTraces, selectedPacketID: selectedPacketID)
+        }
+
+        /// Traces under the channel filter but BEFORE the packet focus — the legend
+        /// lists these so a focused view still offers every packet to switch/reset to.
+        private var channelledTraces: [PacketTrace] {
             channelFilter.traces(traces, nodes: nodes)
         }
 
@@ -87,8 +101,12 @@
                     ChannelFilterControl(filter: channelFilter, presets: availablePresets)
                     VizSettingsPanel(
                         settings: settings,
-                        traces: visibleTraces,
-                        relayCandidateCount: relayCandidateCount
+                        traces: channelledTraces,
+                        relayCandidateCount: relayCandidateCount,
+                        selectedPacketID: selectedPacketID,
+                        onSelectPacket: {
+                            selectedPacketID = PacketFocus.toggled($0, current: selectedPacketID)
+                        }
                     )
                 }
                 .padding(16)
