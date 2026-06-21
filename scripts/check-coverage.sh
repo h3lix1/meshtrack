@@ -20,7 +20,11 @@ fi
 EXE="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
 CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine Sources/Provisioning Sources/Scenario Sources/Ingest Sources/Crypto Sources/Logging)
 
-PCT="$(xcrun llvm-cov export -summary-only -instr-profile "$PROFDATA" "$EXE" "${CORE[@]}" 2>/dev/null \
+# Hardware-I/O adapters (serial termios, CoreBluetooth radio) carry no
+# unit-testable logic — the testable framing lives in SerialFramer — so they are
+# excluded from the coverage metric, same rationale as App/meshtrackd.
+IGNORE='(SerialAdapter|BLEAdapter)\.swift'
+PCT="$(xcrun llvm-cov export -summary-only -instr-profile "$PROFDATA" -ignore-filename-regex="$IGNORE" "$EXE" "${CORE[@]}" 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(round(d["data"][0]["totals"]["lines"]["percent"],2))')"
 
 printf "line coverage (core modules): %s%%   floor: %s%%\n" "$PCT" "$FLOOR"

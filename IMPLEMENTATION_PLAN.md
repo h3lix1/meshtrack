@@ -29,8 +29,9 @@ from a cold checkout. ✅ **Phase 0 complete (2026-06-20).**
 - [ ] Provenance + dedup window (10 min, `(packet_id, from_num)`); telemetry taxonomy persisted  *(→ lead / Ingest+Domain)*
 - [ ] MQTT adapter (TLS) → frames  *(→ lead / Transport, after decode)*
 - [x] PSK decryption (AES-CTR) for `/e/` topics; Keychain-backed `KeyStore` (up to 20 MQTT / 7 local channels)
-- [ ] Serial + BLE adapters for the local node  *(→ Agent C / Transport)*
-- [ ] Packet inspector (debug view) + structured logging (secret-redacting wrapper)  *(→ Agent D / Logging)*
+- [x] Serial + BLE adapters for the local node (SerialFramer tested; port/radio I/O best-effort, HIL-gated)
+- [x] Structured logging (secret-redacting wrapper)
+- [ ] Packet inspector (debug view) over decoded packets  *(→ lead, after decode)*
 
 Seams committed by the lead for the parallel agents: `KeyStore` / `PacketDecryptor`
 / `ChannelKey` ports (Domain), and the `Crypto` + `Logging` module targets.
