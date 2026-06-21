@@ -12,7 +12,9 @@ public struct LatencyDistribution: Sendable, Equatable {
         public let upperMillis: Int
         public let count: Int
 
-        public var id: Int { lowerMillis }
+        public var id: Int {
+            lowerMillis
+        }
 
         public init(lowerMillis: Int, upperMillis: Int, count: Int) {
             self.lowerMillis = lowerMillis
@@ -20,7 +22,9 @@ public struct LatencyDistribution: Sendable, Equatable {
             self.count = count
         }
 
-        public var label: String { "\(lowerMillis)–\(upperMillis)ms" }
+        public var label: String {
+            "\(lowerMillis)–\(upperMillis)ms"
+        }
     }
 
     public let sampleCount: Int
@@ -33,7 +37,9 @@ public struct LatencyDistribution: Sendable, Equatable {
     public let p95Millis: Int
     public let buckets: [Bucket]
 
-    public var isEmpty: Bool { sampleCount == 0 }
+    public var isEmpty: Bool {
+        sampleCount == 0
+    }
 
     public init(
         sampleCount: Int,
@@ -63,38 +69,40 @@ public struct LatencyDistribution: Sendable, Equatable {
     /// distort the histogram). Returns `.empty` for no samples.
     public init(millis rawSamples: [Int], bucketCount: Int = 6) {
         let samples = rawSamples.map { max(0, $0) }.sorted()
-        guard let lo = samples.first, let hi = samples.last else {
+        guard let low = samples.first, let high = samples.last else {
             self = .empty
             return
         }
-        let n = samples.count
+        let total = samples.count
         let sum = samples.reduce(0, +)
-        let mean = Int((Double(sum) / Double(n)).rounded())
+        let mean = Int((Double(sum) / Double(total)).rounded())
 
-        func percentile(_ p: Double) -> Int {
+        func percentile(_ fraction: Double) -> Int {
             // lower-rank nearest: clamp index into bounds.
-            let rank = Int((p * Double(n - 1)).rounded())
-            return samples[min(max(rank, 0), n - 1)]
+            let rank = Int((fraction * Double(total - 1)).rounded())
+            return samples[min(max(rank, 0), total - 1)]
         }
 
-        let span = max(1, hi - lo)
+        let span = max(1, high - low)
         let count = max(1, bucketCount)
-        let width = max(1, (span + count - 1) / count) // ceil so hi lands in last bucket
+        let width = max(1, (span + count - 1) / count) // ceil so high lands in last bucket
         var bucketList: [Bucket] = []
-        for i in 0..<count {
-            let lower = lo + i * width
+        for index in 0 ..< count {
+            let lower = low + index * width
             let upper = lower + width
-            let c = samples.filter { $0 >= lower && $0 < upper }.count
+            let halfOpen = samples.count(where: { $0 >= lower && $0 < upper })
             // the very last bucket is inclusive of the max value.
-            let inclusiveC = (i == count - 1) ? samples.filter { $0 >= lower && $0 <= upper }.count : c
-            bucketList.append(Bucket(lowerMillis: lower, upperMillis: upper, count: inclusiveC))
-            if lower + width > hi { break }
+            let bucketCount = (index == count - 1)
+                ? samples.count(where: { $0 >= lower && $0 <= upper })
+                : halfOpen
+            bucketList.append(Bucket(lowerMillis: lower, upperMillis: upper, count: bucketCount))
+            if lower + width > high { break }
         }
 
         self.init(
-            sampleCount: n,
-            minMillis: lo,
-            maxMillis: hi,
+            sampleCount: total,
+            minMillis: low,
+            maxMillis: high,
             meanMillis: mean,
             medianMillis: percentile(0.5),
             p95Millis: percentile(0.95),

@@ -105,7 +105,7 @@ public final class PacketInspectorViewModel {
         var result: [UInt32: Int] = [:]
         for inspection in packets { // newest first
             guard result[inspection.packetID] == nil else { continue }
-            if let ms = inspection.latencyMillis { result[inspection.packetID] = ms }
+            if let millis = inspection.latencyMillis { result[inspection.packetID] = millis }
         }
         return result
     }
