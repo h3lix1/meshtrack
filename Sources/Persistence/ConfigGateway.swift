@@ -12,22 +12,15 @@ import Domain
 import Foundation
 import GRDB
 
-// swiftlint:disable identifier_name
-// Justification: record properties mirror SQLite column names (snake_case is
-// not needed here, but the GRDB record style matches Records.swift — scoped to
-// this adapter file only).
-
 /// `app_config` — one JSON-valued row per config key (schema v4). Used only by
 /// the `ConfigGateway` methods; not part of the public record surface.
-struct AppConfigRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
+struct AppConfigRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = Table.appConfig
     var key: String
     var value: String
 }
 
-// swiftlint:enable identifier_name
-
-extension MeshStore {
+public extension MeshStore {
     /// Stable `app_config` keys. Centralised so a typo can only happen once.
     private enum ConfigKey {
         static let broker = "broker"
@@ -37,24 +30,24 @@ extension MeshStore {
     // MARK: - Broker config
 
     /// The saved broker config, or `nil` if none has been configured yet.
-    public func loadBrokerConfig() async throws -> BrokerConfig? {
+    func loadBrokerConfig() async throws -> BrokerConfig? {
         try await load(BrokerConfig.self, forKey: ConfigKey.broker)
     }
 
     /// Persist the broker config, overwriting any existing row in place.
-    public func saveBrokerConfig(_ config: BrokerConfig) async throws {
+    func saveBrokerConfig(_ config: BrokerConfig) async throws {
         try await save(config, forKey: ConfigKey.broker)
     }
 
     // MARK: - App settings
 
     /// The saved app settings, or `AppSettings.default` if none have been saved.
-    public func loadAppSettings() async throws -> AppSettings {
+    func loadAppSettings() async throws -> AppSettings {
         try await load(AppSettings.self, forKey: ConfigKey.appSettings) ?? .default
     }
 
     /// Persist the app settings, overwriting any existing row in place.
-    public func saveAppSettings(_ settings: AppSettings) async throws {
+    func saveAppSettings(_ settings: AppSettings) async throws {
         try await save(settings, forKey: ConfigKey.appSettings)
     }
 
@@ -70,7 +63,7 @@ extension MeshStore {
     }
 
     /// JSON-encode `value` and upsert it under `key` (overwrite in place).
-    private func save<T: Encodable>(_ value: T, forKey key: String) async throws {
+    private func save(_ value: some Encodable, forKey key: String) async throws {
         let data = try JSONEncoder().encode(value)
         // The JSON is well-formed UTF-8 by construction; fall back to an empty
         // object rather than force-unwrapping.
