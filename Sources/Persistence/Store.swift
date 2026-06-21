@@ -170,4 +170,13 @@ public struct MeshStore: Sendable {
                       avg_value = excluded.avg_value, sample_count = excluded.sample_count
         """)
     }
+
+    // MARK: Export / backup (SPEC §6 / Phase 6)
+
+    /// Back up the live database to a file at `path` (a consistent SQLite copy,
+    /// safe while the store is in use). Overwrites any existing file.
+    public func backup(toPath path: String) async throws {
+        let destination = try DatabaseQueue(path: path)
+        try writer.backup(to: destination)
+    }
 }
