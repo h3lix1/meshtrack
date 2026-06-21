@@ -120,38 +120,43 @@ touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShe
 - [x] Viz-settings panel: configurable `hopDuration`, equalise-finish toggle, per-id colour legend, guessed-vs-observed key + relay-confidence hint
 - [x] Snapshot path renders the Canvas-only fallback (deterministic); overlay geometry unit-tested
 
-### G2 — Live ingest re-land + composition root (Wave 2; needs G0)
-- [ ] `MeshtrackApp/LiveCoordinator`: MQTT (env creds) → IngestPipeline → store → VMs; sample-fallback when no broker
-- [ ] `onDecoded` trace tap feeds `NetworkViewModel`; latency (`ingest_time`) captured; env-gated live smoke test
+### G2 — Live ingest re-land + composition root (Wave 2; needs G0) ✅ merged
+- [x] `MeshtrackApp/LiveCoordinator`: MQTT (env creds) → IngestPipeline → store → VMs; sample-fallback when no broker
+- [x] `onDecoded` trace tap feeds `NetworkViewModel`; latency (`ingest_time`) captured; env-gated live smoke test
 
-### G3 — Node directory + detail + ownership (Wave 2; needs G0)
-- [ ] Node directory VM: role tabs, search, **My Nodes** filter, managed/unmanaged segmentation + bulk-classify (tested)
-- [ ] Node detail: click-to-configure (arming-gated), QR code, drill-through to analytics
+### G3 — Node directory + detail + ownership (Wave 2; needs G0) ✅ merged
+- [x] Node directory VM: role tabs, search, **My Nodes** filter, managed/unmanaged segmentation + bulk-classify (tested)
+- [x] Node detail: click-to-configure (arming-gated), QR code, drill-through to analytics
 
 ### G4 — Telemetry + node analytics deep-dive (Wave 1) ✅ merged
 - [x] Swift Charts over telemetry + rollups (battery/voltage/util/env), live VM (tested)
 - [x] Analytics tabs: SNR/RSSI distribution, hop-count histogram, peer/topology graph, hourly heatmap, packet-type breakdown
 
-### G5 — Alerts + arming UI (Wave 2; needs G0)
-- [ ] Alert list/ack/snooze/cooldown VM over `AlertEngine` (tested); managed-aware suppression surfaced
-- [ ] Arming flow UI (capture anchor / disarm) over the arming table
+### G5 — Alerts + arming UI (Wave 2; needs G0) ✅ merged
+- [x] Alert list/ack/snooze/cooldown VM over `AlertEngine` (tested); managed-aware suppression surfaced
+- [x] Arming flow UI (capture anchor / disarm) over the arming table
 
-### G6 — Packet inspector + latency analytics (Wave 2; needs G0)
-- [ ] Inspector: byte-level breakdown, filters, detail pane (live, tested VM)
-- [ ] Receive→publish latency surfaced (inspector + map-edge tooltip + latency tab)
+### G6 — Packet inspector + latency analytics (Wave 2; needs G0) ✅ merged
+- [x] Inspector: byte-level breakdown, filters, detail pane (live, tested VM)
+- [x] Receive→publish latency surfaced (inspector + map-edge tooltip + latency tab)
 
-### G7 — Fleet config rollout UI (Wave 2; needs G0)
-- [ ] Wire `FleetApplier`: live verify-each-then-next, halt-on-failure, diff preview, fleet-wide edit, progress + abort (tested VM)
+### G7 — Fleet config rollout UI (Wave 2; needs G0) ✅ merged
+- [x] Wire `FleetApplier`: live verify-each-then-next, halt-on-failure, diff preview, fleet-wide edit, progress + abort (tested VM)
 
-### G8 — Messaging (monitor-only) (Wave 2; needs G0)
-- [ ] Channels view: decoded text grouped by channel — sender, @mentions, timestamps, DM vs broadcast (tested VM)
+### G8 — Messaging (monitor-only) (Wave 2; needs G0) ✅ merged
+- [x] Channels view: decoded text grouped by channel — sender, @mentions, timestamps, DM vs broadcast (tested VM)
 
 ### G9 — VCR / time-travel (Wave 1) ✅ merged
 - [x] Timeline scrubber + variable-speed (≤4×) replay over `ReplayAdapter` driving the map animation (tested VM)
 
-### G10 — Observability + ⌘K search + theme + collision matrix (Wave 2; partly G0)
-- [ ] Observability dashboard: ingestion lag + transport health (finishes Phase 6 item)
-- [ ] Global ⌘K search (nodes/packets/channels); in-app theme customizer; node-id 4-byte hash-collision matrix
+### G10 — Observability + ⌘K search + theme + collision matrix (Wave 2; partly G0) ✅ merged
+- [x] Observability dashboard: ingestion lag + transport health (finishes Phase 6 item)
+- [x] Global ⌘K search (nodes/packets/channels); in-app theme customizer; node-id 4-byte hash-collision matrix
+
+### Lead integration ✅
+- [x] Merged all 11 streams; `AppComposition.registerLiveSections` wires every section into the shell (headline MapKit map live); Analytics + Messages sidebar sections added
+- [x] `make verify` green end-to-end: 474 tests, coverage 91.6%
+- [ ] *Follow-ups:* live `IngestHealth` push from the coordinator; `relay_node` on observations for guessed-hop replay; per-node picker for telemetry/analytics; surface VCR overlay + ⌘K + theme in the live shell; signing/notarization (Phase 6 carry-over)
 
 **Done when:** `swift run MeshtrackApp` shows a real MapKit map animating live MQTT
 traffic (per-id colours, guessed/observed hops, hop badges, latency); click-to-config
