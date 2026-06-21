@@ -58,4 +58,20 @@ struct NetworkViewModelTests {
         #expect(model.traces.count == 1)
         #expect(model.traces.first?.id == 0xABCD)
     }
+
+    @Test
+    func `ingesting records the source node's channel preset`() async throws {
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        // LongFast's channel hash is 8.
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0xABCD,
+            channel: ChannelPreset.longFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+        #expect(model.presetByNode[0x0000_0001] == .longFast)
+        #expect(model.nodes.first { $0.id == 0x0000_0001 }?.preset == .longFast)
+        #expect(model.availablePresets == [.longFast])
+    }
 }

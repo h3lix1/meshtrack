@@ -16,10 +16,14 @@ public struct NetworkNode: Identifiable, Sendable, Equatable {
     public let hopsFromGateway: Int
     public let batteryPercent: Double?
     public let isGateway: Bool
+    /// The channel preset this node's live packets last arrived on, resolved from the
+    /// `DecodedPacket.channel` hash (Task 4). nil until a packet is seen / unresolvable.
+    public let preset: ChannelPreset?
 
     public init(
         id: Int64, name: String, position: GeoPoint,
-        hopsFromGateway: Int, batteryPercent: Double? = nil, isGateway: Bool = false
+        hopsFromGateway: Int, batteryPercent: Double? = nil, isGateway: Bool = false,
+        preset: ChannelPreset? = nil
     ) {
         self.id = id
         self.name = name
@@ -27,6 +31,17 @@ public struct NetworkNode: Identifiable, Sendable, Equatable {
         self.hopsFromGateway = hopsFromGateway
         self.batteryPercent = batteryPercent
         self.isGateway = isGateway
+        self.preset = preset
+    }
+
+    /// A copy with the channel preset replaced (Task 4) — fields are immutable, so the
+    /// view model uses this to stamp a node's channel as live packets arrive.
+    public func withPreset(_ preset: ChannelPreset?) -> NetworkNode {
+        NetworkNode(
+            id: id, name: name, position: position,
+            hopsFromGateway: hopsFromGateway, batteryPercent: batteryPercent,
+            isGateway: isGateway, preset: preset
+        )
     }
 }
 
