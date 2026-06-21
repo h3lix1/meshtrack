@@ -98,7 +98,7 @@ let package = Package(
         // ---- UI + composition roots --------------------------------------------
         .target(
             name: "App",
-            dependencies: ["Domain", "Persistence", "RuleEngine", "Ingest", "Transport", "Crypto"],
+            dependencies: ["Domain", "Persistence", "RuleEngine"],
             swiftSettings: strict
         ),
         .executableTarget(

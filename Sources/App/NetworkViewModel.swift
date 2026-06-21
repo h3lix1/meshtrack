@@ -14,8 +14,6 @@ import Persistence
 public final class NetworkViewModel {
     public private(set) var nodes: [NetworkNode] = []
     public private(set) var traces: [PacketTrace] = []
-    /// Total decoded packets fed in since launch (every gateway reception).
-    public private(set) var packetsObserved = 0
 
     private var positions: [Int64: GeoPoint] = [:]
     private var collector: LivePacketTraceCollector
@@ -51,7 +49,6 @@ public final class NetworkViewModel {
 
     /// Feed one decoded packet into the live trace animation.
     public func ingest(_ packet: DecodedPacket) {
-        packetsObserved += 1
         collector.ingest(packet)
         traces = collector.traces(positions: positions)
     }
