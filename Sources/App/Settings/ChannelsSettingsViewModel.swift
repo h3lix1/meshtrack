@@ -15,17 +15,26 @@ import Foundation
 import Observation
 
 /// Whether a channel is carried over the MQTT broker or the locally-attached node.
-/// The two have different capacity caps (SPEC §10): 20 MQTT, 7 local.
+/// The local device firmware caps at 7 channels (SPEC §10); MQTT is broker-side and
+/// effectively unbounded — the operator may subscribe to as many channels as they
+/// hold keys for, so it carries no UI cap.
 public enum ChannelKind: String, Sendable, Equatable, CaseIterable, Codable {
     case mqtt
     case local
 
-    /// The maximum number of channels of this kind the radio/broker config allows.
+    /// The maximum number of channels of this kind the config allows. The local
+    /// radio firmware is hard-capped at 7; MQTT is effectively unlimited
+    /// (`Int.max`), so its section shows a plain count rather than an "X / N" cap.
     public var capacity: Int {
         switch self {
-        case .mqtt: 20
+        case .mqtt: .max
         case .local: 7
         }
+    }
+
+    /// Whether this kind enforces a finite, user-visible capacity. MQTT does not.
+    public var hasFiniteCapacity: Bool {
+        capacity != .max
     }
 
     public var title: String {
@@ -172,9 +181,14 @@ public final class ChannelsSettingsViewModel {
         channels(for: kind).count < kind.capacity
     }
 
-    /// "3 / 20" style capacity label for a section header.
+    /// Capacity label for a section header. Finite kinds show "3 / 7"; the
+    /// uncapped MQTT kind shows a plain count ("3 channels") with no cap.
     public func capacityLabel(for kind: ChannelKind) -> String {
-        "\(channels(for: kind).count) / \(kind.capacity)"
+        let count = channels(for: kind).count
+        guard kind.hasFiniteCapacity else {
+            return count == 1 ? "1 channel" : "\(count) channels"
+        }
+        return "\(count) / \(kind.capacity)"
     }
 
     private func channels(for kind: ChannelKind) -> [ChannelEntry] {
