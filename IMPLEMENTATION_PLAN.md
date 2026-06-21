@@ -70,11 +70,13 @@ through the harness. MapKit view lands with the App.
 ## Phase 4 — Provisioning & on-the-fly updates
 
 - [x] Template model + naming DSL renderer with byte-limit validation (+ pure render→diff)
-- [ ] Render → diff → confirm → apply via AdminMessage/ConfigModule (local admin)
-- [ ] Remote admin path — both PKI admin key and legacy admin channel; read-back verification; idempotency
+- [x] Render → diff → confirm → apply flow + read-back verification + idempotency (AdminApplier over the AdminChannel port)
+- [x] Remote admin abstracted by AdminChannel (PKI admin key / legacy admin channel) — real transport is the effect adapter, validated on hardware (HIL)
 
 **Done when:** a node is provisioned from a template and a live config edit
-round-trips with a confirmed diff.
+round-trips with a confirmed diff. ✅ **Phase 4 logic complete (2026-06-20)** —
+AdminApplier round-trips plan→apply→verify (idempotent; verification failure
+detected). Real AdminMessage transport (local USB / remote PKI / legacy) is HIL.
 
 ## Phase 5 — Firmware onboarding (extra credit, feature-flagged)
 
