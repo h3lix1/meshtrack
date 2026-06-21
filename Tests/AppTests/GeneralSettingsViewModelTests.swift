@@ -91,6 +91,28 @@ struct GeneralSettingsViewModelTests {
     }
 
     @Test
+    func `selecting a theme applies it live via the callback in addition to persisting`() async {
+        // A box captures the live-applied theme so we can assert the picker drives a
+        // controller (here a fake closure) the moment a preset is chosen.
+        final class Box: @unchecked Sendable { var applied: [Theme] = [] }
+        let box = Box()
+        let gateway = InMemoryConfigGateway()
+        let viewModel = GeneralSettingsViewModel(
+            gateway: gateway,
+            onThemeSelected: { box.applied.append($0) }
+        )
+
+        viewModel.selectTheme(.ember)
+        // Live-applied immediately, before any save.
+        #expect(box.applied.map(\.id) == ["ember"])
+        // And still persisted on save.
+        await viewModel.save()
+        let reader = GeneralSettingsViewModel(gateway: gateway)
+        await reader.load()
+        #expect(reader.settings.themeID == "ember")
+    }
+
+    @Test
     func `isDirty tracks edits and clears after save`() async {
         let viewModel = GeneralSettingsViewModel(gateway: InMemoryConfigGateway())
         await viewModel.load()
