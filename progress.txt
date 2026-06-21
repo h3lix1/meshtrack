@@ -61,3 +61,4 @@
 2026-06-20 P8 T-Prefs feat(app): General preferences + Alert-rules config screens
 2026-06-20 P8 T-Channels feat(app): Channels & Keys screen (wired to placeholder pending an async ChannelKeyManaging port)
 2026-06-20 P8 feat(app): integrate config — on-disk MeshStore (persists), Keychain creds, Settings tabs, MQTT test probe, alert_rule adapter — make verify green, 549 tests, coverage 90.55% [PHASE 8 INTEGRATED]
+2026-06-21 P8 fix(app): settings scroll; unlimited MQTT channels (local 7) + Channels tab wired (Keychain PSKs + app_config registry); alert-rule creation from scratch (always-global + add-scope); theme actually applies (ThemeController + appTheme env) — make verify green, 572 tests, coverage 90.67%
