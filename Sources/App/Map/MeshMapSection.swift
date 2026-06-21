@@ -10,6 +10,7 @@
 
 #if canImport(MapKit) && os(macOS)
     import Domain
+    import Persistence
     import SwiftUI
 
     public struct MeshMapSection: View {
@@ -19,22 +20,42 @@
         public let latencyMillis: [UInt32: Int]
         /// Worst-case relay-byte candidate count, for the confidence hint.
         public let relayCandidateCount: Int
+        /// Channel presets live nodes have been seen on, for the filter menu (Task 4).
+        public let availablePresets: [ChannelPreset]
+        /// Store backing the tap-to-open node-detail popover (Task 5/6). When nil the
+        /// markers aren't tappable (e.g. preview/snapshot composition).
+        public let store: MeshStore?
 
         private let settings: VizSettings
         @State private var mapState = MeshMapState()
+        @State private var channelFilter = ChannelFilter()
+        @State private var selectedNode: NetworkNode?
 
         public init(
             nodes: [NetworkNode],
             traces: [PacketTrace],
             settings: VizSettings,
             latencyMillis: [UInt32: Int] = [:],
-            relayCandidateCount: Int = 1
+            relayCandidateCount: Int = 1,
+            availablePresets: [ChannelPreset] = [],
+            store: MeshStore? = nil
         ) {
             self.nodes = nodes
             self.traces = traces
             self.settings = settings
             self.latencyMillis = latencyMillis
             self.relayCandidateCount = relayCandidateCount
+            self.availablePresets = availablePresets
+            self.store = store
+        }
+
+        /// Nodes / traces visible under the current channel selection (Task 4).
+        private var visibleNodes: [NetworkNode] {
+            channelFilter.nodes(nodes)
+        }
+
+        private var visibleTraces: [PacketTrace] {
+            channelFilter.traces(traces, nodes: nodes)
         }
 
         public var body: some View {
@@ -42,13 +63,17 @@
                 // The MapKit substrate updates only when the node set changes — it stays
                 // OUTSIDE the TimelineView so it isn't re-created every animation frame
                 // (which spun updateNSView → state mutation → a view-graph beachball).
-                MeshMapView(nodes: nodes, state: mapState)
+                MeshMapView(
+                    nodes: visibleNodes,
+                    state: mapState,
+                    onSelectNode: store == nil ? nil : { selectedNode = nodeByID($0) }
+                )
 
                 // Only the animated trace overlay needs the per-frame clock.
                 TimelineView(.animation) { timeline in
                     TraceOverlayCanvas(
-                        nodes: nodes,
-                        traces: traces,
+                        nodes: visibleNodes,
+                        traces: visibleTraces,
                         state: mapState,
                         clock: timeline.date.timeIntervalSinceReferenceDate,
                         hopDuration: settings.hopDuration,
@@ -58,13 +83,26 @@
                 }
                 .allowsHitTesting(false)
 
-                VizSettingsPanel(
-                    settings: settings,
-                    traces: traces,
-                    relayCandidateCount: relayCandidateCount
-                )
+                VStack(alignment: .trailing, spacing: 12) {
+                    ChannelFilterControl(filter: channelFilter, presets: availablePresets)
+                    VizSettingsPanel(
+                        settings: settings,
+                        traces: visibleTraces,
+                        relayCandidateCount: relayCandidateCount
+                    )
+                }
                 .padding(16)
             }
+            .popover(item: $selectedNode) { node in
+                if let store {
+                    NodeDetailPopover(node: node, store: store)
+                }
+            }
+        }
+
+        /// Resolve a tapped node id back to its NetworkNode (from the visible set).
+        private func nodeByID(_ id: Int64) -> NetworkNode? {
+            visibleNodes.first { $0.id == id }
         }
     }
 

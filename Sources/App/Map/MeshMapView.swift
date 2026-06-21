@@ -41,17 +41,38 @@
     public struct MeshMapView: NSViewRepresentable {
         public let nodes: [NetworkNode]
         public let state: MeshMapState
-        /// Whether to auto-fit the camera to the fleet when the node set changes.
+        /// Whether to auto-fit the camera to the fleet — but only ever ONCE, on the
+        /// first-ever launch (Task 1). After that the saved region is restored and the
+        /// camera stays put when nodes are added.
         public var fitToFleet: Bool
+        /// Persists / restores the visible region across restarts (Task 1).
+        public var regionStore: MapRegionStore
+        /// Called with a tapped node's id when its marker is selected (Task 5).
+        public var onSelectNode: ((Int64) -> Void)?
 
-        public init(nodes: [NetworkNode], state: MeshMapState, fitToFleet: Bool = true) {
+        public init(
+            nodes: [NetworkNode],
+            state: MeshMapState,
+            fitToFleet: Bool = true,
+            regionStore: MapRegionStore = MapRegionStore(),
+            onSelectNode: ((Int64) -> Void)? = nil
+        ) {
             self.nodes = nodes
             self.state = state
             self.fitToFleet = fitToFleet
+            self.regionStore = regionStore
+            self.onSelectNode = onSelectNode
         }
 
         public func makeCoordinator() -> Coordinator {
-            Coordinator(state: state)
+            Coordinator(state: state, regionStore: regionStore, onSelectNode: onSelectNode)
+        }
+
+        public func updateNSView(_ map: MKMapView, context: Context) {
+            // Keep the selection callback fresh across SwiftUI updates (it closes over
+            // @State setters that change identity per render).
+            context.coordinator.onSelectNode = onSelectNode
+            sync(map: map, context: context)
         }
 
         public func makeNSView(context: Context) -> MKMapView {
@@ -71,17 +92,35 @@
                 forAnnotationViewWithReuseIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier
             )
             context.coordinator.attach(map: map)
-            sync(map: map, context: context, initialFit: true)
+            restoreInitialRegion(map: map, context: context)
+            sync(map: map, context: context)
             return map
         }
 
-        public func updateNSView(_ map: MKMapView, context: Context) {
-            sync(map: map, context: context, initialFit: false)
+        // MARK: Initial region (once)
+
+        /// Set the starting camera exactly once, at view creation:
+        ///  - If a region was saved on a previous run, restore it (camera stays where
+        ///    the user left it).
+        ///  - Otherwise (first-ever launch) start at the SF Bay Area and arm a one-shot
+        ///    auto-fit so the camera frames the fleet as soon as nodes arrive.
+        /// Either way the map never re-zooms when nodes are later added (Task 1).
+        private func restoreInitialRegion(map: MKMapView, context: Context) {
+            if let saved = regionStore.load() {
+                map.setRegion(saved.asCoordinateRegion, animated: false)
+                context.coordinator.armOneShotFit(false)
+            } else {
+                map.setRegion(
+                    PersistedMapRegion.sanFranciscoBayArea.asCoordinateRegion,
+                    animated: false
+                )
+                context.coordinator.armOneShotFit(fitToFleet)
+            }
         }
 
         // MARK: Sync
 
-        private func sync(map: MKMapView, context: Context, initialFit: Bool) {
+        private func sync(map: MKMapView, context: Context) {
             let desired = nodes.map(MeshNodeAnnotation.init(node:))
             let existing = map.annotations.compactMap { $0 as? MeshNodeAnnotation }
 
@@ -99,8 +138,11 @@
             }
             if !toAdd.isEmpty { map.addAnnotations(toAdd) }
 
-            let changed = !toAdd.isEmpty || !toRemove.isEmpty
-            if fitToFleet, !desired.isEmpty, initialFit || changed {
+            // Auto-fit happens at most ONCE ever (first-ever launch, when nodes first
+            // appear). It is NOT re-run when nodes are added later — that was the bug
+            // that re-zoomed the map on every ingest (Task 1). The coordinator clears
+            // the one-shot flag after firing.
+            if !desired.isEmpty, context.coordinator.consumeOneShotFitIfArmed() {
                 fit(map: map, to: desired)
             }
             // Publish the projection on the NEXT main-actor turn — NEVER synchronously
@@ -142,14 +184,49 @@
         @MainActor
         public final class Coordinator: NSObject, MKMapViewDelegate {
             private let state: MeshMapState
+            private let regionStore: MapRegionStore
+            /// Called with a tapped node's id (Task 5). Refreshed on each SwiftUI update.
+            var onSelectNode: ((Int64) -> Void)?
             private weak var map: MKMapView?
+            /// Armed for a single auto-fit (first-ever launch only); cleared once fired.
+            private var oneShotFitArmed = false
+            /// Debounces persisting the region so a pan/zoom gesture saves once it
+            /// settles, not on every intermediate frame.
+            private var saveWorkItem: DispatchWorkItem?
 
-            init(state: MeshMapState) {
+            init(state: MeshMapState, regionStore: MapRegionStore, onSelectNode: ((Int64) -> Void)?) {
                 self.state = state
+                self.regionStore = regionStore
+                self.onSelectNode = onSelectNode
             }
 
             func attach(map: MKMapView) {
                 self.map = map
+            }
+
+            /// Arm (or disarm) the one-shot fleet fit. Called once from the initial
+            /// region setup: armed only on the first-ever launch.
+            func armOneShotFit(_ armed: Bool) {
+                oneShotFitArmed = armed
+            }
+
+            /// Returns true (and disarms) exactly once if a one-shot fit is pending.
+            func consumeOneShotFitIfArmed() -> Bool {
+                guard oneShotFitArmed else { return false }
+                oneShotFitArmed = false
+                return true
+            }
+
+            /// Persist the current visible region, debounced. Runs off the observed
+            /// state (UserDefaults), so it never re-enters the SwiftUI update loop.
+            private func scheduleRegionSave() {
+                saveWorkItem?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, let map else { return }
+                    regionStore.save(PersistedMapRegion(region: map.region))
+                }
+                saveWorkItem = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
             }
 
             /// Build a MapProjection from the live map and hand it to the shared state.
@@ -168,10 +245,82 @@
 
             public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
                 publishProjection()
+                applySpiderfy(on: mapView)
+                scheduleRegionSave()
             }
 
             public func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
                 publishProjection()
+                applySpiderfy(on: mapView)
+            }
+
+            // MARK: Spiderfy (Task 3)
+
+            /// Identifier for the thin leader-line overlays drawn from a fanned marker
+            /// back to its true (shared) coordinate.
+            private static let leaderTitle = "spiderfy-leader"
+
+            /// Fan out co-located markers and draw their leader lines. Runs on every
+            /// region change: at a given zoom, only markers that still project within a
+            /// few pixels of each other are fanned, so as you zoom in real neighbours
+            /// separate on their own and only genuinely-stacked nodes stay fanned.
+            func applySpiderfy(on mapView: MKMapView) {
+                let annotations = mapView.annotations.compactMap { $0 as? MeshNodeAnnotation }
+                guard !annotations.isEmpty else { return }
+                let points = annotations.map {
+                    (id: $0.nodeID, point: mapView.convert($0.coordinate, toPointTo: mapView))
+                }
+                let placements = Spiderfier.spiderfy(points: points)
+                let byID = Dictionary(uniqueKeysWithValues: placements.map { ($0.id, $0) })
+
+                // Offset each marker view to its fanned position (screen y is down, which
+                // matches MKAnnotationView.centerOffset on macOS).
+                for annotation in annotations {
+                    guard let view = mapView.view(for: annotation),
+                          let placement = byID[annotation.nodeID] else { continue }
+                    view.centerOffset = CGPoint(
+                        x: placement.displaced.x - placement.anchor.x,
+                        y: placement.displaced.y - placement.anchor.y
+                    )
+                }
+
+                refreshLeaderLines(on: mapView, placements: placements)
+            }
+
+            /// Replace the leader-line overlays with one per fanned marker (true anchor
+            /// → displaced marker), converting screen points back to coordinates.
+            private func refreshLeaderLines(on mapView: MKMapView, placements: [SpiderfiedPlacement]) {
+                let stale = mapView.overlays.filter { ($0.title ?? nil) == Self.leaderTitle }
+                mapView.removeOverlays(stale)
+                let leaders = placements.filter(\.isFanned).map { placement -> MKPolyline in
+                    let anchor = mapView.convert(placement.anchor, toCoordinateFrom: mapView)
+                    let displaced = mapView.convert(placement.displaced, toCoordinateFrom: mapView)
+                    let line = MKPolyline(coordinates: [anchor, displaced], count: 2)
+                    line.title = Self.leaderTitle
+                    return line
+                }
+                if !leaders.isEmpty { mapView.addOverlays(leaders) }
+            }
+
+            public func mapView(
+                _ mapView: MKMapView,
+                rendererFor overlay: any MKOverlay
+            ) -> MKOverlayRenderer {
+                guard let line = overlay as? MKPolyline else {
+                    return MKOverlayRenderer(overlay: overlay)
+                }
+                let renderer = MKPolylineRenderer(polyline: line)
+                renderer.strokeColor = NSColor.white.withAlphaComponent(0.45)
+                renderer.lineWidth = 1
+                return renderer
+            }
+
+            public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+                guard let annotation = view.annotation as? MeshNodeAnnotation else { return }
+                onSelectNode?(annotation.nodeID)
+                // Deselect immediately so the same marker can be tapped again to reopen
+                // the popover (MapKit otherwise suppresses re-selection of the current).
+                mapView.deselectAnnotation(annotation, animated: false)
             }
 
             public func mapView(
@@ -197,6 +346,28 @@
                 (view as? MeshNodeAnnotationView)?.configure(for: node)
                 return view
             }
+        }
+    }
+
+    // MARK: PersistedMapRegion ↔ MapKit bridge
+
+    extension PersistedMapRegion {
+        /// Build from a live MKMapView region (delegate side).
+        init(region: MKCoordinateRegion) {
+            self.init(
+                centerLatitude: region.center.latitude,
+                centerLongitude: region.center.longitude,
+                latitudeSpan: region.span.latitudeDelta,
+                longitudeSpan: region.span.longitudeDelta
+            )
+        }
+
+        /// The MapKit region to restore.
+        var asCoordinateRegion: MKCoordinateRegion {
+            MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: centerLatitude, longitude: centerLongitude),
+                span: MKCoordinateSpan(latitudeDelta: latitudeSpan, longitudeDelta: longitudeSpan)
+            )
         }
     }
 #endif

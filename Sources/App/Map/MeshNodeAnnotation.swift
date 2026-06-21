@@ -52,7 +52,8 @@
         override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
             super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
             collisionMode = .circle
-            canShowCallout = true
+            // Selection opens our own NodeDetailPopover (Task 5), not a system callout.
+            canShowCallout = false
             frame = CGRect(x: 0, y: 0, width: 16, height: 16)
             wantsLayer = true
         }
@@ -64,8 +65,12 @@
 
         func configure(for annotation: MeshNodeAnnotation) {
             self.annotation = annotation
-            clusteringIdentifier = "mesh-node"
-            displayPriority = annotation.isGateway ? .required : .defaultHigh
+            // Co-located nodes are de-collided by Spiderfier (Task 3), not MapKit's
+            // built-in clustering — clustering would collapse a stacked site into a
+            // single bubble you can't tap into. We fan them out instead, so no
+            // clusteringIdentifier and every marker is always individually selectable.
+            clusteringIdentifier = nil
+            displayPriority = .required
             toolTip = annotation.title
             guard let layer else { return }
             let color = Self.color(for: annotation)
