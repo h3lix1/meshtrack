@@ -74,6 +74,11 @@ let package = Package(
             dependencies: ["Domain"],
             swiftSettings: strict
         ),
+        .target(
+            name: "Delivery",
+            dependencies: ["RuleEngine"],
+            swiftSettings: strict
+        ),
 
         // ---- Test/acceptance harness -------------------------------------------
         .target(
@@ -96,7 +101,7 @@ let package = Package(
             name: "meshtrackd",
             dependencies: [
                 "Domain", "Persistence", "Transport", "RuleEngine",
-                "Provisioning", "Ingest", "Crypto", "Logging", "MeshProtos"
+                "Provisioning", "Ingest", "Crypto", "Logging", "Delivery", "MeshProtos"
             ],
             swiftSettings: strict
         ),
