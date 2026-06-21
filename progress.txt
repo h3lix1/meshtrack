@@ -54,3 +54,10 @@
 2026-06-20 P7 G8 feat(app): monitor-only Channels view (sender, @mentions, DM/broadcast) — ADR 0006
 2026-06-20 P7 G10 feat(app): observability dashboard + ⌘K search + theme customizer + node-id collision matrix
 2026-06-20 P7 feat(app): wire all sections into the shell (AppComposition.registerLiveSections; headline MapKit map live; +Analytics/+Messages sections) — make verify green, 474 tests, coverage 91.6% [PHASE 7 GUI INTEGRATED]
+2026-06-20 P8 feat(domain,app): config contracts — BrokerConfig/AppSettings + ConfigGateway/CredentialStore ports + SettingsModel/SettingsTab registry (no more env vars)
+2026-06-20 P8 T-Persist feat: ConfigGateway on MeshStore (migration v4 app_config) + Keychain CredentialStore for the broker password
+2026-06-20 P8 T-Compose feat(app): macOS Settings scene (⌘,) + first-run onboarding + store-driven LiveCoordinator (env fallback) + reconnect-on-change + status badge
+2026-06-20 P8 T-Connection feat(app): Connection settings screen (host/port/TLS/topics + SecureField password + Test Connection)
+2026-06-20 P8 T-Prefs feat(app): General preferences + Alert-rules config screens
+2026-06-20 P8 T-Channels feat(app): Channels & Keys screen (wired to placeholder pending an async ChannelKeyManaging port)
+2026-06-20 P8 feat(app): integrate config — on-disk MeshStore (persists), Keychain creds, Settings tabs, MQTT test probe, alert_rule adapter — make verify green, 549 tests, coverage 90.55% [PHASE 8 INTEGRATED]
