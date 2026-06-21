@@ -180,22 +180,42 @@ struct SettingsGroup<Content: View>: View {
     }
 }
 
-/// A label + detail on the left, a `.switch` toggle on the right.
+/// A label + detail on the left, a `.switch` toggle on the right. The detail text
+/// wraps so a long subtitle never forces the row wider — that overflow is what used
+/// to push the switches out of a consistent trailing column.
 struct ToggleRow: View {
     let label: String
     let detail: String
     @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(isOn: $isOn) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.system(size: 13))
-                Text(detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
-            }
+        HStack(spacing: 12) {
+            SettingsRowLabel(label: label, detail: detail)
+            Spacer(minLength: 8)
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
         }
-        .toggleStyle(.switch)
-        .controlSize(.small)
         .padding(.vertical, 9)
+    }
+}
+
+/// The shared leading label + wrapping detail subtitle used by every settings row,
+/// so the label column lines up and long helper text wraps instead of overflowing.
+struct SettingsRowLabel: View {
+    let label: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 13))
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -212,10 +232,7 @@ struct StepperRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.system(size: 13))
-                Text(detail).font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
-            }
+            SettingsRowLabel(label: label, detail: detail)
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 stepButton("minus", action: onDecrement, enabled: canDecrement)
