@@ -21,7 +21,33 @@ public enum MeshtrackMigrator {
             try createAlert(db)
             try createTemplate(db)
         }
+        migrator.registerMigration("v2") { db in
+            try createTelemetryRollup(db, named: Table.telemetryHourly)
+            try createTelemetryRollup(db, named: Table.telemetryDaily)
+        }
         return migrator
+    }
+
+    /// Downsampled telemetry rollup table (hourly/daily): one row per
+    /// (node, bucket, kind, key) with min/max/avg/count (SPEC §5 retention).
+    private static func createTelemetryRollup(_ db: Database, named table: String) throws {
+        try db.create(table: table) { t in
+            t.autoIncrementedPrimaryKey("id")
+            t.column("node_num", .integer).notNull()
+            t.column("bucket", .integer).notNull() // bucket-start, ns since epoch
+            t.column("kind", .text).notNull()
+            t.column("key", .text).notNull()
+            t.column("min_value", .double).notNull()
+            t.column("max_value", .double).notNull()
+            t.column("avg_value", .double).notNull()
+            t.column("sample_count", .integer).notNull()
+        }
+        try db.create(
+            index: "idx_\(table)_bucket",
+            on: table,
+            columns: ["node_num", "bucket", "kind", "key"],
+            options: [.unique]
+        )
     }
 
     private static func createNode(_ db: Database) throws {

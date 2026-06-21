@@ -14,6 +14,8 @@ public enum Table {
     public static let observation = "observation"
     public static let positionFix = "position_fix"
     public static let telemetry = "telemetry"
+    public static let telemetryHourly = "telemetry_hourly"
+    public static let telemetryDaily = "telemetry_daily"
     public static let arming = "arming"
     public static let alertRule = "alert_rule"
     public static let alert = "alert"
