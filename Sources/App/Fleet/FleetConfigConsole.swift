@@ -36,6 +36,11 @@ public struct FleetConfigConsole: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Templates").font(.title2.bold())
 
+                if viewModel.templates.isEmpty {
+                    Text("No templates yet — create one below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 HStack {
                     Picker("Template", selection: Binding(
                         get: { viewModel.selectedTemplateID },
@@ -134,7 +139,9 @@ public struct FleetConfigConsole: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Target nodes (\(viewModel.selected.count) selected)").font(.headline)
             if viewModel.visibleCandidates.isEmpty {
-                Text("No nodes match the current filter.")
+                Text(viewModel.candidates.isEmpty
+                    ? "No nodes yet — they appear here once the mesh reports them."
+                    : "No nodes match the current filter.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(viewModel.visibleCandidates) { candidate in
