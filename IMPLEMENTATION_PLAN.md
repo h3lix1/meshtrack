@@ -31,13 +31,15 @@ from a cold checkout. ✅ **Phase 0 complete (2026-06-20).**
 - [x] PSK decryption (AES-CTR) for `/e/` topics; Keychain-backed `KeyStore` (up to 20 MQTT / 7 local channels)
 - [x] Serial + BLE adapters for the local node (SerialFramer tested; port/radio I/O best-effort, HIL-gated)
 - [x] Structured logging (secret-redacting wrapper)
-- [ ] Packet inspector (debug view) over decoded packets  *(→ lead, after decode)*
+- [x] Packet inspector (debug-view data layer) over decoded packets
 
 Seams committed by the lead for the parallel agents: `KeyStore` / `PacketDecryptor`
 / `ChannelKey` ports (Domain), and the `Crypto` + `Logging` module targets.
 
 **Done when:** live nodes + typed telemetry appear from MQTT and from a USB node;
-dedup proven by replay test.
+dedup proven by replay test. ✅ **Phase 1 complete (2026-06-20)** — validated on
+live bayme.sh MediumFast (decode+decrypt+dedup); serial framer built, USB-node
+hardware validation deferred to the Phase 5 HIL tier.
 
 ## Phase 2 — Liveness, battery & graphs
 
