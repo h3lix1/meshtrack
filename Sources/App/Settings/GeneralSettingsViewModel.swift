@@ -24,8 +24,22 @@ public final class GeneralSettingsViewModel {
 
     @ObservationIgnored private let gateway: any ConfigGateway
 
-    public init(gateway: any ConfigGateway) {
+    /// Applied live when a theme preset is selected, so the picker drives the app's
+    /// `ThemeController` (the chrome re-themes immediately) in addition to persisting
+    /// `themeID`. Optional so the VM stays unit-testable over a fake with no controller.
+    @ObservationIgnored private let onThemeSelected: (Theme) -> Void
+
+    /// - Parameters:
+    ///   - gateway: the `ConfigGateway` port the settings load/save through.
+    ///   - onThemeSelected: invoked with the chosen preset when the user picks a theme,
+    ///     so the composition root can apply it live (e.g. `themeController.apply`).
+    ///     Defaults to a no-op for previews/tests that don't drive a controller.
+    public init(
+        gateway: any ConfigGateway,
+        onThemeSelected: @escaping (Theme) -> Void = { _ in }
+    ) {
         self.gateway = gateway
+        self.onThemeSelected = onThemeSelected
         let defaults = AppSettings.default
         settings = defaults
         savedSettings = defaults
@@ -45,9 +59,12 @@ public final class GeneralSettingsViewModel {
         themePresets.first { $0.id == settings.themeID } ?? themePresets[0]
     }
 
-    /// Select a theme preset by storing its id.
+    /// Select a theme preset: persist its id (saved on `save()`) AND apply it live via
+    /// `onThemeSelected`, so the chrome re-themes immediately rather than only after a
+    /// relaunch.
     public func selectTheme(_ theme: Theme) {
         settings.themeID = theme.id
+        onThemeSelected(theme)
     }
 
     // MARK: Bounds (shared by the steppers/sliders and the clamp logic)
