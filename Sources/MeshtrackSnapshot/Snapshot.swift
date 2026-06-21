@@ -23,6 +23,10 @@ enum Snapshot {
                 to: "\(outputDir)/\(section.rawValue).png"
             )
         }
+        write(
+            NodeDetailView(node: nodes[1], region: "US", role: "ROUTER", armedForPreview: true),
+            to: "\(outputDir)/node-detail.png"
+        )
         print("snapshots written to \(outputDir)/")
     }
 

@@ -5,6 +5,7 @@ import SwiftUI
 
 public struct NodesView: View {
     public let nodes: [NetworkNode]
+    @State private var selected: NetworkNode?
     public init(nodes: [NetworkNode]) {
         self.nodes = nodes
     }
@@ -12,11 +13,15 @@ public struct NodesView: View {
     public var body: some View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 16)], spacing: 16) {
-                ForEach(nodes) { NodeCard(node: $0) }
+                ForEach(nodes) { node in
+                    NodeCard(node: node)
+                        .onTapGesture { selected = node }
+                }
             }
             .padding(20)
         }
         .background(Color(red: 0.03, green: 0.04, blue: 0.10))
+        .sheet(item: $selected) { NodeDetailView(node: $0) }
     }
 }
 
