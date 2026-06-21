@@ -17,10 +17,12 @@ enum Snapshot {
 
         let nodes = SampleNetwork.nodes
         let traces = SampleNetwork.traces
-        write(
-            DashboardView(nodes: nodes, traces: traces, clock: 1.6).frame(width: 1400, height: 900),
-            to: "\(outputDir)/dashboard.png"
-        )
+        for section in AppSection.allCases {
+            write(
+                RootView(section: section, nodes: nodes, traces: traces).frame(width: 1400, height: 880),
+                to: "\(outputDir)/\(section.rawValue).png"
+            )
+        }
         print("snapshots written to \(outputDir)/")
     }
 
