@@ -59,6 +59,11 @@ public extension AppModel {
         register(.fleet) {
             AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(store: store)))
         }
+        register(.provision) {
+            AnyView(ProvisioningWorkflowView(
+                viewModel: ProvisioningWorkflowFactory.make(store: store, draft: .init(), channelFor: nil)
+            ))
+        }
     }
 }
 

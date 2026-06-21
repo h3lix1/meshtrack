@@ -30,4 +30,15 @@ struct AppModelTests {
         #expect(model.nodes.count == SampleNetwork.nodes.count)
         #expect(model.traces.count == SampleNetwork.traces.count)
     }
+
+    @Test
+    func `the provisioning workflow is reachable from the sidebar with a default-mode provider`() {
+        // The section must exist in the sidebar list (so the workflow is reachable)
+        // and the default/sample registry must back it (so it renders without a live
+        // store). Live wiring is asserted by the AppComposition registration itself.
+        #expect(AppSection.allCases.contains(.provision))
+        #expect(AppSection.provision.title == "Provision")
+        let model = AppModel(nodes: SampleNetwork.nodes, traces: SampleNetwork.traces, live: false)
+        #expect(model.isRegistered(.provision))
+    }
 }
