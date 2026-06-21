@@ -20,6 +20,8 @@ public enum Table {
     public static let alertRule = "alert_rule"
     public static let alert = "alert"
     public static let template = "template"
+    /// Monitor-only decoded text messages (schema v3, SPEC §1 amended / ADR 0006).
+    public static let message = "message"
 }
 
 /// Node classification (SPEC §2.1) — the canonical type lives in Domain; persisted
