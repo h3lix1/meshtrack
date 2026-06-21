@@ -57,13 +57,15 @@ the App.
 
 ## Phase 3 — Map, arming & movement
 
-- [ ] MapKit view: nodes, clustering, track polylines, geofence overlays
+- [ ] MapKit view: nodes, clustering, track polylines, geofence overlays  *(→ App layer)*
 - [x] Arming: anchor capture (arming table) + `MovementDetector` (confirmation + accuracy margin + hysteresis + escape factor)
-- [ ] Node classification + class-based movement semantics (geofence-exit for mobile)
-- [ ] `moved` / `returned` / `geofence_exit` rules
+- [x] Node classification + class-based movement semantics (geofence-exit for mobile)
+- [x] `moved` / `returned` / `geofence_exit` rules
 
 **Done when:** jitter scenarios produce **zero** false movement alerts; real-move
-scenarios produce exactly one.
+scenarios produce exactly one. ✅ **Phase 3 logic complete (2026-06-20)** —
+MovementScenarioEvaluator proves jitter→0, 600m move→1 moved, mobile→geofence_exit
+through the harness. MapKit view lands with the App.
 
 ## Phase 4 — Provisioning & on-the-fly updates
 
