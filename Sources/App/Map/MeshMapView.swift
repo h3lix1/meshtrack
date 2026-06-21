@@ -47,21 +47,32 @@
         public var fitToFleet: Bool
         /// Persists / restores the visible region across restarts (Task 1).
         public var regionStore: MapRegionStore
+        /// Called with a tapped node's id when its marker is selected (Task 5).
+        public var onSelectNode: ((Int64) -> Void)?
 
         public init(
             nodes: [NetworkNode],
             state: MeshMapState,
             fitToFleet: Bool = true,
-            regionStore: MapRegionStore = MapRegionStore()
+            regionStore: MapRegionStore = MapRegionStore(),
+            onSelectNode: ((Int64) -> Void)? = nil
         ) {
             self.nodes = nodes
             self.state = state
             self.fitToFleet = fitToFleet
             self.regionStore = regionStore
+            self.onSelectNode = onSelectNode
         }
 
         public func makeCoordinator() -> Coordinator {
-            Coordinator(state: state, regionStore: regionStore)
+            Coordinator(state: state, regionStore: regionStore, onSelectNode: onSelectNode)
+        }
+
+        public func updateNSView(_ map: MKMapView, context: Context) {
+            // Keep the selection callback fresh across SwiftUI updates (it closes over
+            // @State setters that change identity per render).
+            context.coordinator.onSelectNode = onSelectNode
+            sync(map: map, context: context)
         }
 
         public func makeNSView(context: Context) -> MKMapView {
@@ -84,10 +95,6 @@
             restoreInitialRegion(map: map, context: context)
             sync(map: map, context: context)
             return map
-        }
-
-        public func updateNSView(_ map: MKMapView, context: Context) {
-            sync(map: map, context: context)
         }
 
         // MARK: Initial region (once)
@@ -178,6 +185,8 @@
         public final class Coordinator: NSObject, MKMapViewDelegate {
             private let state: MeshMapState
             private let regionStore: MapRegionStore
+            /// Called with a tapped node's id (Task 5). Refreshed on each SwiftUI update.
+            var onSelectNode: ((Int64) -> Void)?
             private weak var map: MKMapView?
             /// Armed for a single auto-fit (first-ever launch only); cleared once fired.
             private var oneShotFitArmed = false
@@ -185,9 +194,10 @@
             /// settles, not on every intermediate frame.
             private var saveWorkItem: DispatchWorkItem?
 
-            init(state: MeshMapState, regionStore: MapRegionStore) {
+            init(state: MeshMapState, regionStore: MapRegionStore, onSelectNode: ((Int64) -> Void)?) {
                 self.state = state
                 self.regionStore = regionStore
+                self.onSelectNode = onSelectNode
             }
 
             func attach(map: MKMapView) {
@@ -303,6 +313,14 @@
                 renderer.strokeColor = NSColor.white.withAlphaComponent(0.45)
                 renderer.lineWidth = 1
                 return renderer
+            }
+
+            public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+                guard let annotation = view.annotation as? MeshNodeAnnotation else { return }
+                onSelectNode?(annotation.nodeID)
+                // Deselect immediately so the same marker can be tapped again to reopen
+                // the popover (MapKit otherwise suppresses re-selection of the current).
+                mapView.deselectAnnotation(annotation, animated: false)
             }
 
             public func mapView(
