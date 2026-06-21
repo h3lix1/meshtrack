@@ -29,15 +29,16 @@ import Ingest
 import Persistence
 import Transport
 
-/// The shell-facing connection state. Carries only the broker host — never any
-/// credentials — so the status indicator can show "connecting to mqtt.bayme.sh"
-/// without ever surfacing a secret.
+/// The shell-facing connection state. Carries only the active endpoint — the broker
+/// host for MQTT, or the device path/name for a local node — never any credentials,
+/// so the status indicator can show "connecting to mqtt.bayme.sh" (or "…to
+/// /dev/cu.usbmodem3101") without ever surfacing a secret.
 enum LiveConnectionStatus: Equatable {
     case offline
     case connecting(host: String)
     case connected(host: String)
 
-    /// The broker host, when connecting/connected; `nil` when offline.
+    /// The endpoint, when connecting/connected; `nil` when offline.
     var host: String? {
         switch self {
         case .offline: nil
@@ -54,10 +55,12 @@ enum LiveConnectionStatus: Equatable {
 final class LiveCoordinator {
     /// The live network view model the shell renders (nodes + animated traces).
     let viewModel: NetworkViewModel
-    /// The connection state for the status indicator (host only, never secrets).
+    /// The connection state for the status indicator (endpoint only, never secrets).
     private(set) var status: LiveConnectionStatus = .offline
 
-    /// The broker host, for the "connecting…" affordance (never logs credentials).
+    /// The active endpoint (broker host or device), for the "connecting…" affordance
+    /// (never logs credentials). Named `brokerHost` for source compatibility with the
+    /// existing shell; it is the host for MQTT and the device path/name for a node.
     var brokerHost: String {
         status.host ?? ""
     }
@@ -66,9 +69,9 @@ final class LiveCoordinator {
     /// section view models (nodes / telemetry / analytics / alerts / messages).
     let store: MeshStore
     private let refreshInterval: Duration
-    /// The connection settings of the currently-running stream (incl. resolved
-    /// password). `nil` while offline. Never logged.
-    private var settings: LiveBrokerSettings?
+    /// The currently-running source (MQTT settings incl. resolved password, or a local
+    /// node's coordinates). `nil` while offline. Never logged.
+    private var dataSource: LiveDataSource?
     private var tasks: [Task<Void, Never>] = []
 
     /// The well-known Meshtastic default channel key (PSK index 1, "AQ=="), shared
@@ -90,47 +93,60 @@ final class LiveCoordinator {
         viewModel = NetworkViewModel(store: store)
     }
 
-    /// Resolve the broker connection from the config store and, if a connectable
-    /// `BrokerConfig` is saved, (re)start the live stream. Reconnect-on-change: if
-    /// the resolved settings differ from the running stream's, the stream restarts;
-    /// if they are identical it is a no-op. With no connectable config the stream
-    /// stops and the status goes offline. The password is read from the
-    /// `CredentialStore` and held only in memory.
+    /// Resolve the active data source from the persisted selection (`DataSourceStore`)
+    /// plus the broker config/password and, if it is connectable, (re)start the live
+    /// stream. Reconnect-on-change: if the resolved source differs from the running
+    /// stream's, the stream restarts; identical → no-op. With nothing connectable the
+    /// stream stops and the status goes offline. The broker password is read from the
+    /// `CredentialStore` and held only in memory; it is never logged.
     func applyConfig(
         gateway: any ConfigGateway,
-        credentials: any CredentialStore
+        credentials: any CredentialStore,
+        dataSourceStore: any DataSourceStore
     ) async {
-        guard let config = try? await gateway.loadBrokerConfig(), config.isConnectable else {
+        let brokerConfig = try? await gateway.loadBrokerConfig()
+        let resolved = LiveDataSource.resolve(
+            dataSource: dataSourceStore.load(),
+            brokerConfig: brokerConfig,
+            password: { credentials.password(host: $0, username: $1) }
+        )
+        guard let resolved else {
             stop()
             return
         }
-        let password = credentials.password(host: config.host, username: config.username)
-        apply(settings: LiveBrokerSettings.from(config: config, password: password))
+        apply(dataSource: resolved)
     }
 
-    /// (Re)start the live stream against `newSettings`. Restarts on change, no-ops
-    /// when unchanged. Public seam for the env-fallback path and tests.
+    /// (Re)start the live stream against `newSettings` (an MQTT broker). Convenience
+    /// seam for the env-fallback path and tests; wraps the settings in the MQTT source.
     func apply(settings newSettings: LiveBrokerSettings) {
-        guard settings != newSettings else { return }
+        apply(dataSource: .mqtt(newSettings))
+    }
+
+    /// (Re)start the live stream against `newSource`. Restarts on change, no-ops when
+    /// unchanged. Public seam for the composition root and tests.
+    func apply(dataSource newSource: LiveDataSource) {
+        guard dataSource != newSource else { return }
         stop()
-        start(settings: newSettings)
+        start(dataSource: newSource)
     }
 
     /// Connect and begin streaming live packets into the visualization. The
     /// pipeline persists + extracts while `onDecoded` feeds traces; a slow loop
-    /// refreshes node positions from the store.
-    private func start(settings newSettings: LiveBrokerSettings) {
-        settings = newSettings
-        status = .connecting(host: newSettings.displayHost)
+    /// refreshes node positions from the store. Works identically for every source —
+    /// MQTT, serial, or BLE — since they all implement `MeshTransport`.
+    private func start(dataSource newSource: LiveDataSource) {
+        dataSource = newSource
+        let host = newSource.displayEndpoint
+        status = .connecting(host: host)
 
-        let adapter = MQTTAdapter(config: newSettings.makeMQTTConfig(), clock: SystemWallClock())
+        let adapter = newSource.makeTransport(clock: SystemWallClock())
         let decoder = PacketDecoder(
             keyStore: DefaultChannelKeyStore(key: Self.defaultKey),
             decryptor: AESCTRPacketDecryptor()
         )
         let pipeline = IngestPipeline(store: store, decoder: decoder)
         let model = viewModel
-        let host = newSettings.displayHost
         // A @MainActor tap that promotes the status to `.connected`; capturing this
         // closure (rather than `self`) keeps the Sendable ingest closure clean.
         let onFirstPacket: @MainActor @Sendable () -> Void = { [weak self] in
@@ -157,14 +173,15 @@ final class LiveCoordinator {
         })
     }
 
-    /// Cancel the live tasks (disconnects the MQTT stream via its termination
-    /// handler) and go offline. Safe to call more than once.
+    /// Cancel the live tasks (disconnects the active stream via its termination
+    /// handler — MQTT disconnect, serial close, BLE cancel) and go offline. Safe to
+    /// call more than once.
     func stop() {
         for task in tasks {
             task.cancel()
         }
         tasks.removeAll()
-        settings = nil
+        dataSource = nil
         status = .offline
     }
 
