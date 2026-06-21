@@ -69,7 +69,7 @@ through the harness. MapKit view lands with the App.
 
 ## Phase 4 — Provisioning & on-the-fly updates
 
-- [ ] Template model + naming DSL renderer with byte-limit validation
+- [x] Template model + naming DSL renderer with byte-limit validation (+ pure render→diff)
 - [ ] Render → diff → confirm → apply via AdminMessage/ConfigModule (local admin)
 - [ ] Remote admin path — both PKI admin key and legacy admin channel; read-back verification; idempotency
 

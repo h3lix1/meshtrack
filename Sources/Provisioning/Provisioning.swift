@@ -1,7 +1,6 @@
-// Provisioning — templates, naming DSL, AdminMessage/ConfigModule apply with
-// dry-run diff + read-back verification (SPEC §2.7). Phase 4 work; placeholder.
-
-/// Module marker; superseded by the template renderer + admin apply pipeline.
-public enum ProvisioningModule {
-    public static let name = "Provisioning"
-}
+// Provisioning — templates, the naming DSL renderer (with hard byte-limit
+// validation), config diff, and AdminMessage/ConfigModule apply (SPEC §2.7).
+//
+//   • NamingDSL.swift — render `{shortName}-{id[-4:]}` style templates and
+//     enforce the Meshtastic byte limits (short ≤ 4 bytes, long ≤ 39 bytes).
+//   • (Phase 4) Template model, render→diff→confirm→apply, read-back verify.
