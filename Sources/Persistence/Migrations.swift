@@ -32,7 +32,25 @@ public enum MeshtrackMigrator {
             try addObservationIngestTime(db)
             try createMessage(db)
         }
+        // Phase 8: configuration moves out of env vars into the shared store
+        // (SPEC §2.5/§10). Non-secret app config (broker connection, app
+        // settings) is JSON-encoded into a simple key-value table; secrets stay
+        // in the Keychain (`CredentialStore`), never here.
+        migrator.registerMigration("v4") { db in
+            try createAppConfig(db)
+        }
         return migrator
+    }
+
+    /// `app_config` — key-value store for non-secret app configuration (Phase 8).
+    /// `ConfigGateway` JSON-encodes `BrokerConfig`/`AppSettings` into rows under
+    /// stable keys (`"broker"`, `"app_settings"`). Never holds secrets — the DB
+    /// must never store plaintext secrets (SPEC §2.5).
+    private static func createAppConfig(_ db: Database) throws {
+        try db.create(table: Table.appConfig) { t in
+            t.primaryKey("key", .text)
+            t.column("value", .text).notNull()
+        }
     }
 
     /// `node` ownership flags (ADR 0008). `is_mine` drives the "My Nodes" filter
