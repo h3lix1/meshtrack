@@ -2,6 +2,8 @@
 // error surface. Kept free of GRDB so the names can be referenced from tests and
 // future query helpers without dragging in the driver.
 
+import Domain
+
 /// Canonical SQLite table names for schema v1 (SPEC §5).
 ///
 /// Centralising the strings keeps record `databaseTableName`s, the migration,
@@ -18,14 +20,9 @@ public enum Table {
     public static let template = "template"
 }
 
-/// Node classification (SPEC §2.1). Drives default alert behaviour, is
-/// user-overridable, and may be inferred. Persisted as TEXT via its `rawValue`.
-public enum NodeClass: String, Codable, Sendable, CaseIterable {
-    case fixed
-    case mobile
-    case gateway
-    case unknown
-}
+/// Node classification (SPEC §2.1) — the canonical type lives in Domain; persisted
+/// as TEXT via its `rawValue`.
+public typealias NodeClass = Domain.NodeClass
 
 /// How an observation reached us (SPEC §2.4 provenance). Persisted as TEXT.
 public enum Transport: String, Codable, Sendable, CaseIterable {
