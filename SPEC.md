@@ -20,8 +20,13 @@ notifications, MapKit, Swift Charts, Keychain, LaunchAgent background execution,
 code-signed distribution.
 
 **Non-goals (v1).** Cross-platform builds; a public/multi-user server;
-chat/messaging UX (we monitor; we do not replace the official client for
-conversations); routing/topology optimization. Keep the surface small and correct.
+*two-way* chat (we do not replace the official client for sending conversations);
+routing/topology optimization. Keep the surface small and correct.
+
+> **Amended in Phase 7 (ADR 0006):** **monitor-only** messaging *is* in scope —
+> we decode and display channel/DM text read-only (sender, mentions, timestamps).
+> There is no send path. This stays true to "we monitor"; it does not make us a
+> chat client.
 
 ---
 
@@ -118,6 +123,25 @@ conversations); routing/topology optimization. Keep the surface small and correc
   the public broker (zero-hop policy). Encryption choices on amateur allocations
   are the operator's responsibility — surface settings, don't make legal decisions.
 
+### 2.10 Node ownership: "mine" & managed vs unmanaged (Phase 7, ADR 0008)
+- `is_mine` marks a node as part of the operator's fleet. It drives the **"My
+  Nodes"** filter across every view; it changes *visibility*, not alerting.
+- `is_managed` marks a node we actually administer (we own its battery / hold an
+  admin key). **Ownership-sensitive rules — `battery_below`, `voltage_below`,
+  `stale` — evaluate only for managed nodes.** Unmanaged nodes are observed
+  read-only: they appear, chart, and trace, but never raise battery/silence alerts
+  (no false alarms for strangers' nodes). Movement/geofence and `new_node_seen`
+  remain global. Both flags default false; either is user-settable (single or bulk),
+  and `is_managed` may be inferred when we successfully admin a node.
+
+### 2.11 Reception→publish latency (Phase 7)
+- For every observation, record **both** the mesh `rx_time` and our **`ingest_time`**
+  (wall-clock at frame receipt, via the `Clock` port). The gateway's
+  receive→MQTT-publish latency is `ingest_time − rx_time`. Surface it in the packet
+  inspector, as map-edge tooltips, and in latency analytics. Latency is descriptive
+  telemetry, never an alert input (clock skew between nodes makes it unreliable for
+  thresholds).
+
 ---
 
 ## 3. Architecture
@@ -138,6 +162,15 @@ Ports: `Clock`, `MeshTransport`, `Store`, `Notifier`, `Flasher`, `KeyStore`,
 `AdminChannel`. Adapters live in the outer ring (e.g. `MQTTAdapter`, `SerialAdapter`,
 `BLEAdapter`, `ReplayAdapter`, `GRDBStore`, `UNNotifier`, `EsptoolFlasher`,
 `UF2Flasher`, `KeychainKeyStore`).
+
+**App layer (Phase 7).** The `App` library stays snapshot-pure (imports `Domain`,
+`Persistence`, `RuleEngine`, `Provisioning` only); every section is a testable
+`@MainActor @Observable` view model over the store. Live MQTT wiring lives in the
+`MeshtrackApp` executable composition root, not the library. **MapKit caveat
+(ADR 0007):** `MKMapView` cannot render under the headless `ImageRenderer` snapshot
+gate, so the live map is an `MKMapView` substrate with a SwiftUI `Canvas` trace
+overlay; snapshots/CI render the deterministic Canvas-only map, and the trace
+geometry is unit-tested independent of MapKit.
 
 ---
 

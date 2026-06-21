@@ -97,3 +97,64 @@ green; flag off by default.
 - [x] Performance budgets: decode-throughput gate (DecodePerfTests, ≥ 5000 msgs/sec) wired into make verify + scoreboard; coverage floor ratcheted 70→80
 
 **Done when:** signed/notarized build; all budgets met; docs complete.
+
+## Phase 7 — The App: award-grade MapKit GUI + live fleet control  ← in progress
+
+Design contract: `docs/phase7-gui.md`. SPEC amended (§1 monitor-only messaging,
+§2.10 managed/unmanaged + my-nodes, §2.11 latency, §3 MapKit/snapshot). ADRs 0006–0008.
+Built by parallel worktree agents; feature streams add **new files only** and never
+touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShell.swift`,
+`SampleNetwork.swift`) — the Foundation stream owns those. Commit per molecular task.
+
+### G0 — Foundation seams (lead-only; unblocks Wave 2)
+- [ ] Migration v3: `node.is_mine`/`is_managed`; `message` table; `observation.ingest_time` (+ records/queries + tests)
+- [ ] Domain: `MeshMessage`, `NodeManagement`, latency helpers (pure + tested)
+- [ ] Ingest: record `ingest_time`; decode `TEXT_MESSAGE_APP` → message; re-add `onDecoded` tap (tested)
+- [ ] RuleEngine: gate `battery_below`/`voltage_below`/`stale` on `is_managed` (unmanaged+low → no alert; managed+low → 1)
+- [ ] `Package.swift`: `App` += `Provisioning`; `MeshtrackApp` += `Ingest,Transport,Persistence,Crypto,RuleEngine,Provisioning,Domain,MeshProtos`
+- [ ] AppShell → `AppModel` registry refactor; Snapshot harness builds `AppModel` from sample data
+
+### G1 — MapKit substrate (Wave 1)  *(→ headline)*
+- [ ] `MeshMapView` (`NSViewRepresentable` over `MKMapView`): dark style, fit-to-fleet, clustering, real `MKAnnotation` nodes (position-less omitted)
+- [ ] `MapProjection` adapter (`MKMapView.convert` → `point(for:)`); transparent `Canvas` trace overlay reusing `PacketTraceBuilder`/`PacketColor`/hop badge
+- [ ] Viz-settings panel: configurable `hopDuration`, equalise-finish toggle, per-id colour legend, guessed-vs-observed key + relay-confidence hint
+- [ ] Snapshot path renders the Canvas-only fallback (deterministic); overlay geometry unit-tested
+
+### G2 — Live ingest re-land + composition root (Wave 2; needs G0)
+- [ ] `MeshtrackApp/LiveCoordinator`: MQTT (env creds) → IngestPipeline → store → VMs; sample-fallback when no broker
+- [ ] `onDecoded` trace tap feeds `NetworkViewModel`; latency (`ingest_time`) captured; env-gated live smoke test
+
+### G3 — Node directory + detail + ownership (Wave 2; needs G0)
+- [ ] Node directory VM: role tabs, search, **My Nodes** filter, managed/unmanaged segmentation + bulk-classify (tested)
+- [ ] Node detail: click-to-configure (arming-gated), QR code, drill-through to analytics
+
+### G4 — Telemetry + node analytics deep-dive (Wave 1)
+- [ ] Swift Charts over telemetry + rollups (battery/voltage/util/env), live VM (tested)
+- [ ] Analytics tabs: SNR/RSSI distribution, hop-count histogram, peer/topology graph, hourly heatmap, packet-type breakdown
+
+### G5 — Alerts + arming UI (Wave 2; needs G0)
+- [ ] Alert list/ack/snooze/cooldown VM over `AlertEngine` (tested); managed-aware suppression surfaced
+- [ ] Arming flow UI (capture anchor / disarm) over the arming table
+
+### G6 — Packet inspector + latency analytics (Wave 2; needs G0)
+- [ ] Inspector: byte-level breakdown, filters, detail pane (live, tested VM)
+- [ ] Receive→publish latency surfaced (inspector + map-edge tooltip + latency tab)
+
+### G7 — Fleet config rollout UI (Wave 2; needs G0)
+- [ ] Wire `FleetApplier`: live verify-each-then-next, halt-on-failure, diff preview, fleet-wide edit, progress + abort (tested VM)
+
+### G8 — Messaging (monitor-only) (Wave 2; needs G0)
+- [ ] Channels view: decoded text grouped by channel — sender, @mentions, timestamps, DM vs broadcast (tested VM)
+
+### G9 — VCR / time-travel (Wave 1)
+- [ ] Timeline scrubber + variable-speed (≤4×) replay over `ReplayAdapter` driving the map animation (tested VM)
+
+### G10 — Observability + ⌘K search + theme + collision matrix (Wave 2; partly G0)
+- [ ] Observability dashboard: ingestion lag + transport health (finishes Phase 6 item)
+- [ ] Global ⌘K search (nodes/packets/channels); in-app theme customizer; node-id 4-byte hash-collision matrix
+
+**Done when:** `swift run MeshtrackApp` shows a real MapKit map animating live MQTT
+traffic (per-id colours, guessed/observed hops, hop badges, latency); click-to-config
++ safe fleet rollout work; my-nodes/managed segmentation kills false battery/stale
+alerts (RuleEngine test proves it); channels/telemetry/analytics/inspector/observability
+live; VCR + ⌘K work; `make verify` green; coverage floor held; snapshots deterministic.
