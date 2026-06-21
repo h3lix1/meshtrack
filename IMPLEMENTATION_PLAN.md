@@ -106,19 +106,19 @@ Built by parallel worktree agents; feature streams add **new files only** and ne
 touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShell.swift`,
 `SampleNetwork.swift`) — the Foundation stream owns those. Commit per molecular task.
 
-### G0 — Foundation seams (lead-only; unblocks Wave 2)
-- [ ] Migration v3: `node.is_mine`/`is_managed`; `message` table; `observation.ingest_time` (+ records/queries + tests)
-- [ ] Domain: `MeshMessage`, `NodeManagement`, latency helpers (pure + tested)
-- [ ] Ingest: record `ingest_time`; decode `TEXT_MESSAGE_APP` → message; re-add `onDecoded` tap (tested)
-- [ ] RuleEngine: gate `battery_below`/`voltage_below`/`stale` on `is_managed` (unmanaged+low → no alert; managed+low → 1)
-- [ ] `Package.swift`: `App` += `Provisioning`; `MeshtrackApp` += `Ingest,Transport,Persistence,Crypto,RuleEngine,Provisioning,Domain,MeshProtos`
-- [ ] AppShell → `AppModel` registry refactor; Snapshot harness builds `AppModel` from sample data
+### G0 — Foundation seams (lead-only; unblocks Wave 2) ✅ merged
+- [x] Migration v3: `node.is_mine`/`is_managed`; `message` table; `observation.ingest_time` (+ records/queries + tests)
+- [x] Domain: `MeshMessage`, `NodeManagement`, latency helpers (pure + tested)
+- [x] Ingest: record `ingest_time`; decode `TEXT_MESSAGE_APP` → message; re-add `onDecoded` tap (tested)
+- [x] RuleEngine: gate `battery_below`/`voltage_below`/`stale` on `is_managed` (unmanaged+low → no alert; managed+low → 1)
+- [x] `Package.swift`: `App` += `Provisioning`; `MeshtrackApp` += `Ingest,Transport,Persistence,Crypto,RuleEngine,Provisioning,Domain,MeshProtos`
+- [x] AppShell → `AppModel` registry refactor; Snapshot harness builds `AppModel` from sample data
 
-### G1 — MapKit substrate (Wave 1)  *(→ headline)*
-- [ ] `MeshMapView` (`NSViewRepresentable` over `MKMapView`): dark style, fit-to-fleet, clustering, real `MKAnnotation` nodes (position-less omitted)
-- [ ] `MapProjection` adapter (`MKMapView.convert` → `point(for:)`); transparent `Canvas` trace overlay reusing `PacketTraceBuilder`/`PacketColor`/hop badge
-- [ ] Viz-settings panel: configurable `hopDuration`, equalise-finish toggle, per-id colour legend, guessed-vs-observed key + relay-confidence hint
-- [ ] Snapshot path renders the Canvas-only fallback (deterministic); overlay geometry unit-tested
+### G1 — MapKit substrate (Wave 1)  *(→ headline)* ✅ merged
+- [x] `MeshMapView` (`NSViewRepresentable` over `MKMapView`): dark style, fit-to-fleet, clustering, real `MKAnnotation` nodes (position-less omitted)
+- [x] `MapProjection` adapter (`MKMapView.convert` → `point(for:)`); transparent `Canvas` trace overlay reusing `PacketTraceBuilder`/`PacketColor`/hop badge
+- [x] Viz-settings panel: configurable `hopDuration`, equalise-finish toggle, per-id colour legend, guessed-vs-observed key + relay-confidence hint
+- [x] Snapshot path renders the Canvas-only fallback (deterministic); overlay geometry unit-tested
 
 ### G2 — Live ingest re-land + composition root (Wave 2; needs G0)
 - [ ] `MeshtrackApp/LiveCoordinator`: MQTT (env creds) → IngestPipeline → store → VMs; sample-fallback when no broker
@@ -128,9 +128,9 @@ touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShe
 - [ ] Node directory VM: role tabs, search, **My Nodes** filter, managed/unmanaged segmentation + bulk-classify (tested)
 - [ ] Node detail: click-to-configure (arming-gated), QR code, drill-through to analytics
 
-### G4 — Telemetry + node analytics deep-dive (Wave 1)
-- [ ] Swift Charts over telemetry + rollups (battery/voltage/util/env), live VM (tested)
-- [ ] Analytics tabs: SNR/RSSI distribution, hop-count histogram, peer/topology graph, hourly heatmap, packet-type breakdown
+### G4 — Telemetry + node analytics deep-dive (Wave 1) ✅ merged
+- [x] Swift Charts over telemetry + rollups (battery/voltage/util/env), live VM (tested)
+- [x] Analytics tabs: SNR/RSSI distribution, hop-count histogram, peer/topology graph, hourly heatmap, packet-type breakdown
 
 ### G5 — Alerts + arming UI (Wave 2; needs G0)
 - [ ] Alert list/ack/snooze/cooldown VM over `AlertEngine` (tested); managed-aware suppression surfaced
@@ -146,8 +146,8 @@ touch shared files (`Package.swift`, `Migrations.swift`, `Schema.swift`, `AppShe
 ### G8 — Messaging (monitor-only) (Wave 2; needs G0)
 - [ ] Channels view: decoded text grouped by channel — sender, @mentions, timestamps, DM vs broadcast (tested VM)
 
-### G9 — VCR / time-travel (Wave 1)
-- [ ] Timeline scrubber + variable-speed (≤4×) replay over `ReplayAdapter` driving the map animation (tested VM)
+### G9 — VCR / time-travel (Wave 1) ✅ merged
+- [x] Timeline scrubber + variable-speed (≤4×) replay over `ReplayAdapter` driving the map animation (tested VM)
 
 ### G10 — Observability + ⌘K search + theme + collision matrix (Wave 2; partly G0)
 - [ ] Observability dashboard: ingestion lag + transport health (finishes Phase 6 item)

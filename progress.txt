@@ -40,3 +40,9 @@
 2026-06-20 P6 feat(persistence): database export/backup (consistent SQLite copy) + round-trip test
 2026-06-20 P6 docs(adr): 0003 ingestion/dedup, 0004 movement detection, 0005 firmware never-auto-flash
 2026-06-20 P6 feat(app): NodeListViewModel (testable @Observable VM over store) + NodeListView — App-layer pattern for the deferred UI (map/charts/dashboard)
+2026-06-20 P7 docs(phase7): GUI plan (docs/phase7-gui.md) + SPEC amend (§1 monitor-only msg, §2.10 managed/unmanaged, §2.11 latency) + ADRs 0006-0008; 11 worktree streams G0-G10
+2026-06-20 P7 G0 feat: migration v3 (is_mine/is_managed, message table, observation.ingest_time) + MeshMessage/NodeManagement/ReceptionLatency + ingest taps + RuleEngine managed-gating + AppModel registry [make verify green]
+2026-06-20 P7 G1 feat(app): MapKit substrate — MeshMapView (MKMapView) + MapProjection + transparent trace overlay (per-id colour, hop badge, equalise-finish timing) + viz-settings panel [headline]
+2026-06-20 P7 G4 feat(app): Swift Charts telemetry + node-analytics deep-dive (SNR/RSSI dist, hop histogram, peer graph, hourly heatmap, packet-type breakdown) — pure aggregations + headless render guard
+2026-06-20 P7 G9 feat(app): VCR/time-travel — 24h scrubber + variable-speed replay (pure reconstructor) driving the same map overlay
+2026-06-20 P7 fix(app): VizSettings @Observable didSet recursion (SIGSEGV) caught at integration; merged Wave 1 (G0/G1/G4/G9), make verify green — 319 tests, coverage 90.57%
