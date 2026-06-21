@@ -43,6 +43,7 @@ public enum AppSection: String, CaseIterable, Identifiable {
 /// `AppModel` registry, so feature streams add sections by registering a provider
 /// (never editing this switch). The sample-data path builds a default `AppModel`.
 public struct RootView: View {
+    @Environment(\.appTheme) private var theme
     @State private var section: AppSection
     @State private var model: AppModel
 
@@ -69,18 +70,34 @@ public struct RootView: View {
             model.view(for: section).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 1100, minHeight: 720)
-        .background(Color(red: 0.03, green: 0.04, blue: 0.10))
+        .background(theme.backgroundColor)
+        .tint(theme.accentColor)
         .environment(model)
     }
 }
 
 struct SidebarView: View {
+    @Environment(\.appTheme) private var theme
     @Binding var section: AppSection
+
+    /// The sidebar sits a touch lighter than the canvas so the rail reads as a
+    /// distinct surface across themes (derived from the theme background, not hardcoded).
+    private var sidebarBackground: Color {
+        let background = theme.background
+        return Color(
+            .sRGB,
+            red: min(1, background.red + 0.02),
+            green: min(1, background.green + 0.02),
+            blue: min(1, background.blue + 0.05),
+            opacity: background.opacity
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 9) {
-                Image(systemName: "antenna.radiowaves.left.and.right").foregroundStyle(.cyan)
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .foregroundStyle(theme.accentColor)
                 Text("Meshtrack").font(.title2.bold()).foregroundStyle(.white)
             }
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
@@ -96,10 +113,10 @@ struct SidebarView: View {
                     }
                     .padding(.horizontal, 13).padding(.vertical, 9)
                     .background(
-                        section == item ? Color.cyan.opacity(0.16) : .clear,
+                        section == item ? theme.accentColor.opacity(0.16) : .clear,
                         in: RoundedRectangle(cornerRadius: 8)
                     )
-                    .foregroundStyle(section == item ? Color.cyan : .white.opacity(0.65))
+                    .foregroundStyle(section == item ? theme.accentColor : .white.opacity(0.65))
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 8)
@@ -107,7 +124,7 @@ struct SidebarView: View {
             Spacer()
         }
         .frame(width: 210)
-        .background(Color(red: 0.05, green: 0.06, blue: 0.15))
+        .background(sidebarBackground)
     }
 }
 
