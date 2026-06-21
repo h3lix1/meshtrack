@@ -33,3 +33,4 @@
 2026-06-20 P3 feat(domain): Haversine geo + MovementDetector (confirmation + accuracy margin + hysteresis + escape) — jitter=0 false positives
 2026-06-20 P3 feat(scenario): MovementScenarioEvaluator — jitter→0, 600m move→1, mobile→geofence_exit via harness [PHASE 3 logic DONE; MapKit→App]
 2026-06-20 P4 feat(provisioning): NamingDSL renderer (byte limits, UTF-8, slicing) + NodeTemplate + pure ConfigDiff (render→diff)
+2026-06-20 P4 feat(provisioning): AdminApplier — render→diff→confirm→apply→read-back→idempotent over AdminChannel port [PHASE 4 logic DONE; transport HIL]
