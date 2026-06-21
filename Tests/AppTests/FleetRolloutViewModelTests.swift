@@ -52,6 +52,44 @@ struct FleetRolloutViewModelTests {
         func apply(_: [ConfigChange]) {}
     }
 
+    /// Parks inside `apply` until the test releases it — lets us catch the rollout
+    /// mid-flight (a node `.applying`) to test abort deterministically.
+    private actor GatedChannel: AdminChannel {
+        private var config: [String: String]
+        private var gate: CheckedContinuation<Void, Never>?
+        private var didEnter = false
+        private var enteredWaiter: CheckedContinuation<Void, Never>?
+        init(_ config: [String: String]) {
+            self.config = config
+        }
+
+        func currentConfig() -> [String: String] {
+            config
+        }
+
+        func apply(_ changes: [ConfigChange]) async {
+            didEnter = true
+            enteredWaiter?.resume()
+            enteredWaiter = nil
+            await withCheckedContinuation { gate = $0 }
+            for change in changes {
+                config[change.field] = change.to
+            }
+        }
+
+        /// Suspend until the rollout has entered `apply` (returns immediately if it
+        /// already has).
+        func waitUntilEntered() async {
+            if didEnter { return }
+            await withCheckedContinuation { enteredWaiter = $0 }
+        }
+
+        func release() {
+            gate?.resume()
+            gate = nil
+        }
+    }
+
     private let template = NodeTemplate(name: "fleet-std", region: "US", role: "CLIENT")
 
     private func member(_ num: Int64) -> FleetMember {
@@ -191,6 +229,30 @@ struct FleetRolloutViewModelTests {
         #expect(vm.verifiedCount == 1) // no-op counts as success
         #expect(!vm.hasFailure)
         #expect(vm.phase == .finished)
+    }
+
+    // MARK: Rollout — abort
+
+    @Test
+    func `aborting mid-rollout stops new applies and reverts the in-flight node`() async {
+        let gate = GatedChannel([:])
+        let vm = FleetRolloutViewModel(
+            channelFor: { _ in gate },
+            template: template,
+            members: [member(1), member(2)]
+        )
+
+        vm.startRollout()
+        #expect(vm.rows[0].status == .applying) // engine lit the first node up front
+        await gate.waitUntilEntered() // rollout is parked inside node 1's apply
+
+        vm.abort()
+
+        #expect(vm.phase == .aborted)
+        #expect(vm.rows[0].status == .pending) // in-flight node reverted
+        #expect(vm.rows[1].status == .pending) // node 2 never started
+        #expect(!vm.isRolling)
+        await gate.release() // let the cancelled task wind down without leaking
     }
 
     // MARK: Helpers
