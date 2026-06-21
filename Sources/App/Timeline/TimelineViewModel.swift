@@ -107,7 +107,7 @@ public final class TimelineViewModel {
     }
 
     public func togglePlay() {
-        isPlaying ? pause() : play()
+        if isPlaying { pause() } else { play() }
     }
 
     public func setSpeed(_ newSpeed: PlaybackSpeed) {
@@ -152,6 +152,30 @@ public final class TimelineViewModel {
             playhead = advanced
             refresh()
         }
+    }
+
+    // MARK: View bridge
+
+    /// The presentational state the VCRControlView renders. Lets the lead wire
+    /// `VCRControlView(state: vm.controlState, actions: .init(...))` with no glue.
+    public var controlState: VCRControlState {
+        VCRControlState(
+            buckets: window.buckets,
+            playheadFraction: window.fraction(of: playhead),
+            isPlaying: isPlaying,
+            isLive: mode == .live,
+            speed: speed,
+            playheadLabel: playheadLabel
+        )
+    }
+
+    /// A short "time-ago" label for the playhead ("LIVE" at the window end).
+    public var playheadLabel: String {
+        if mode == .live { return "LIVE" }
+        let secondsAgo = max(0, window.end.secondsSince(playhead))
+        let hours = Int(secondsAgo) / 3600
+        let minutes = (Int(secondsAgo) % 3600) / 60
+        return hours > 0 ? "-\(hours)h\(String(format: "%02d", minutes))m" : "-\(minutes)m"
     }
 
     // MARK: Derivation

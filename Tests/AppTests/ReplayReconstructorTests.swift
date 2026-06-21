@@ -69,7 +69,8 @@ struct ReplayReconstructorTests {
     @Test
     func `the sliding window evicts the oldest packets beyond the cap`() {
         let engine = ReplayReconstructor(windowSize: 3)
-        let corpus = (1 ... 6).map { observation(id: UInt32($0), gateway: 0x0000_00FF, atSeconds: Double($0)) }
+        let corpus = (1 ... 6)
+            .map { observation(id: UInt32($0), gateway: 0x0000_00FF, atSeconds: Double($0)) }
         let frame = engine.frame(
             observations: corpus,
             playhead: Instant.epoch.adding(seconds: 100),
@@ -88,10 +89,20 @@ struct ReplayReconstructorTests {
         let atOne = engine.frame(observations: corpus, playhead: playhead, speed: .one, positions: positions)
         #expect(atOne.clock == 30)
 
-        let atFour = engine.frame(observations: corpus, playhead: playhead, speed: .four, positions: positions)
+        let atFour = engine.frame(
+            observations: corpus,
+            playhead: playhead,
+            speed: .four,
+            positions: positions
+        )
         #expect(atFour.clock == 120) // 30 * 4
 
-        let atHalf = engine.frame(observations: corpus, playhead: playhead, speed: .half, positions: positions)
+        let atHalf = engine.frame(
+            observations: corpus,
+            playhead: playhead,
+            speed: .half,
+            positions: positions
+        )
         #expect(atHalf.clock == 15) // 30 * 0.5
     }
 
