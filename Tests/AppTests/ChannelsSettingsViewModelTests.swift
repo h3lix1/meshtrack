@@ -59,55 +59,139 @@ struct ChannelsSettingsViewModelTests {
         #expect(throws: ChannelsSettingsError.invalidKey) { try ChannelKeyMath.parsePSK(short) }
     }
 
+    // MARK: - Load
+
+    @Test
+    func `load reads channels already present in the store`() async {
+        let keys = InMemoryChannelKeyManager()
+        let hash = ChannelKeyMath.channelHash(name: "Seeded", psk: ChannelKeyMath.defaultPSK)
+        await keys.addChannel(name: "Seeded", hash: hash, kind: .mqtt)
+        let vm = ChannelsSettingsViewModel(keys: keys)
+
+        // Nothing until load() runs — the VM does not touch the port in init.
+        #expect(vm.mqttChannels.isEmpty)
+        await vm.load()
+        #expect(vm.mqttChannels.map(\.name) == ["Seeded"])
+        #expect(vm.lastError == nil)
+    }
+
+    // MARK: - Channel-hash parsing
+
+    @Test
+    func `parseChannelHash accepts hex and decimal byte values`() throws {
+        #expect(try ChannelKeyMath.parseChannelHash("0x1F") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("0X1f") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("#1f") == 0x1F)
+        #expect(try ChannelKeyMath.parseChannelHash("31") == 31)
+        #expect(try ChannelKeyMath.parseChannelHash(" 255 ") == 255)
+        #expect(try ChannelKeyMath.parseChannelHash("0") == 0)
+    }
+
+    @Test
+    func `parseChannelHash rejects out-of-range and non-numeric text`() {
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("256") // > one byte
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("0x100") // > one byte
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("nope")
+        }
+        #expect(throws: ChannelsSettingsError.invalidChannelHash) {
+            try ChannelKeyMath.parseChannelHash("-1")
+        }
+    }
+
     // MARK: - Add + caps
 
     @Test
-    func `adding channels splits them into mqtt and local`() {
+    func `adding with an explicit hash uses the entered byte not the derived one`() async throws {
         let (vm, _) = makeVM()
-        vm.addChannel(name: "Broker1", kind: .mqtt)
-        vm.addChannel(name: "Device1", kind: .local)
+        await vm.addChannel(name: "Observed", hashText: "0x2A", kind: .mqtt)
+        #expect(vm.lastError == nil)
+        let entry = try #require(vm.mqttChannels.first)
+        #expect(entry.hash == 0x2A)
+        // Confirm it did NOT fall back to the name-derived hash.
+        let derived = ChannelKeyMath.channelHash(name: "Observed", psk: ChannelKeyMath.defaultPSK)
+        #expect(entry.hash != derived || derived == 0x2A)
+    }
+
+    @Test
+    func `adding with an invalid hash surfaces an error and adds nothing`() async {
+        let (vm, _) = makeVM()
+        await vm.addChannel(name: "Bad", hashText: "0x100", kind: .mqtt)
+        #expect(vm.lastError == .invalidChannelHash)
+        #expect(vm.mqttChannels.isEmpty)
+    }
+
+    @Test
+    func `adding channels splits them into mqtt and local`() async {
+        let (vm, _) = makeVM()
+        await vm.addChannel(name: "Broker1", kind: .mqtt)
+        await vm.addChannel(name: "Device1", kind: .local)
         #expect(vm.mqttChannels.map(\.name) == ["Broker1"])
         #expect(vm.localChannels.map(\.name) == ["Device1"])
         #expect(vm.lastError == nil)
     }
 
-    @Test
-    func `mqtt cap is 20 — the 21st is rejected`() {
-        let (vm, _) = makeVM()
-        for i in 0 ..< 20 {
-            vm.addChannel(name: "mqtt-\(i)", kind: .mqtt)
+    /// 21 channel names whose 1-byte Meshtastic hashes are all distinct, so the
+    /// add path exercises the (un)capacity logic and not the legitimate duplicate
+    /// rejection of two channels that collide to the same on-wire hash byte.
+    private func distinctHashNames(_ count: Int) -> [String] {
+        var names: [String] = []
+        var hashes = Set<UInt32>()
+        var index = 0
+        while names.count < count {
+            let name = "ch\(index)"
+            let hash = ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+            if hashes.insert(hash).inserted {
+                names.append(name)
+            }
+            index += 1
         }
-        #expect(vm.mqttChannels.count == 20)
-        #expect(vm.canAdd(.mqtt) == false)
-
-        vm.addChannel(name: "mqtt-overflow", kind: .mqtt)
-        #expect(vm.mqttChannels.count == 20)
-        #expect(vm.lastError == .capacityReached(.mqtt))
+        return names
     }
 
     @Test
-    func `local cap is 7 — the 8th is rejected`() {
+    func `mqtt has no cap — the 21st channel is allowed`() async {
+        let (vm, _) = makeVM()
+        let names = distinctHashNames(21)
+        for name in names.prefix(20) {
+            await vm.addChannel(name: name, kind: .mqtt)
+        }
+        #expect(vm.mqttChannels.count == 20)
+        #expect(vm.canAdd(.mqtt)) // still room — MQTT is uncapped
+
+        await vm.addChannel(name: names[20], kind: .mqtt)
+        #expect(vm.mqttChannels.count == 21)
+        #expect(vm.lastError == nil)
+        #expect(vm.canAdd(.mqtt))
+    }
+
+    @Test
+    func `local cap is 7 — the 8th is rejected`() async {
         let (vm, _) = makeVM()
         for i in 0 ..< 7 {
-            vm.addChannel(name: "local-\(i)", kind: .local)
+            await vm.addChannel(name: "local-\(i)", kind: .local)
         }
         #expect(vm.localChannels.count == 7)
         #expect(vm.canAdd(.local) == false)
 
-        vm.addChannel(name: "local-overflow", kind: .local)
+        await vm.addChannel(name: "local-overflow", kind: .local)
         #expect(vm.localChannels.count == 7)
         #expect(vm.lastError == .capacityReached(.local))
     }
 
     @Test
-    func `empty and duplicate names are rejected`() {
+    func `empty and duplicate names are rejected`() async {
         let (vm, _) = makeVM()
-        vm.addChannel(name: "   ", kind: .mqtt)
+        await vm.addChannel(name: "   ", kind: .mqtt)
         #expect(vm.mqttChannels.isEmpty)
         #expect(vm.lastError == .emptyName)
 
-        vm.addChannel(name: "dup", kind: .mqtt)
-        vm.addChannel(name: "dup", kind: .mqtt)
+        await vm.addChannel(name: "dup", kind: .mqtt)
+        await vm.addChannel(name: "dup", kind: .mqtt)
         #expect(vm.mqttChannels.count == 1)
         #expect(vm.lastError == .duplicateChannel)
     }
@@ -115,19 +199,19 @@ struct ChannelsSettingsViewModelTests {
     // MARK: - Set / rotate / clear / delete
 
     @Test
-    func `setting a key flips hasKey and never re-exposes the plaintext`() throws {
+    func `setting a key flips hasKey and never re-exposes the plaintext`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "secure", kind: .mqtt)
+        await vm.addChannel(name: "secure", kind: .mqtt)
         let hash = try #require(vm.mqttChannels.first).hash
         #expect(vm.mqttChannels.first?.hasKey == false)
 
-        vm.setKey(forChannelHash: hash, pskText: customKeyB64)
+        await vm.setKey(forChannelHash: hash, pskText: customKeyB64)
         #expect(vm.lastError == nil)
         #expect(vm.mqttChannels.first?.hasKey == true)
 
         // The view model exposes only a boolean — no API returns the bytes.
         // The store holds the true PSK; the UI's ChannelEntry never does.
-        let stored = try #require(store.storedKey(forChannelHash: hash))
+        let stored = try #require(await store.storedKey(forChannelHash: hash))
         #expect(stored.psk == [UInt8](Data(base64Encoded: customKeyB64) ?? Data()))
         let entry = try #require(vm.mqttChannels.first)
         // ChannelEntry carries no psk field at all; only hasKey.
@@ -135,17 +219,17 @@ struct ChannelsSettingsViewModelTests {
     }
 
     @Test
-    func `rotating a key replaces the stored secret`() throws {
+    func `rotating a key replaces the stored secret`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "rot", kind: .local)
+        await vm.addChannel(name: "rot", kind: .local)
         let hash = try #require(vm.localChannels.first).hash
 
-        vm.setKey(forChannelHash: hash, pskText: customKeyB64)
-        let first = try #require(store.storedKey(forChannelHash: hash))
+        await vm.setKey(forChannelHash: hash, pskText: customKeyB64)
+        let first = try #require(await store.storedKey(forChannelHash: hash))
 
         let other = Data(Array(repeating: UInt8(0x77), count: 16)).base64EncodedString()
-        vm.setKey(forChannelHash: hash, pskText: other)
-        let second = try #require(store.storedKey(forChannelHash: hash))
+        await vm.setKey(forChannelHash: hash, pskText: other)
+        let second = try #require(await store.storedKey(forChannelHash: hash))
 
         #expect(first.psk != second.psk)
         #expect(second.psk == [UInt8](Data(base64Encoded: other) ?? Data()))
@@ -153,69 +237,73 @@ struct ChannelsSettingsViewModelTests {
     }
 
     @Test
-    func `the default-PSK shortcut stores the well-known key`() throws {
+    func `the default-PSK shortcut stores the well-known key`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "pub", kind: .mqtt)
+        await vm.addChannel(name: "pub", kind: .mqtt)
         let hash = try #require(vm.mqttChannels.first).hash
 
-        vm.useDefaultKey(forChannelHash: hash)
+        await vm.useDefaultKey(forChannelHash: hash)
         #expect(vm.mqttChannels.first?.hasKey == true)
-        #expect(store.storedKey(forChannelHash: hash)?.psk == ChannelKeyMath.defaultPSK)
+        #expect(await store.storedKey(forChannelHash: hash)?.psk == ChannelKeyMath.defaultPSK)
     }
 
     @Test
-    func `the AQ text shortcut also stores the default key`() throws {
+    func `the AQ text shortcut also stores the default key`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "pub2", kind: .mqtt)
+        await vm.addChannel(name: "pub2", kind: .mqtt)
         let hash = try #require(vm.mqttChannels.first).hash
 
-        vm.setKey(forChannelHash: hash, pskText: "AQ==")
-        #expect(store.storedKey(forChannelHash: hash)?.psk == ChannelKeyMath.defaultPSK)
+        await vm.setKey(forChannelHash: hash, pskText: "AQ==")
+        #expect(await store.storedKey(forChannelHash: hash)?.psk == ChannelKeyMath.defaultPSK)
     }
 
     @Test
-    func `clearing a key keeps the channel but drops the secret`() throws {
+    func `clearing a key keeps the channel but drops the secret`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "clr", kind: .mqtt)
+        await vm.addChannel(name: "clr", kind: .mqtt)
         let hash = try #require(vm.mqttChannels.first).hash
-        vm.useDefaultKey(forChannelHash: hash)
+        await vm.useDefaultKey(forChannelHash: hash)
         #expect(vm.mqttChannels.first?.hasKey == true)
 
-        vm.clearKey(forChannelHash: hash)
+        await vm.clearKey(forChannelHash: hash)
         #expect(vm.mqttChannels.count == 1)
         #expect(vm.mqttChannels.first?.hasKey == false)
-        #expect(store.storedKey(forChannelHash: hash) == nil)
+        #expect(await store.storedKey(forChannelHash: hash) == nil)
     }
 
     @Test
-    func `deleting a channel removes it and its key`() throws {
+    func `deleting a channel removes it and its key`() async throws {
         let (vm, store) = makeVM()
-        vm.addChannel(name: "gone", kind: .local)
+        await vm.addChannel(name: "gone", kind: .local)
         let hash = try #require(vm.localChannels.first).hash
-        vm.useDefaultKey(forChannelHash: hash)
+        await vm.useDefaultKey(forChannelHash: hash)
 
-        vm.removeChannel(hash: hash)
+        await vm.removeChannel(hash: hash)
         #expect(vm.localChannels.isEmpty)
-        #expect(store.storedKey(forChannelHash: hash) == nil)
+        #expect(await store.storedKey(forChannelHash: hash) == nil)
     }
 
     @Test
-    func `an invalid key text surfaces an error and leaves the channel keyless`() throws {
+    func `an invalid key text surfaces an error and leaves the channel keyless`() async throws {
         let (vm, _) = makeVM()
-        vm.addChannel(name: "bad", kind: .mqtt)
+        await vm.addChannel(name: "bad", kind: .mqtt)
         let hash = try #require(vm.mqttChannels.first).hash
 
-        vm.setKey(forChannelHash: hash, pskText: "totally not base64 $$$")
+        await vm.setKey(forChannelHash: hash, pskText: "totally not base64 $$$")
         #expect(vm.lastError == .invalidKey)
         #expect(vm.mqttChannels.first?.hasKey == false)
     }
 
     @Test
-    func `capacity label reflects current counts`() {
+    func `capacity label shows local cap and an uncapped mqtt count`() async {
         let (vm, _) = makeVM()
-        #expect(vm.capacityLabel(for: .mqtt) == "0 / 20")
+        // Local enforces and shows its 7-channel cap.
         #expect(vm.capacityLabel(for: .local) == "0 / 7")
-        vm.addChannel(name: "x", kind: .mqtt)
-        #expect(vm.capacityLabel(for: .mqtt) == "1 / 20")
+        // MQTT is uncapped: a plain count, pluralised, with no "/ N".
+        #expect(vm.capacityLabel(for: .mqtt) == "0 channels")
+        await vm.addChannel(name: "x", kind: .mqtt)
+        #expect(vm.capacityLabel(for: .mqtt) == "1 channel")
+        await vm.addChannel(name: "y", kind: .mqtt)
+        #expect(vm.capacityLabel(for: .mqtt) == "2 channels")
     }
 }
