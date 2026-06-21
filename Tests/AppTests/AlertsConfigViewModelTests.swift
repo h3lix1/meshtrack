@@ -156,6 +156,133 @@ struct AlertsConfigViewModelTests {
         }
     }
 
+    // MARK: Empty store is never a dead end
+
+    @Test
+    func `display groups always include a global group on an empty store`() async {
+        let store = InMemoryAlertRuleStore()
+        let viewModel = AlertsConfigViewModel(rules: store)
+        await viewModel.load()
+
+        // No persisted rules…
+        #expect(viewModel.groups.isEmpty)
+        // …but the editor always offers the Global group so defaults can be added.
+        #expect(viewModel.displayGroups.map(\.scope) == [.global])
+        #expect(viewModel.displayGroups.first?.records.isEmpty == true)
+    }
+
+    @Test
+    func `a persisted global group is not duplicated by the synthesized one`() async {
+        let store = InMemoryAlertRuleStore([
+            AlertRuleRecord(scope: .global, type: .batteryBelow, threshold: 20)
+        ])
+        let viewModel = AlertsConfigViewModel(rules: store)
+        await viewModel.load()
+
+        #expect(viewModel.displayGroups.count(where: { $0.scope == .global }) == 1)
+        #expect(viewModel.displayGroups.first?.records.count == 1)
+    }
+
+    // MARK: Add scope + rules round-trip through the store
+
+    @Test
+    func `full configuration from an empty store round-trips and orders correctly`() async throws {
+        let store = InMemoryAlertRuleStore()
+        let viewModel = AlertsConfigViewModel(rules: store)
+        await viewModel.load()
+        #expect(viewModel.groups.isEmpty)
+
+        // 1) Add a global battery_below rule.
+        await viewModel.addRule(type: .batteryBelow, scope: .global)
+        // 2) Add a node-scoped stale rule (scope materialized via addScope, then the
+        //    specific rule added on top).
+        let node: UInt32 = 0x00AB_CDEF
+        await viewModel.addScope(.node(node))
+        await viewModel.addRule(type: .stale, scope: .node(node))
+        // 3) Add a class-scoped voltage_below rule (this single rule materializes the
+        //    class group on its own, no seeding needed).
+        await viewModel.addRule(type: .voltageBelow, scope: .nodeClass(.fixed))
+
+        // Each rule round-trips through the store…
+        let stored = try await store.allRules()
+        #expect(stored.contains { $0.scope == .global && $0.type == .batteryBelow })
+        #expect(stored.contains { $0.scope == .node(node) && $0.type == .stale })
+        #expect(stored.contains { $0.scope == .nodeClass(.fixed) && $0.type == .voltageBelow })
+        // The fixed class has exactly the one rule we added.
+        #expect(stored.count(where: { $0.scope == .nodeClass(.fixed) }) == 1)
+
+        // …and groups are ordered global → class → node.
+        #expect(viewModel.groups.map(\.scope) == [
+            .global, .nodeClass(.fixed), .node(node)
+        ])
+
+        // Edit thresholds and assert they persist.
+        await viewModel.setThreshold(15, scope: .global, type: .batteryBelow)
+        await viewModel.setThreshold(48, scope: .node(node), type: .stale)
+        await viewModel.setThreshold(3.0, scope: .nodeClass(.fixed), type: .voltageBelow)
+
+        let reader = AlertsConfigViewModel(rules: store)
+        await reader.load()
+        #expect(reader.record(scope: .global, type: .batteryBelow)?.threshold == 15)
+        #expect(reader.record(scope: .node(node), type: .stale)?.threshold == 48)
+        let v = try #require(reader.record(scope: .nodeClass(.fixed), type: .voltageBelow)?.threshold)
+        #expect(abs(v - 3.0) < 0.0001)
+
+        // Delete the class-scoped rule: its group disappears (it had only one rule).
+        await reader.deleteRule(scope: .nodeClass(.fixed), type: .voltageBelow)
+        #expect(reader.record(scope: .nodeClass(.fixed), type: .voltageBelow) == nil)
+        #expect(reader.groups.map(\.scope) == [.global, .node(node)])
+        // The deletion is durable in the store.
+        let afterDelete = try await store.allRules()
+        #expect(!afterDelete.contains { $0.scope == .nodeClass(.fixed) })
+    }
+
+    @Test
+    func `addScope materializes a group with its default rule and persists`() async throws {
+        let store = InMemoryAlertRuleStore()
+        let viewModel = AlertsConfigViewModel(rules: store)
+        await viewModel.load()
+
+        await viewModel.addScope(.nodeClass(.mobile))
+        let seeded = try #require(viewModel.record(
+            scope: .nodeClass(.mobile), type: AlertsConfigViewModel.defaultScopeRuleType
+        ))
+        #expect(seeded.threshold == AlertsConfigViewModel.defaultScopeRuleType.defaultThreshold)
+
+        // Persisted: a fresh model reads the materialized group back.
+        let reader = AlertsConfigViewModel(rules: store)
+        await reader.load()
+        #expect(reader.groups.contains { $0.scope == .nodeClass(.mobile) })
+    }
+
+    @Test
+    func `addScope is a no-op when the scope already has a rule`() async throws {
+        let store = InMemoryAlertRuleStore([
+            AlertRuleRecord(scope: .nodeClass(.gateway), type: .stale, threshold: 6)
+        ])
+        let viewModel = AlertsConfigViewModel(rules: store)
+        await viewModel.load()
+
+        await viewModel.addScope(.nodeClass(.gateway))
+        // Did not seed a second (default) rule on top of the existing one.
+        let groupRecords = try #require(viewModel.groups.first { $0.scope == .nodeClass(.gateway) }?.records)
+        #expect(groupRecords.map(\.type) == [.stale])
+    }
+
+    // MARK: Node-id parsing
+
+    @Test
+    func `parseNodeID accepts hex, bare-hex and decimal, rejects junk`() {
+        #expect(AlertsConfigViewModel.parseNodeID("!a1b2c3d4") == 0xA1B2_C3D4)
+        #expect(AlertsConfigViewModel.parseNodeID("  !a1b2c3d4  ") == 0xA1B2_C3D4)
+        #expect(AlertsConfigViewModel.parseNodeID("deadbeef") == 0xDEAD_BEEF)
+        #expect(AlertsConfigViewModel.parseNodeID("42") == 42)
+        #expect(AlertsConfigViewModel.parseNodeID("") == nil)
+        #expect(AlertsConfigViewModel.parseNodeID("   ") == nil)
+        #expect(AlertsConfigViewModel.parseNodeID("!zzzz") == nil)
+        #expect(AlertsConfigViewModel.parseNodeID("not-a-node") == nil)
+    }
+
     // MARK: Snooze
 
     @Test
