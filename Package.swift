@@ -79,6 +79,10 @@ let package = Package(
             dependencies: ["RuleEngine"],
             swiftSettings: strict
         ),
+        .target(
+            name: "Firmware",
+            swiftSettings: strict
+        ),
 
         // ---- Test/acceptance harness -------------------------------------------
         .target(
@@ -101,7 +105,7 @@ let package = Package(
             name: "meshtrackd",
             dependencies: [
                 "Domain", "Persistence", "Transport", "RuleEngine",
-                "Provisioning", "Ingest", "Crypto", "Logging", "Delivery", "MeshProtos"
+                "Provisioning", "Ingest", "Crypto", "Logging", "Delivery", "Firmware", "MeshProtos"
             ],
             swiftSettings: strict
         ),
@@ -123,7 +127,8 @@ let package = Package(
             swiftSettings: strict
         ),
         .testTarget(name: "CryptoTests", dependencies: ["Crypto", "Domain"], swiftSettings: strict),
-        .testTarget(name: "LoggingTests", dependencies: ["Logging", "Domain"], swiftSettings: strict)
+        .testTarget(name: "LoggingTests", dependencies: ["Logging", "Domain"], swiftSettings: strict),
+        .testTarget(name: "FirmwareTests", dependencies: ["Firmware"], swiftSettings: strict)
     ],
     swiftLanguageModes: [.v6]
 )

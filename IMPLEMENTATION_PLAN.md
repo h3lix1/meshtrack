@@ -80,11 +80,11 @@ detected). Real AdminMessage transport (local USB / remote PKI / legacy) is HIL.
 
 ## Phase 5 — Firmware onboarding (extra credit, feature-flagged)
 
-- [ ] `Flasher` port; chip-family detection
-- [ ] esptool adapter (ESP32 family, correct offsets)
-- [ ] UF2/DFU adapter (nRF52 / RP2040)
-- [ ] firmware-variant↔hardware verification; binary pinning + checksums; confirm-before-write
-- [ ] HIL test tier (real board + Docker Mosquitto)
+- [x] `Flasher` port; chip-family detection (esptool vs UF2 by family + chip-specific offsets)
+- [~] esptool adapter (offsets defined; real esptool process I/O is effect/HIL)  *(→ HIL)*
+- [~] UF2/DFU adapter (UF2 method defined; real volume-copy I/O is effect/HIL)  *(→ HIL)*
+- [x] firmware-variant↔hardware verification; binary pinning + checksums; confirm-before-write (GuardedFlasher, never auto-flash)
+- [~] HIL test tier — read-only chip detection validated on the XIAO; flashing is gated/manual (never auto-flash)  *(→ HIL)*
 
 **Done when:** guided flash of a known board succeeds behind confirmation; HIL gate
 green; flag off by default.
