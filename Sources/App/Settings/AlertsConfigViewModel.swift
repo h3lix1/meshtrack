@@ -79,6 +79,17 @@ public final class AlertsConfigViewModel {
         }
     }
 
+    /// The groups to render, with a Global group guaranteed to exist (and ordered
+    /// first) even when no global rules are configured yet — so a fresh store is never
+    /// a dead end: the user can always add global defaults. The synthesized global
+    /// group has no records and is not persisted until a rule is added to it.
+    public var displayGroups: [ScopeGroup] {
+        if groups.contains(where: { $0.scope == .global }) {
+            return groups
+        }
+        return [ScopeGroup(scope: .global, records: [])] + groups
+    }
+
     /// Group records by scope, ordered global → class → node, with class scopes in
     /// `NodeClass.allCases` order and node scopes by ascending node number. Within a
     /// group, rules are ordered by `AlertRuleType.allCases`.
@@ -204,6 +215,39 @@ public final class AlertsConfigViewModel {
     public func addRule(type: AlertRuleType, scope: AlertRuleScope) async {
         guard record(scope: scope, type: type) == nil else { return }
         await upsert(AlertRuleRecord(scope: scope, type: type, threshold: type.defaultThreshold))
+    }
+
+    /// The rule type a freshly-added scope is seeded with so the new group
+    /// materializes (and persists) immediately with one editable rule.
+    public static let defaultScopeRuleType: AlertRuleType = .batteryBelow
+
+    /// Materialize a new scope group by adding its first default rule, so a class- or
+    /// node-scoped group appears immediately and persists. If the scope already has
+    /// any rule, seed nothing (it is already present); the group simply stays.
+    public func addScope(_ scope: AlertRuleScope) async {
+        let hasAnyRule = groups.first { $0.scope == scope }?.records.isEmpty == false
+        guard !hasAnyRule else { return }
+        await addRule(type: Self.defaultScopeRuleType, scope: scope)
+    }
+
+    // MARK: Node-id parsing
+
+    /// Parse a user-entered node identifier into a node number, accepting either a
+    /// Meshtastic `!aabbccdd` hex id or a plain decimal number. Returns `nil` for
+    /// empty/invalid input. Pure; unit-tested.
+    nonisolated static func parseNodeID(_ raw: String) -> UInt32? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        // Meshtastic `!aabbccdd` hex id.
+        if trimmed.hasPrefix("!") {
+            return UInt32(trimmed.dropFirst(), radix: 16)
+        }
+        // A bare hex id (e.g. "aabbccdd") containing a hex letter is read as hex…
+        if trimmed.allSatisfy(\.isHexDigit), trimmed.contains(where: { !$0.isNumber }) {
+            return UInt32(trimmed, radix: 16)
+        }
+        // …otherwise a plain decimal node number.
+        return UInt32(trimmed)
     }
 
     /// Delete the rule for `(scope, type)`.
