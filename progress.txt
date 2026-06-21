@@ -38,3 +38,5 @@
 2026-06-20 P5 HIL: read-only esptool flash-id on the XIAO → ESP32-S3/8MB; ChipDetection (.esp32s3→esptool/0x0000) matches real hardware. No flash written.
 2026-06-20 P6 feat(perf): decode-throughput budget gate (DecodePerfTests ≥5000 msgs/sec) + scoreboard ingestion budget
 2026-06-20 P6 feat(persistence): database export/backup (consistent SQLite copy) + round-trip test
+2026-06-20 P6 docs(adr): 0003 ingestion/dedup, 0004 movement detection, 0005 firmware never-auto-flash
+2026-06-20 P6 feat(app): NodeListViewModel (testable @Observable VM over store) + NodeListView — App-layer pattern for the deferred UI (map/charts/dashboard)

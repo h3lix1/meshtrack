@@ -128,7 +128,8 @@ let package = Package(
         ),
         .testTarget(name: "CryptoTests", dependencies: ["Crypto", "Domain"], swiftSettings: strict),
         .testTarget(name: "LoggingTests", dependencies: ["Logging", "Domain"], swiftSettings: strict),
-        .testTarget(name: "FirmwareTests", dependencies: ["Firmware"], swiftSettings: strict)
+        .testTarget(name: "FirmwareTests", dependencies: ["Firmware"], swiftSettings: strict),
+        .testTarget(name: "AppTests", dependencies: ["App", "Persistence", "Domain"], swiftSettings: strict)
     ],
     swiftLanguageModes: [.v6]
 )
