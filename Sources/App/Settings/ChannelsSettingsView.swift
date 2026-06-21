@@ -103,29 +103,52 @@ private struct ChannelSection: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: 8) {
-            TextField("Add channel by name", text: $newName)
-                .textFieldStyle(.plain)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                .onSubmit(add)
-            TextField("Hash (optional)", text: $newHash)
-                .textFieldStyle(.plain)
-                .foregroundStyle(.white)
-                .frame(width: 110)
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                .onSubmit(add)
-            Button(action: add) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .bold))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("Add channel by name", text: $newName)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                    .onSubmit(add)
+                TextField("Hash (optional)", text: $newHash)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .frame(width: 110)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                    .onSubmit(add)
+                Button(action: add) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(viewModel.canAdd(kind) ? Color.cyan : .secondary)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .disabled(!viewModel.canAdd(kind))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(viewModel.canAdd(kind) ? Color.cyan : .secondary)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            .disabled(!viewModel.canAdd(kind))
+            derivedHashHint
+        }
+    }
+
+    /// The hash preview to show under the add row: the name-derived byte while the
+    /// operator leaves the hash field blank, and `nil` once they type an override
+    /// (then the field itself is the source of truth) or before they type a name.
+    private var previewHash: UInt32? {
+        guard newHash.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return viewModel.derivedHash(forName: newName)
+    }
+
+    /// A live hint showing the on-wire hash that will be derived from the typed
+    /// name, so the operator can confirm a channel will match traffic before adding.
+    @ViewBuilder
+    private var derivedHashHint: some View {
+        if let derived = previewHash {
+            Text(String(format: "Derives hash 0x%02X", derived))
+                .font(.system(size: 11).monospaced())
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
         }
     }
 
