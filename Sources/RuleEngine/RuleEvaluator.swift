@@ -2,7 +2,7 @@
 //
 // Given a node's observed snapshot, the effective rules, and `now` (from the
 // Clock port), produce the alert conditions that currently hold. Deterministic
-// and side-effect-free; the state machine (firing/ack/resolved) wraps this.
+// and side-effect-free; the AlertEngine state machine wraps this.
 
 import Domain
 
@@ -34,16 +34,19 @@ public struct NodeSnapshot: Sendable, Equatable {
     }
 }
 
-/// A condition that currently holds for a node (pre-state-machine).
+/// A condition that currently holds for a node (pre-state-machine). Carries the
+/// effective rule's cooldown so the engine can rate-limit re-firing.
 public struct AlertCondition: Sendable, Equatable {
     public let type: AlertType
     public let nodeNum: UInt32
     public let detail: String
+    public let cooldownSeconds: Double
 
-    public init(type: AlertType, nodeNum: UInt32, detail: String) {
+    public init(type: AlertType, nodeNum: UInt32, detail: String, cooldownSeconds: Double = 0) {
         self.type = type
         self.nodeNum = nodeNum
         self.detail = detail
+        self.cooldownSeconds = cooldownSeconds
     }
 }
 
@@ -78,7 +81,8 @@ public enum RuleEvaluator {
         return AlertCondition(
             type: .stale,
             nodeNum: snapshot.nodeNum,
-            detail: "silent for \(Int(silence))s (> \(Int(threshold))s)"
+            detail: "silent for \(Int(silence))s (> \(Int(threshold))s)",
+            cooldownSeconds: rule.cooldownSeconds
         )
     }
 
@@ -92,7 +96,8 @@ public enum RuleEvaluator {
         return AlertCondition(
             type: .batteryBelow,
             nodeNum: snapshot.nodeNum,
-            detail: "battery \(battery)% < \(rule.threshold)%"
+            detail: "battery \(battery)% < \(rule.threshold)%",
+            cooldownSeconds: rule.cooldownSeconds
         )
     }
 
@@ -106,7 +111,8 @@ public enum RuleEvaluator {
         return AlertCondition(
             type: .voltageBelow,
             nodeNum: snapshot.nodeNum,
-            detail: "voltage \(voltage)V < \(rule.threshold)V"
+            detail: "voltage \(voltage)V < \(rule.threshold)V",
+            cooldownSeconds: rule.cooldownSeconds
         )
     }
 }

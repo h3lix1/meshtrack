@@ -60,12 +60,9 @@ public enum ArmingState: String, Codable, Sendable, CaseIterable {
     case returned
 }
 
-/// Lifecycle of a fired alert (SPEC §2.6 state machine). Persisted as TEXT.
-public enum AlertState: String, Codable, Sendable, CaseIterable {
-    case firing
-    case acknowledged
-    case resolved
-}
+/// Lifecycle of a fired alert (SPEC §2.6 state machine) — canonical type in
+/// Domain; persisted as TEXT via its `rawValue`.
+public typealias AlertState = Domain.AlertState
 
 /// Typed errors surfaced by the store. No `try!`/force-unwrap in production code;
 /// callers get a precise, `Sendable` failure instead.
