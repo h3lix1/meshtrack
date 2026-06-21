@@ -38,15 +38,13 @@ struct MeshtrackApp: App {
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
 
-    /// The settings window's tab registry. The Connection/Channels/General/Alerts
-    /// tabs are owned by other agents and register themselves at integration; here
-    /// we register placeholder providers for tabs nothing else has wired yet, so the
-    /// window always renders. About is owned here.
-    @State private var settingsModel = SettingsModel()
+    /// The settings window's tab registry, populated eagerly in `init` (before the
+    /// Settings window first renders) so the initially-selected tab shows its content.
+    @State private var settingsModel: SettingsModel
     @State private var root = RootCoordinator()
     /// The live theme applied across the app's chrome; seeded from the saved
     /// `AppSettings.themeID` and updated when the General picker selects a preset.
-    @State private var themeController = ThemeController()
+    @State private var themeController: ThemeController
 
     /// Promotes the process to a regular foreground GUI app on launch — see
     /// `MeshtrackAppDelegate`. Required because `swift run MeshtrackApp` starts a bare
@@ -59,8 +57,22 @@ struct MeshtrackApp: App {
     init() {
         let store = Self.openStore()
         self.store = store
-        configGateway = store // MeshStore conforms to ConfigGateway (Persistence)
-        credentialStore = KeychainCredentialStore()
+        let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
+        let credentials: any CredentialStore = KeychainCredentialStore()
+        configGateway = gateway
+        credentialStore = credentials
+
+        // Register the Settings tabs EAGERLY, before the Settings window first
+        // renders. (Doing it in `.onAppear` resolved the initially-selected tab
+        // against an empty registry, so it stayed blank until the selection changed.)
+        let themeController = ThemeController()
+        let model = SettingsModel()
+        Self.registerTabs(
+            on: model, gateway: gateway, credentials: credentials,
+            store: store, themeController: themeController
+        )
+        _settingsModel = State(initialValue: model)
+        _themeController = State(initialValue: themeController)
     }
 
     /// Open the durable on-disk store under Application Support, falling back to an
@@ -112,7 +124,6 @@ struct MeshtrackApp: App {
             SettingsShellView(model: settingsModel, tab: root.settingsTab)
                 .preferredColorScheme(.dark)
                 .appTheme(themeController.theme)
-                .onAppear { registerSettingsTabs() }
         }
     }
 
@@ -122,50 +133,41 @@ struct MeshtrackApp: App {
         openSettings()
     }
 
-    /// Whether the settings tabs have been registered yet (one-shot: `.onAppear`
-    /// can fire more than once for the Settings scene).
-    @State private var settingsTabsRegistered = false
-
-    /// Register content providers so the Settings window renders end-to-end before
-    /// the other agents' tabs land. The About tab is owned here; Connection /
-    /// Channels / General / Alerts get bespoke placeholders.
-    ///
-    /// LEAD: at integration each owning agent registers its real provider by
-    /// calling `settingsModel.register(.tab) { … }` from its own composition file.
-    /// `register` replaces, so call those registrations AFTER this seed (or simply
-    /// drop the matching placeholder line below). This runs once per launch.
-    private func registerSettingsTabs() {
-        guard !settingsTabsRegistered else { return }
-        settingsTabsRegistered = true
-        let gateway = configGateway
-        let credentials = credentialStore
-        let store = store
-        let themeController = themeController
-
-        settingsModel.register(.connection) {
+    /// Register each Settings tab's content provider on `model`. Static and called
+    /// from `init` so the registry is fully populated before the Settings window
+    /// first renders (the initially-selected tab then shows its content immediately).
+    @MainActor
+    private static func registerTabs(
+        on model: SettingsModel,
+        gateway: any ConfigGateway,
+        credentials: any CredentialStore,
+        store: MeshStore,
+        themeController: ThemeController
+    ) {
+        model.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
                 gateway: gateway,
                 credentials: credentials,
                 test: { await probeBrokerConnection($0, password: $1) }
             )))
         }
-        settingsModel.register(.channels) {
+        model.register(.channels) {
             AnyView(ChannelsSettingsView(viewModel: ChannelsSettingsViewModel(
                 keys: KeychainChannelManager(store: store)
             )))
         }
-        settingsModel.register(.general) {
+        model.register(.general) {
             AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(
                 gateway: gateway,
                 onThemeSelected: { themeController.apply($0) }
             )))
         }
-        settingsModel.register(.alerts) {
+        model.register(.alerts) {
             AnyView(AlertsConfigView(viewModel: AlertsConfigViewModel(
                 rules: MeshStoreAlertRuleStore(store: store)
             )))
         }
-        settingsModel.register(.about) { AnyView(AboutSettingsTab()) }
+        model.register(.about) { AnyView(AboutSettingsTab()) }
     }
 }
 
