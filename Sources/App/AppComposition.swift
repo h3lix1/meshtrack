@@ -47,6 +47,9 @@ public extension AppModel {
         register(.health) {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
+        register(.fleet) {
+            AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(store: store)))
+        }
     }
 }
 
