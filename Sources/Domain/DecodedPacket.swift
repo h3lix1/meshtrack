@@ -63,6 +63,12 @@ public struct DecodedPacket: Sendable, Equatable {
     public let rxSnr: Double?
     public let hopStart: UInt8?
     public let hopLimit: UInt8?
+    /// Last byte of the previous hop (`MeshPacket.relay_node`); drives relay guessing.
+    public let relayNode: UInt8?
+    /// Routing next-hop hint (`MeshPacket.next_hop`), last byte.
+    public let nextHop: UInt8?
+    /// The gateway node that uplinked this to MQTT (`ServiceEnvelope.gateway_id`).
+    public let gatewayID: UInt32?
     /// Whether the packet arrived encrypted (and was decrypted) vs. plaintext.
     public let wasEncrypted: Bool
 
@@ -78,6 +84,9 @@ public struct DecodedPacket: Sendable, Equatable {
         rxSnr: Double? = nil,
         hopStart: UInt8? = nil,
         hopLimit: UInt8? = nil,
+        relayNode: UInt8? = nil,
+        nextHop: UInt8? = nil,
+        gatewayID: UInt32? = nil,
         wasEncrypted: Bool = false
     ) {
         self.from = from
@@ -91,6 +100,9 @@ public struct DecodedPacket: Sendable, Equatable {
         self.rxSnr = rxSnr
         self.hopStart = hopStart
         self.hopLimit = hopLimit
+        self.relayNode = relayNode
+        self.nextHop = nextHop
+        self.gatewayID = gatewayID
         self.wasEncrypted = wasEncrypted
     }
 
