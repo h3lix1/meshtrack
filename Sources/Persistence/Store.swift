@@ -115,4 +115,59 @@ public struct MeshStore: Sendable {
                 .fetchAll(db)
         }
     }
+
+    // MARK: Retention & rollups (SPEC §5)
+
+    /// Roll up raw telemetry into the hourly + daily downsample tables for every
+    /// COMPLETE bucket (range entirely before `now`). Idempotent (upserts).
+    public func rollupTelemetry(now: Instant) async throws {
+        let nowNanos = now.nanosecondsSinceEpoch
+        try await writer.write { db in
+            try Self.rollup(db, into: Table.telemetryHourly, bucketNanos: 3_600_000_000_000, now: nowNanos)
+            try Self.rollup(db, into: Table.telemetryDaily, bucketNanos: 86_400_000_000_000, now: nowNanos)
+        }
+    }
+
+    /// Delete raw telemetry older than `cutoff` (retention_raw). Run AFTER
+    /// `rollupTelemetry` so the downsampled rollups survive.
+    public func pruneRawTelemetry(olderThan cutoff: Instant) async throws {
+        try await writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM \(Table.telemetry) WHERE t < ?",
+                arguments: [cutoff.nanosecondsSinceEpoch]
+            )
+        }
+    }
+
+    public func hourlyTelemetry(forNode nodeNum: Int64) async throws -> [TelemetryRollupRecord] {
+        try await rollups(Table.telemetryHourly, nodeNum: nodeNum)
+    }
+
+    public func dailyTelemetry(forNode nodeNum: Int64) async throws -> [TelemetryRollupRecord] {
+        try await rollups(Table.telemetryDaily, nodeNum: nodeNum)
+    }
+
+    private func rollups(_ table: String, nodeNum: Int64) async throws -> [TelemetryRollupRecord] {
+        try await writer.read { db in
+            try TelemetryRollupRecord.fetchAll(
+                db,
+                sql: "SELECT * FROM \(table) WHERE node_num = ? ORDER BY bucket",
+                arguments: [nodeNum]
+            )
+        }
+    }
+
+    private static func rollup(_ db: Database, into table: String, bucketNanos: Int64, now: Int64) throws {
+        try db.execute(sql: """
+        INSERT INTO \(table) (node_num, bucket, kind, key, min_value, max_value, avg_value, sample_count)
+        SELECT node_num, (t / \(bucketNanos)) * \(bucketNanos) AS bucket, kind, key,
+               MIN(value), MAX(value), AVG(value), COUNT(*)
+        FROM \(Table.telemetry)
+        WHERE (t / \(bucketNanos)) * \(bucketNanos) + \(bucketNanos) <= \(now)
+        GROUP BY node_num, bucket, kind, key
+        ON CONFLICT(node_num, bucket, kind, key)
+        DO UPDATE SET min_value = excluded.min_value, max_value = excluded.max_value,
+                      avg_value = excluded.avg_value, sample_count = excluded.sample_count
+        """)
+    }
 }

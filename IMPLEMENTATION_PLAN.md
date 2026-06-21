@@ -47,7 +47,7 @@ hardware validation deferred to the Phase 5 HIL tier.
 - [x] `stale`, `battery_below`, `voltage_below` rules
 - [x] Alert state machine + cooldown/snooze/ack + storm suppression on reconnect
 - [x] Notification Center delivery (+ delivery port stub for ntfy/webhook)
-- [ ] Swift Charts telemetry history; retention + rollups
+- [x] Telemetry retention + rollups (hourly/daily downsample, prune-keeps-rollups) — Swift Charts history deferred to the App layer (Phase 3)
 
 **Done when:** stale/battery scenarios fire exactly the expected alerts; reconnect
 avalanche test passes.

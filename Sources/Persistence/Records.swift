@@ -328,4 +328,18 @@ public struct TemplateRecord: Codable, FetchableRecord, MutablePersistableRecord
     }
 }
 
+/// A downsampled telemetry rollup row (`telemetry_hourly` / `telemetry_daily`),
+/// read-only — rows are written by the rollup SQL.
+public struct TelemetryRollupRecord: Codable, FetchableRecord, Sendable {
+    public var id: Int64?
+    public var node_num: Int64
+    public var bucket: Int64
+    public var kind: TelemetryKind
+    public var key: String
+    public var min_value: Double
+    public var max_value: Double
+    public var avg_value: Double
+    public var sample_count: Int
+}
+
 // swiftlint:enable identifier_name
