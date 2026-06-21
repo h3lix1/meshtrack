@@ -52,7 +52,8 @@
         override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
             super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
             collisionMode = .circle
-            canShowCallout = true
+            // Selection opens our own NodeDetailPopover (Task 5), not a system callout.
+            canShowCallout = false
             frame = CGRect(x: 0, y: 0, width: 16, height: 16)
             wantsLayer = true
         }
