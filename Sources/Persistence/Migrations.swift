@@ -61,11 +61,15 @@ public enum MeshtrackMigrator {
             t.column("hop_start", .integer)
             t.column("hop_limit", .integer)
         }
-        // Dedup key (SPEC §2.4): same packet from the same node counts once.
+        // Observations are append-only provenance (SPEC §2.4): the same packet may
+        // arrive via several gateways, each its own row. Only an EXACT re-delivery
+        // (same packet + node + gateway + transport) is rejected, for idempotency on
+        // backfill/reconnect. Telemetry/position "count once" is the pipeline's
+        // DedupWindow, not this index.
         try db.create(
-            index: "idx_observation_dedup",
+            index: "idx_observation_provenance",
             on: Table.observation,
-            columns: ["packet_id", "node_num"],
+            columns: ["packet_id", "node_num", "gateway_id", "transport"],
             options: [.unique]
         )
         try db.create(

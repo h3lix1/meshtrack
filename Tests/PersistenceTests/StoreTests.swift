@@ -68,27 +68,31 @@ struct StoreTests {
     }
 
     @Test
-    func `observation dedup index rejects a duplicate (packet_id, node_num)`() async throws {
+    func `observations are append-only provenance; only exact re-delivery is rejected`() async throws {
         let store = try makeStore()
         let obs = ObservationRecord(
             node_num: 7, packet_id: 0xDEAD_BEEF, transport: .mqtt,
-            gateway_id: "!gw", rx_time: 1000, rx_rssi: -90, rx_snr: 5.5
+            gateway_id: "!gw1", rx_time: 1000, rx_rssi: -90, rx_snr: 5.5
         )
         let id = try await store.recordObservation(obs)
         #expect(id > 0)
 
-        // Same packet from the same node, even via a different gateway, counts once.
+        // Exact re-delivery (same packet + node + gateway + transport) is rejected — idempotent.
+        await #expect(throws: StoreError.self) {
+            try await store.recordObservation(obs)
+        }
+
+        // The SAME packet via a DIFFERENT gateway is valid provenance (SPEC §2.4) — kept.
         var viaOtherGateway = obs
         viaOtherGateway.gateway_id = "!gw2"
-        await #expect(throws: StoreError.self) {
-            try await store.recordObservation(viaOtherGateway)
-        }
+        let id2 = try await store.recordObservation(viaOtherGateway)
+        #expect(id2 > 0)
 
         // A different node with the same packet_id is allowed.
         var otherNode = obs
         otherNode.node_num = 8
-        let id2 = try await store.recordObservation(otherNode)
-        #expect(id2 > 0)
+        let id3 = try await store.recordObservation(otherNode)
+        #expect(id3 > 0)
     }
 
     @Test
