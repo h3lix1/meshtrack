@@ -21,11 +21,15 @@ public struct TelemetryPoint: Sendable, Equatable, Identifiable {
     public let minValue: Double?
     public let maxValue: Double?
 
-    public var id: Int64 { time }
+    public var id: Int64 {
+        time
+    }
 
     /// Seconds since the Unix epoch — convenient for `Date(timeIntervalSince1970:)`
     /// at the SwiftUI boundary without dragging Foundation into this core.
-    public var secondsSinceEpoch: Double { Double(time) / 1_000_000_000 }
+    public var secondsSinceEpoch: Double {
+        Double(time) / 1_000_000_000
+    }
 
     public init(time: Int64, value: Double, minValue: Double? = nil, maxValue: Double? = nil) {
         self.time = time
@@ -46,7 +50,9 @@ public struct TelemetryMetric: Sendable, Equatable, Identifiable, Hashable {
     /// utilisation 0…100). `nil` lets the chart auto-scale (voltage, temp…).
     public let domain: ClosedRange<Double>?
 
-    public var id: String { "\(kind.rawValue):\(key)" }
+    public var id: String {
+        "\(kind.rawValue):\(key)"
+    }
 
     public init(
         key: String,
@@ -101,7 +107,9 @@ public enum TelemetryRange: String, Sendable, CaseIterable, Identifiable {
     case week
     case month
 
-    public var id: String { rawValue }
+    public var id: String {
+        rawValue
+    }
 
     public var label: String {
         switch self {
@@ -148,8 +156,13 @@ public extension TelemetrySeries {
         public let points: [TelemetryPoint]
         public let resolution: TelemetryResolution
 
-        public var id: String { metric.id }
-        public var isEmpty: Bool { points.isEmpty }
+        public var id: String {
+            metric.id
+        }
+
+        public var isEmpty: Bool {
+            points.isEmpty
+        }
 
         public init(metric: TelemetryMetric, points: [TelemetryPoint], resolution: TelemetryResolution) {
             self.metric = metric

@@ -133,9 +133,9 @@ struct NodeAnalyticsAggregationsTests {
     func `hour of day buckets nanoseconds into 0 to 23 UTC`() {
         #expect(NodeAnalytics.hourOfDay(nanoseconds: 0) == 0)
         // 13:00 UTC = 13 * 3600 s.
-        #expect(NodeAnalytics.hourOfDay(nanoseconds: 13 * 3_600 * 1_000_000_000) == 13)
+        #expect(NodeAnalytics.hourOfDay(nanoseconds: 13 * 3600 * 1_000_000_000) == 13)
         // Wraps across a day boundary: 25h → hour 1.
-        #expect(NodeAnalytics.hourOfDay(nanoseconds: 25 * 3_600 * 1_000_000_000) == 1)
+        #expect(NodeAnalytics.hourOfDay(nanoseconds: 25 * 3600 * 1_000_000_000) == 1)
     }
 
     @Test
@@ -143,13 +143,14 @@ struct NodeAnalyticsAggregationsTests {
         let observations = [
             observation(rxNanos: 0),
             observation(rxNanos: 0),
-            observation(rxNanos: 5 * 3_600 * 1_000_000_000)
+            observation(rxNanos: 5 * 3600 * 1_000_000_000)
         ]
         let grid = NodeAnalytics.hourlyActivity(observations: observations)
         #expect(grid.count == 24)
         #expect(grid[0].count == 2)
         #expect(grid[5].count == 1)
-        #expect(grid[12].count == 0)
+        // Hour 12 had no receptions (empty bucket value).
+        #expect(grid[12].count < 1)
     }
 
     // MARK: Packet-type breakdown

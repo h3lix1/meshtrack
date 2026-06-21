@@ -10,8 +10,8 @@ struct TelemetrySeriesTests {
         TelemetryRecord(node_num: 1, t: t, kind: kind, key: key, value: value)
     }
 
-    // `TelemetryRollupRecord` is read-only (written by the rollup SQL) and exposes
-    // no public memberwise init, so we decode one through Codable for the test.
+    /// `TelemetryRollupRecord` is read-only (written by the rollup SQL) and exposes
+    /// no public memberwise init, so we decode one through Codable for the test.
     private func rollup(
         _ key: String,
         _ kind: TelemetryKind,
@@ -67,9 +67,9 @@ struct TelemetrySeriesTests {
 
     @Test
     func `rollup points carry the min/max band and plot the average`() throws {
-        let records = [
-            try rollup("temp", .environment, bucket: 200, avg: 21, min: 18, max: 24),
-            try rollup("temp", .environment, bucket: 100, avg: 19, min: 17, max: 22)
+        let records = try [
+            rollup("temp", .environment, bucket: 200, avg: 21, min: 18, max: 24),
+            rollup("temp", .environment, bucket: 100, avg: 19, min: 17, max: 22)
         ]
         let points = TelemetrySeries.rollupPoints(records, metric: .temperature, sinceNanos: 0)
         #expect(points.map(\.time) == [100, 200])
@@ -95,7 +95,7 @@ struct TelemetrySeriesTests {
 
     @Test
     func `buildRollup tags the supplied resolution`() throws {
-        let records = [try rollup("humidity", .environment, bucket: 100, avg: 55, min: 50, max: 60)]
+        let records = try [rollup("humidity", .environment, bucket: 100, avg: 55, min: 50, max: 60)]
         let built = TelemetrySeries.buildRollup(
             records, metrics: TelemetryMetric.environmentMetrics, resolution: .daily, sinceNanos: 0
         )

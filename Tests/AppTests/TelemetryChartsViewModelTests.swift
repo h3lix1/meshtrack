@@ -16,7 +16,13 @@ struct TelemetryChartsViewModelTests {
         for i in 0 ..< count {
             let t = endNanos - Int64(i) * hour
             try await store.appendTelemetry(
-                TelemetryRecord(node_num: nodeNum, t: t, kind: .device, key: "battery_pct", value: Double(80 + i))
+                TelemetryRecord(
+                    node_num: nodeNum,
+                    t: t,
+                    kind: .device,
+                    key: "battery_pct",
+                    value: Double(80 + i)
+                )
             )
             try await store.appendTelemetry(
                 TelemetryRecord(node_num: nodeNum, t: t, kind: .device, key: "voltage", value: 3.7)
@@ -30,7 +36,7 @@ struct TelemetryChartsViewModelTests {
 
     @Test
     func `load reads raw device and environment series within the 24h window`() async throws {
-        let now: Int64 = 1_000 * 3_600_000_000_000
+        let now: Int64 = 1000 * 3_600_000_000_000
         let store = try await seededStore(endNanos: now, count: 6)
         let viewModel = TelemetryChartsViewModel(
             store: store, nodeNum: nodeNum, now: { Instant(nanosecondsSinceEpoch: now) }
@@ -50,7 +56,7 @@ struct TelemetryChartsViewModelTests {
 
     @Test
     func `the 24h window excludes older raw samples`() async throws {
-        let now: Int64 = 1_000 * 3_600_000_000_000
+        let now: Int64 = 1000 * 3_600_000_000_000
         // 30 hourly samples — only the last 24 fall inside the 24h window.
         let store = try await seededStore(endNanos: now, count: 30)
         let viewModel = TelemetryChartsViewModel(
@@ -65,7 +71,7 @@ struct TelemetryChartsViewModelTests {
 
     @Test
     func `week range reads the hourly rollup resolution`() async throws {
-        let now: Int64 = 10_000 * 3_600_000_000_000
+        let now: Int64 = 10000 * 3_600_000_000_000
         let store = try await seededStore(endNanos: now - 3_600_000_000_000, count: 48)
         // Produce rollups for complete buckets before `now`.
         try await store.rollupTelemetry(now: Instant(nanosecondsSinceEpoch: now))

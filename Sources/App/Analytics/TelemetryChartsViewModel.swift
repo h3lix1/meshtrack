@@ -32,10 +32,15 @@ public final class TelemetryChartsViewModel {
     /// Injected clock so the window's lower bound is deterministic in tests.
     @ObservationIgnored private let now: @Sendable () -> Instant
 
+    /// System wall-clock as an `Instant` (the production default for `now`).
+    public static let systemNow: @Sendable () -> Instant = {
+        Instant(nanosecondsSinceEpoch: Int64(Date().timeIntervalSince1970 * 1_000_000_000))
+    }
+
     public init(
         store: MeshStore,
         nodeNum: Int64,
-        now: @escaping @Sendable () -> Instant = { Instant(nanosecondsSinceEpoch: Int64(Date().timeIntervalSince1970 * 1_000_000_000)) }
+        now: @escaping @Sendable () -> Instant = TelemetryChartsViewModel.systemNow
     ) {
         self.store = store
         self.nodeNum = nodeNum
@@ -43,7 +48,9 @@ public final class TelemetryChartsViewModel {
     }
 
     /// Whether either series collection has any data to draw.
-    public var hasData: Bool { !deviceSeries.isEmpty || !environmentSeries.isEmpty }
+    public var hasData: Bool {
+        !deviceSeries.isEmpty || !environmentSeries.isEmpty
+    }
 
     /// Select a range and reload in one call (for the range picker).
     public func select(_ range: TelemetryRange) async throws {
