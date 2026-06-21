@@ -29,3 +29,4 @@
 2026-06-20 P2 feat(ruleengine): AlertEngine state machine — firing/ack/resolved + cooldown + snooze + storm suppression
 2026-06-20 P2 feat(ruleengine+delivery): Notifier port + formatter/dispatcher + UN/webhook/console adapters
 2026-06-20 P2 feat(persistence): migration v2 telemetry_hourly/daily rollups + retention prune (idempotent, prune-keeps-rollups)
+2026-06-20 P2 feat(scenario): LivenessScenarioEvaluator — wires RuleEngine into the acceptance harness; unify Scenario.NodeClass→Domain [PHASE 2 DONE]
