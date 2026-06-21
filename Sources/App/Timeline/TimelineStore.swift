@@ -37,10 +37,10 @@ public extension MeshStore {
 
     /// Map a stored observation row into the pure replay corpus type.
     static func timelineObservation(_ record: ObservationRecord) throws -> TimelineObservation {
-        TimelineObservation(
+        try TimelineObservation(
             packetID: UInt32(truncatingIfNeeded: record.packet_id),
             fromNode: record.node_num,
-            gatewayNode: try parseGateway(record.gateway_id),
+            gatewayNode: parseGateway(record.gateway_id),
             relayNode: 0,
             hopStart: record.hop_start ?? 0,
             hopLimit: record.hop_limit ?? 0,

@@ -78,11 +78,9 @@ public struct ReplayReconstructor: Sendable {
     private func windowedOldest(_ sorted: [TimelineObservation]) -> TimelineObservation? {
         var order: [UInt32] = []
         var firstByPacket: [UInt32: TimelineObservation] = [:]
-        for observation in sorted {
-            if firstByPacket[observation.packetID] == nil {
-                order.append(observation.packetID)
-                firstByPacket[observation.packetID] = observation
-            }
+        for observation in sorted where firstByPacket[observation.packetID] == nil {
+            order.append(observation.packetID)
+            firstByPacket[observation.packetID] = observation
         }
         guard !order.isEmpty else { return nil }
         let surviving = order.suffix(windowSize)

@@ -52,7 +52,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `load builds nodes, window and starts live at the window end`() async throws {
-        let viewModel = model(try await seededStore())
+        let viewModel = try await model(seededStore())
         try await viewModel.load()
         #expect(viewModel.nodes.count == 2)
         #expect(viewModel.mode == .live)
@@ -62,7 +62,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `scrubbing into the past enters review and reconstructs fewer traces`() async throws {
-        let viewModel = model(try await seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
+        let viewModel = try await model(seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
         try await viewModel.load()
         // Scrub to the very start: nothing has arrived yet.
         viewModel.scrub(toFraction: 0)
@@ -76,7 +76,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `seeking to the middle shows only the arrived packets`() async throws {
-        let viewModel = model(try await seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
+        let viewModel = try await model(seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
         try await viewModel.load()
         // Seek to just after the first observation (window end - 1800s ... the
         // first obs is at end-1800, second at end-1200, third at end-600).
@@ -87,7 +87,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `play then tick advances the playhead and surfaces more traces`() async throws {
-        let viewModel = model(try await seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
+        let viewModel = try await model(seededStore(count: 3, spacingSeconds: 600, endOffset: 600))
         try await viewModel.load()
         viewModel.scrub(toFraction: 0) // back to the start, review mode
         viewModel.play()
@@ -103,7 +103,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `tick does nothing when paused or live`() async throws {
-        let viewModel = model(try await seededStore())
+        let viewModel = try await model(seededStore())
         try await viewModel.load()
         let pinned = viewModel.playhead
         viewModel.tick(delta: 100) // live + not playing
@@ -116,7 +116,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `goLive pins the playhead to the window end and pauses`() async throws {
-        let viewModel = model(try await seededStore())
+        let viewModel = try await model(seededStore())
         try await viewModel.load()
         viewModel.scrub(toFraction: 0.2)
         viewModel.play()
@@ -128,7 +128,7 @@ struct TimelineViewModelTests {
 
     @Test
     func `speed changes rescale the animation clock at a fixed playhead`() async throws {
-        let viewModel = model(try await seededStore(count: 1, spacingSeconds: 600, endOffset: 600))
+        let viewModel = try await model(seededStore(count: 1, spacingSeconds: 600, endOffset: 600))
         try await viewModel.load()
         viewModel.seek(to: viewModel.window.end) // playhead after the single packet
         let clockAtOne = viewModel.clock
