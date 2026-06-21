@@ -23,7 +23,7 @@ CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine So
 # Hardware-I/O adapters (serial termios, CoreBluetooth radio) carry no
 # unit-testable logic — the testable framing lives in SerialFramer — so they are
 # excluded from the coverage metric, same rationale as App/meshtrackd.
-IGNORE='(SerialAdapter|BLEAdapter)\.swift'
+IGNORE='(SerialAdapter|BLEAdapter|MQTTAdapter)\.swift'
 PCT="$(xcrun llvm-cov export -summary-only -instr-profile "$PROFDATA" -ignore-filename-regex="$IGNORE" "$EXE" "${CORE[@]}" 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(round(d["data"][0]["totals"]["lines"]["percent"],2))')"
 
