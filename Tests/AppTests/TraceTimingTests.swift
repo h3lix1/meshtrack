@@ -31,9 +31,27 @@ struct TraceTimingTests {
     @Test
     func `sequential hops finish one after another`() {
         // At clock 1.5, edge 0 is done, edge 1 is half-drawn, edge 2 not started.
-        let e0 = TraceTiming.edgeProgress(clock: 1.5, startedAt: 0, edgeIndex: 0, hopDuration: 1, mode: .sequential)
-        let e1 = TraceTiming.edgeProgress(clock: 1.5, startedAt: 0, edgeIndex: 1, hopDuration: 1, mode: .sequential)
-        let e2 = TraceTiming.edgeProgress(clock: 1.5, startedAt: 0, edgeIndex: 2, hopDuration: 1, mode: .sequential)
+        let e0 = TraceTiming.edgeProgress(
+            clock: 1.5,
+            startedAt: 0,
+            edgeIndex: 0,
+            hopDuration: 1,
+            mode: .sequential
+        )
+        let e1 = TraceTiming.edgeProgress(
+            clock: 1.5,
+            startedAt: 0,
+            edgeIndex: 1,
+            hopDuration: 1,
+            mode: .sequential
+        )
+        let e2 = TraceTiming.edgeProgress(
+            clock: 1.5,
+            startedAt: 0,
+            edgeIndex: 2,
+            hopDuration: 1,
+            mode: .sequential
+        )
         #expect(e0 == 1)
         #expect(abs(e1 - 0.5) < 1e-9)
         #expect(e2 == 0)
@@ -51,7 +69,9 @@ struct TraceTimingTests {
                 clock: clock, startedAt: 0, edgeIndex: $0, hopDuration: 1, mode: .equaliseFinish
             )
         }
-        for p in progresses { #expect(abs(p - 0.4) < 1e-9) }
+        for p in progresses {
+            #expect(abs(p - 0.4) < 1e-9)
+        }
     }
 
     @Test
@@ -68,7 +88,8 @@ struct TraceTimingTests {
 
     @Test
     func `journey duration scales with hops when sequential, fixed when equalised`() {
-        #expect(abs(TraceTiming.journeyDuration(edgeCount: 3, hopDuration: 1.2, mode: .sequential) - 3.6) < 1e-9)
+        #expect(abs(TraceTiming.journeyDuration(edgeCount: 3, hopDuration: 1.2, mode: .sequential) - 3.6) <
+            1e-9)
         #expect(TraceTiming.journeyDuration(edgeCount: 3, hopDuration: 1.2, mode: .equaliseFinish) == 1.2)
         #expect(TraceTiming.journeyDuration(edgeCount: 0, hopDuration: 1.2, mode: .equaliseFinish) == 0)
     }
@@ -93,12 +114,30 @@ struct TraceTimingTests {
 
     @Test
     func `progress is clamped to [0, 1] and finite for degenerate inputs`() {
-        let over = TraceTiming.edgeProgress(clock: 100, startedAt: 0, edgeIndex: 0, hopDuration: 1, mode: .sequential)
-        let under = TraceTiming.edgeProgress(clock: -100, startedAt: 0, edgeIndex: 0, hopDuration: 1, mode: .sequential)
+        let over = TraceTiming.edgeProgress(
+            clock: 100,
+            startedAt: 0,
+            edgeIndex: 0,
+            hopDuration: 1,
+            mode: .sequential
+        )
+        let under = TraceTiming.edgeProgress(
+            clock: -100,
+            startedAt: 0,
+            edgeIndex: 0,
+            hopDuration: 1,
+            mode: .sequential
+        )
         #expect(over == 1)
         #expect(under == 0)
         // hopDuration 0 must not produce NaN/inf.
-        let zero = TraceTiming.edgeProgress(clock: 0, startedAt: 0, edgeIndex: 0, hopDuration: 0, mode: .sequential)
+        let zero = TraceTiming.edgeProgress(
+            clock: 0,
+            startedAt: 0,
+            edgeIndex: 0,
+            hopDuration: 0,
+            mode: .sequential
+        )
         #expect(zero.isFinite)
     }
 
@@ -115,6 +154,9 @@ struct TraceTimingTests {
     @Test
     func `head point is nil before the edge starts`() {
         #expect(TraceTiming.headPoint(from: .zero, to: CGPoint(x: 1, y: 1), progress: 0) == nil)
-        #expect(TraceTiming.headPoint(from: .zero, to: CGPoint(x: 10, y: 0), progress: 0.5) == CGPoint(x: 5, y: 0))
+        #expect(TraceTiming.headPoint(from: .zero, to: CGPoint(x: 10, y: 0), progress: 0.5) == CGPoint(
+            x: 5,
+            y: 0
+        ))
     }
 }

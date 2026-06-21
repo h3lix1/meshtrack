@@ -20,8 +20,7 @@ public enum RelayConfidence {
         positions: [Int64: GeoPoint]
     ) -> Int {
         positions.keys
-            .filter { UInt8(truncatingIfNeeded: $0) == relayByte && !excluding.contains($0) }
-            .count
+            .count(where: { UInt8(truncatingIfNeeded: $0) == relayByte && !excluding.contains($0) })
     }
 
     /// A confidence level derived from the candidate count, for colouring the key.

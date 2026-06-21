@@ -40,12 +40,11 @@ public enum TraceTiming {
         mode: TraceTimingMode
     ) -> Double {
         let duration = max(hopDuration, .leastNonzeroMagnitude)
-        let delay: Double
-        switch mode {
+        let delay: Double = switch mode {
         case .sequential:
-            delay = Double(edgeIndex) * duration
+            Double(edgeIndex) * duration
         case .equaliseFinish:
-            delay = 0
+            0
         }
         let elapsed = clock - startedAt - delay
         return clamp01(elapsed / duration)
@@ -83,8 +82,8 @@ public enum TraceTiming {
 
     /// Linear interpolation between two points (north-up screen space).
     public static func lerp(_ from: CGPoint, _ to: CGPoint, _ fraction: Double) -> CGPoint {
-        let f = clamp01(fraction)
-        return CGPoint(x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f)
+        let t = clamp01(fraction)
+        return CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
     }
 
     /// The animation-head point for edge `index` at the given progress — where the

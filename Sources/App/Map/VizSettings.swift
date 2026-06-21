@@ -11,8 +11,25 @@ import Observation
 @Observable
 public final class VizSettings {
     /// Seconds one hop edge takes to draw. Bounded to a sane, demo-friendly range.
+    ///
+    /// Backed by a private store with a clamping setter. We cannot use `didSet` to
+    /// clamp here: `@Observable` rewrites stored properties into computed ones, so a
+    /// `didSet` that assigns to `self` re-enters the synthesized setter and recurses
+    /// forever (the "no recursive didSet" rule only applies to truly stored
+    /// properties). Wiring the registrar manually keeps the value observed *and*
+    /// clamped without recursion.
+    @ObservationIgnored private var _hopDuration: Double
+
     public var hopDuration: Double {
-        didSet { hopDuration = min(Self.maxHopDuration, max(Self.minHopDuration, hopDuration)) }
+        get {
+            access(keyPath: \.hopDuration)
+            return _hopDuration
+        }
+        set {
+            withMutation(keyPath: \.hopDuration) {
+                _hopDuration = min(Self.maxHopDuration, max(Self.minHopDuration, newValue))
+            }
+        }
     }
 
     /// When true, every edge of a journey finishes together (shorter hops draw
@@ -23,7 +40,7 @@ public final class VizSettings {
     public static let maxHopDuration: Double = 4.0
 
     public init(hopDuration: Double = 1.2, equaliseFinish: Bool = false) {
-        self.hopDuration = min(Self.maxHopDuration, max(Self.minHopDuration, hopDuration))
+        _hopDuration = min(Self.maxHopDuration, max(Self.minHopDuration, hopDuration))
         self.equaliseFinish = equaliseFinish
     }
 

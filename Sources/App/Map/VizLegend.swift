@@ -36,7 +36,7 @@ public enum VizLegend {
                     color: PacketColor.color(for: trace.id),
                     label: hexLabel(trace.id),
                     hops: trace.hops,
-                    guessedEdges: trace.edges.filter { $0.kind == .guessed }.count
+                    guessedEdges: trace.edges.count(where: { $0.kind == .guessed })
                 )
             }
             .sorted { $0.id < $1.id }
@@ -52,11 +52,11 @@ public enum VizLegend {
     public static func confidenceHint(candidateCount: Int) -> String {
         switch RelayConfidence.level(forCandidateCount: candidateCount) {
         case .none:
-            return "no candidate shared the relay byte"
+            "no candidate shared the relay byte"
         case .high:
-            return "1 node shared the relay byte — high confidence"
+            "1 node shared the relay byte — high confidence"
         case .medium, .low:
-            return "\(candidateCount) nodes shared the relay byte — \(candidateCount) candidates"
+            "\(candidateCount) nodes shared the relay byte — \(candidateCount) candidates"
         }
     }
 }
