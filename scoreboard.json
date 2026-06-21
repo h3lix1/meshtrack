@@ -1,13 +1,13 @@
 {
   "updated": "2026-06-20",
-  "phase": 7,
+  "phase": 8,
   "gates": {
     "coverage_min_pct": 80,
     "mutation_min_score": 60,
     "ingestion_min_msgs_per_sec": 5000
   },
   "metrics": {
-    "coverage_pct": 91.6,
+    "coverage_pct": 90.55,
     "mutation_score": null,
     "ingestion_msgs_per_sec": 5000,
     "p95_query_latency_ms": null,

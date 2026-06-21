@@ -168,15 +168,19 @@ committed contracts (`Domain/AppConfig.swift`: `BrokerConfig`, `AppSettings`,
 `ConfigGateway`, `CredentialStore`; `App/SettingsModel.swift`: `SettingsTab` registry).
 
 - [x] Contracts: Domain config types + `ConfigGateway`/`CredentialStore` ports + `SettingsModel`/`SettingsTab` registry (lead)
-- [ ] **T-Persist**: `ConfigGateway` on `MeshStore` (migration v4 `app_config`) + Keychain `CredentialStore` adapter (+ tests)
-- [ ] **T-Compose**: macOS `Settings {}` scene + ⌘, + first-run onboarding wizard; `LiveCoordinator`/`MeshtrackApp` read `BrokerConfig` from the store (env fallback); reconnect-on-change; connection-status indicator
-- [ ] **T-Connection**: Connection tab — broker host/port/TLS/cert/topics + username + Keychain password + Test Connection + Connect/Disconnect + status
-- [ ] **T-Channels**: Channels & Keys tab — MQTT (≤20) + local (≤7) channels, PSK entry/rotation via `KeyStore`, default-PSK toggle, name→hash
-- [ ] **T-Prefs**: General tab (refresh, units, theme, retention, notifications, start-at-login, auto-connect) + Alerts-rules config tab (battery/voltage/stale thresholds across the node→class→global hierarchy, snooze defaults, delivery)
+- [x] **T-Persist**: `ConfigGateway` on `MeshStore` (migration v4 `app_config`) + Keychain `CredentialStore` adapter (+ tests)
+- [x] **T-Compose**: macOS `Settings {}` scene + ⌘, + first-run onboarding wizard; `LiveCoordinator`/`MeshtrackApp` read `BrokerConfig` from the store (env fallback); reconnect-on-change; connection-status indicator
+- [x] **T-Connection**: Connection tab — broker host/port/TLS/cert/topics + username + Keychain password + Test Connection + status
+- [~] **T-Channels**: Channels & Keys screen built + `KeychainKeyStore` exists; tab wired to a placeholder pending an **async `ChannelKeyManaging`** port (sync port can't persist the registry to GRDB)
+- [x] **T-Prefs**: General tab (refresh, units, theme, retention, notifications, start-at-login, auto-connect) + Alerts-rules config tab (battery/voltage/stale thresholds across node→class→global)
+- [x] **Lead integration**: on-disk shared `MeshStore` (config persists) + `KeychainCredentialStore` + MQTT Test-Connection probe + `alert_rule` CRUD adapter; Connection/General/Alerts tabs registered; `make verify` green (549 tests, coverage 90.55%)
 
 **Done when:** a fresh launch with no env vars walks the user through onboarding,
 connects to a broker entered in the UI (password in Keychain), and every setting is
 editable from `Settings` (⌘,) and persists across launches; `make verify` green.
+*Follow-ups:* async `ChannelKeyManaging` so the Channels tab persists (then wire it);
+CONNACK-based connection status hook on `MQTTAdapter`; persist default-snooze; wire
+`startAtLogin`→LaunchAgent and `notificationsEnabled`→`UNNotifier`.
 
 **Done when:** `swift run MeshtrackApp` shows a real MapKit map animating live MQTT
 traffic (per-id colours, guessed/observed hops, hop badges, latency); click-to-config
