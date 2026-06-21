@@ -116,6 +116,37 @@ struct CollisionMatrixTests {
 
     @Test
     @MainActor
+    func `store-backed load turns an empty matrix into a colliding one`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // Two nodes share last byte 0xd4 (ambiguous relay byte); one is unique.
+        try await store.markHeard(nodeNum: 0xA1B2_C3D4, at: Instant(nanosecondsSinceEpoch: 1))
+        try await store.markHeard(nodeNum: 0x9988_77D4, at: Instant(nanosecondsSinceEpoch: 2))
+        try await store.markHeard(nodeNum: 0x3333_3301, at: Instant(nanosecondsSinceEpoch: 3))
+
+        let viewModel = CollisionMatrixViewModel(store: store)
+        // Before load() the matrix is the empty seed (this is the bug the view's
+        // .task fixes — without a load the matrix stays here).
+        #expect(viewModel.analysis.nodeCount == 0)
+        #expect(viewModel.analysis.maxLastByteCollision == 0)
+
+        try await viewModel.load()
+
+        // After load() the analysis is non-empty and surfaces the d4 collision.
+        #expect(viewModel.analysis.nodeCount == 3)
+        #expect(viewModel.analysis.maxLastByteCollision == 2)
+        #expect(viewModel.analysis.collidingByteCount == 1)
+        #expect(viewModel.analysis.lastByteBuckets[0xD4].count == 2)
+
+        // A node sharing the byte is ambiguous → confidence below 1; the unique
+        // node is fully confident.
+        let colliding = try #require(viewModel.analysis.relayConfidence(forNodeNum: 0xA1B2_C3D4))
+        #expect(colliding < 1.0)
+        #expect(colliding == 0.5)
+        #expect(viewModel.analysis.relayConfidence(forNodeNum: 0x3333_3301) == 1.0)
+    }
+
+    @Test
+    @MainActor
     func `memory-only view model updates from an in-memory set`() {
         let viewModel = CollisionMatrixViewModel()
         #expect(viewModel.analysis.nodeCount == 0)

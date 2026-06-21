@@ -53,9 +53,11 @@ public final class CollisionMatrixViewModel {
 }
 
 /// The collision section: a header, the 16×16 last-byte heatmap, and the short-id
-/// collision list.
+/// collision list. Self-loads from the store on appear (store-backed VMs only);
+/// memory-only VMs are already seeded, so `load()` is a no-op for them.
 public struct CollisionMatrixView: View {
     @State private var viewModel: CollisionMatrixViewModel
+    @State private var loaded = false
 
     public init(viewModel: CollisionMatrixViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -64,13 +66,39 @@ public struct CollisionMatrixView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
-            heatmapCard
-            shortIDCard
+            if viewModel.analysis.nodeCount == 0 {
+                emptyState
+            } else {
+                heatmapCard
+                shortIDCard
+            }
             Spacer(minLength: 0)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(ObserveTheme.background)
+        .task {
+            // Store-backed VMs fetch their nodes here; memory-only VMs no-op.
+            try? await viewModel.load()
+            loaded = true
+        }
+    }
+
+    /// Shown when no nodes have been heard yet — distinguishes empty-because-no-data
+    /// from a broken (never-loaded) matrix.
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(loaded ? "No nodes yet" : "Loading…")
+                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            Text(loaded
+                ? "The collision matrix populates as nodes are heard. Nothing to "
+                + "compare yet — relay-byte ambiguity needs at least two nodes."
+                : "Reading the node set from the store…")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(ObserveTheme.card, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var header: some View {
