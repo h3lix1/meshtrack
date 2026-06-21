@@ -5,3 +5,4 @@ disabled_rules:
   - force_try
   - force_cast
   - identifier_name
+  - function_parameter_count   # test fixture builders take many params
