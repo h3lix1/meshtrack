@@ -34,7 +34,9 @@ public struct HexDumpRow: Identifiable, Sendable, Equatable {
     public let bytes: [UInt8]
     public let bytesPerRow: Int
 
-    public var id: Int { offset }
+    public var id: Int {
+        offset
+    }
 
     public init(offset: Int, bytes: [UInt8], bytesPerRow: Int) {
         self.offset = offset
@@ -57,7 +59,7 @@ public struct HexDumpRow: Identifiable, Sendable, Equatable {
 
     /// Printable ASCII (`.` for non-printables) — the right-hand gutter.
     public var asciiText: String {
-        String(bytes.map { (0x20...0x7E).contains($0) ? Character(UnicodeScalar($0)) : "." })
+        String(bytes.map { (0x20 ... 0x7E).contains($0) ? Character(UnicodeScalar($0)) : "." })
     }
 }
 
@@ -72,7 +74,9 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
     /// even when two packets share a packet id (relay duplicates).
     public let sequence: Int
 
-    public var id: Int { sequence }
+    public var id: Int {
+        sequence
+    }
 
     public init(packet: DecodedPacket, ingestTime: Instant?, sequence: Int) {
         self.packet = packet
@@ -82,13 +86,33 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
 
     // MARK: Decoded field summary
 
-    public var packetID: UInt32 { packet.packetID }
-    public var from: UInt32 { packet.from }
-    public var to: UInt32 { packet.to }
-    public var channel: UInt32 { packet.channel }
-    public var port: MeshPort { packet.port }
-    public var portName: String { PortLabel.name(packet.port) }
-    public var wasEncrypted: Bool { packet.wasEncrypted }
+    public var packetID: UInt32 {
+        packet.packetID
+    }
+
+    public var from: UInt32 {
+        packet.from
+    }
+
+    public var to: UInt32 {
+        packet.to
+    }
+
+    public var channel: UInt32 {
+        packet.channel
+    }
+
+    public var port: MeshPort {
+        packet.port
+    }
+
+    public var portName: String {
+        PortLabel.name(packet.port)
+    }
+
+    public var wasEncrypted: Bool {
+        packet.wasEncrypted
+    }
 
     /// Hops travelled = hopStart − hopLimit (clamped ≥ 0). Nil if either is absent.
     public var hops: Int? {
@@ -101,8 +125,13 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
         String(format: "!%08x", value)
     }
 
-    public var fromHex: String { Self.hexID(from) }
-    public var toHex: String { Self.hexID(to) }
+    public var fromHex: String {
+        Self.hexID(from)
+    }
+
+    public var toHex: String {
+        Self.hexID(to)
+    }
 
     /// `0x..` for the relay byte (last byte of the previous hop), or "—".
     public var relayByteText: String {
@@ -113,7 +142,13 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
         packet.gatewayID.map(Self.hexID) ?? "—"
     }
 
-    public var payloadByteCount: Int { packet.payload.count }
+    public var payloadByteCount: Int {
+        packet.payload.count
+    }
+
+    public var isPayloadEmpty: Bool {
+        packet.payload.isEmpty
+    }
 
     // MARK: Byte-level hex breakdown
 
@@ -124,7 +159,7 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
             let end = min(start + width, packet.payload.count)
             return HexDumpRow(
                 offset: start,
-                bytes: Array(packet.payload[start..<end]),
+                bytes: Array(packet.payload[start ..< end]),
                 bytesPerRow: width
             )
         }
@@ -146,10 +181,10 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
     /// A free-text haystack for the inspector's text filter: hex ids, port, payload.
     public var searchHaystack: String {
         var parts = [fromHex, toHex, portName, String(format: "!%08x", packetID)]
-        if let gw = packet.gatewayID { parts.append(Self.hexID(gw)) }
+        if let gateway = packet.gatewayID { parts.append(Self.hexID(gateway)) }
         // include printable payload so text-message bodies are searchable
         let printable = String(packet.payload.compactMap { byte -> Character? in
-            (0x20...0x7E).contains(byte) ? Character(UnicodeScalar(byte)) : nil
+            (0x20 ... 0x7E).contains(byte) ? Character(UnicodeScalar(byte)) : nil
         })
         if !printable.isEmpty { parts.append(printable) }
         return parts.joined(separator: " ").lowercased()

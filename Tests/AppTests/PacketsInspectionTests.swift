@@ -61,7 +61,7 @@ struct PacketsInspectionTests {
     @Test
     func `hex dump splits payload into 16-byte rows with ascii gutter`() {
         // 18 bytes → two rows (16 + 2). Includes printable + non-printable.
-        let bytes: [UInt8] = Array(0x41...0x52) // "ABCDEFGHIJKLMNOPQR" (18 chars)
+        let bytes: [UInt8] = Array(0x41 ... 0x52) // "ABCDEFGHIJKLMNOPQR" (18 chars)
         let rows = inspect(packet(payload: bytes)).hexDump()
         #expect(rows.count == 2)
         #expect(rows[0].offset == 0)
