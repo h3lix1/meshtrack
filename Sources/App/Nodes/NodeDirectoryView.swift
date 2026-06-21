@@ -38,7 +38,10 @@ public struct NodeDirectoryView: View {
             titleRow
             controls
             roleTabs
-            content
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -215,7 +218,7 @@ public struct NodeDirectoryView: View {
             Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
             Text("No nodes match the current filters").foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 240)
     }
 
     // MARK: Classify helpers
