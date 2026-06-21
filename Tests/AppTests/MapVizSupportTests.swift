@@ -5,7 +5,7 @@ import Testing
 
 @Suite("RelayConfidence")
 struct RelayConfidenceTests {
-    // Three nodes whose ids end in 0x11; one ending in 0x22.
+    /// Three nodes whose ids end in 0x11; one ending in 0x22.
     private let positions: [Int64: GeoPoint] = [
         0x0AC1_5511: GeoPoint(latitude: 1, longitude: 1),
         0xBEEF_0011: GeoPoint(latitude: 2, longitude: 2),

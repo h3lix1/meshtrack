@@ -9,53 +9,58 @@
 // pan/zoom fall through to the map underneath.
 
 #if canImport(MapKit) && os(macOS)
-import Domain
-import SwiftUI
+    import Domain
+    import SwiftUI
 
-public struct TraceOverlayCanvas: View {
-    public let nodes: [NetworkNode]
-    public let traces: [PacketTrace]
-    public let state: MeshMapState
-    public var clock: Double
-    public var hopDuration: Double
-    public var mode: TraceTimingMode
-    /// Optional receive→publish latency (ms) per packet id, surfaced as edge tooltips.
-    public var latencyMillis: [UInt32: Int]
+    public struct TraceOverlayCanvas: View {
+        public let nodes: [NetworkNode]
+        public let traces: [PacketTrace]
+        public let state: MeshMapState
+        public var clock: Double
+        public var hopDuration: Double
+        public var mode: TraceTimingMode
+        /// Optional receive→publish latency (ms) per packet id, surfaced as edge tooltips.
+        public var latencyMillis: [UInt32: Int]
 
-    public init(
-        nodes: [NetworkNode],
-        traces: [PacketTrace],
-        state: MeshMapState,
-        clock: Double,
-        hopDuration: Double,
-        mode: TraceTimingMode,
-        latencyMillis: [UInt32: Int] = [:]
-    ) {
-        self.nodes = nodes
-        self.traces = traces
-        self.state = state
-        self.clock = clock
-        self.hopDuration = hopDuration
-        self.mode = mode
-        self.latencyMillis = latencyMillis
-    }
-
-    public var body: some View {
-        Canvas { context, _ in
-            // Reading regionRevision inside the Canvas closure makes the overlay
-            // re-render whenever the map's camera moves.
-            _ = state.regionRevision
-            guard let projection = state.projection else { return }
-            let renderer = TraceRenderer(clock: clock, hopDuration: hopDuration, mode: mode)
-            renderer.drawTraces(traces, in: &context, projection: projection)
-            renderer.drawNodes(nodes, in: &context, projection: projection)
-            for trace in traces {
-                guard let ms = latencyMillis[trace.id] else { continue }
-                renderer.drawLatencyTooltip(trace, latencyMillis: ms, in: &context, projection: projection)
-            }
+        public init(
+            nodes: [NetworkNode],
+            traces: [PacketTrace],
+            state: MeshMapState,
+            clock: Double,
+            hopDuration: Double,
+            mode: TraceTimingMode,
+            latencyMillis: [UInt32: Int] = [:]
+        ) {
+            self.nodes = nodes
+            self.traces = traces
+            self.state = state
+            self.clock = clock
+            self.hopDuration = hopDuration
+            self.mode = mode
+            self.latencyMillis = latencyMillis
         }
-        .allowsHitTesting(false)
-        .drawingGroup()
+
+        public var body: some View {
+            Canvas { context, _ in
+                // Reading regionRevision inside the Canvas closure makes the overlay
+                // re-render whenever the map's camera moves.
+                _ = state.regionRevision
+                guard let projection = state.projection else { return }
+                let renderer = TraceRenderer(clock: clock, hopDuration: hopDuration, mode: mode)
+                renderer.drawTraces(traces, in: &context, projection: projection)
+                renderer.drawNodes(nodes, in: &context, projection: projection)
+                for trace in traces {
+                    guard let latencyMs = latencyMillis[trace.id] else { continue }
+                    renderer.drawLatencyTooltip(
+                        trace,
+                        latencyMillis: latencyMs,
+                        in: &context,
+                        projection: projection
+                    )
+                }
+            }
+            .allowsHitTesting(false)
+            .drawingGroup()
+        }
     }
-}
 #endif
