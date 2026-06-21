@@ -23,3 +23,4 @@
 2026-06-20 P1 feat(transport): MeshtasticTopic parser (tested) + CocoaMQTT MQTTAdapter (TLS, best-effort I/O)
 2026-06-20 P1 feat(meshtrackd): MQTT capture + replay diagnostics (creds via env, data not committed)
 2026-06-20 P1 VALIDATED full stack on live bayme.sh MediumFast: 67/69 decoded+decrypted (default PSK), real telemetry+positions, 62 multi-gateway dups collapsed
+2026-06-20 P1 feat(ingest): PacketInspector debug formatter (decodes telemetry/position for display) [PHASE 1 DONE]
