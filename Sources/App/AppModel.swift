@@ -109,6 +109,22 @@ public final class AppModel {
                 ))
             }
         }
+        // Provision shows the REAL guided workflow everywhere. Without a live store
+        // (sample / first-run), back it with the same fresh in-memory store so the
+        // render→diff→confirm→apply→verify flow is exercisable end-to-end (over a
+        // StoreBackedAdminChannel) rather than left unreachable.
+        register(.provision) { [self] in
+            if let store = sampleFleetStore {
+                AnyView(ProvisioningWorkflowView(
+                    viewModel: ProvisioningWorkflowFactory.make(store: store, draft: .init(), channelFor: nil)
+                ))
+            } else {
+                AnyView(SectionMessageView(
+                    title: "Provision",
+                    message: "Provisioning is unavailable — the local store could not be opened."
+                ))
+            }
+        }
     }
 }
 
