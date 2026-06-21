@@ -8,17 +8,11 @@
 // SPEC §6.2, with the spec's illustrative `xN` fix-suffix replaced by a real
 // `count:` field on each fix step.
 
-/// The node *class* a scenario node belongs to (SPEC §2.1).
-///
-/// Class drives default alert behaviour. The scenario harness records it so
-/// later phases can assert class-specific semantics (e.g. `mobile` nodes use
-/// geofence-exit rather than "moved at all").
-public enum NodeClass: String, Sendable, Equatable, CaseIterable {
-    case fixed
-    case mobile
-    case gateway
-    case unknown
-}
+import Domain
+
+/// The node class (SPEC §2.1) — the canonical type lives in Domain; aliased
+/// module-wide so the parser/runner refer to one definition.
+public typealias NodeClass = Domain.NodeClass
 
 /// The arming parameters captured when a node is armed for movement (SPEC §2.3).
 ///

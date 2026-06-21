@@ -50,7 +50,10 @@ hardware validation deferred to the Phase 5 HIL tier.
 - [x] Telemetry retention + rollups (hourly/daily downsample, prune-keeps-rollups) — Swift Charts history deferred to the App layer (Phase 3)
 
 **Done when:** stale/battery scenarios fire exactly the expected alerts; reconnect
-avalanche test passes.
+avalanche test passes. ✅ **Phase 2 complete (2026-06-20)** — RuleEvaluator +
+AlertEngine (storm suppression = no reconnect avalanche); LivenessScenarioEvaluator
+fires stale exactly once through the acceptance harness. Swift Charts UI lands with
+the App.
 
 ## Phase 3 — Map, arming & movement
 
