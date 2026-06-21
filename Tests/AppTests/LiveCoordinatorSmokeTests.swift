@@ -25,8 +25,8 @@ import Testing
 @Suite("LiveCoordinator (live-broker smoke — env-gated)")
 @MainActor
 struct LiveCoordinatorSmokeTests {
-    // Evaluated by the `.enabled(if:)` trait in a nonisolated context, so it must
-    // not touch main-actor state.
+    /// Evaluated by the `.enabled(if:)` trait in a nonisolated context, so it must
+    /// not touch main-actor state.
     private nonisolated static var brokerConfigured: Bool {
         let host = ProcessInfo.processInfo.environment["MESHTRACK_MQTT_HOST"]
         return host.map { !$0.isEmpty } ?? false
@@ -65,8 +65,18 @@ struct LiveCoordinatorSmokeTests {
             node_num: 0x0000_0001, hexid: "!00000001", short_name: "SRC",
             node_class: .mobile, first_seen_at: 0, last_heard_at: 0
         ))
-        _ = try await store.appendPositionFix(PositionFixRecord(node_num: 0x0000_00FF, t: 1, lat: 37.5, lon: -122.0))
-        _ = try await store.appendPositionFix(PositionFixRecord(node_num: 0x0000_0001, t: 1, lat: 37.0, lon: -122.0))
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_00FF,
+            t: 1,
+            lat: 37.5,
+            lon: -122.0
+        ))
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001,
+            t: 1,
+            lat: 37.0,
+            lon: -122.0
+        ))
 
         let model = NetworkViewModel(store: store)
         model.ingest(DecodedPacket(
