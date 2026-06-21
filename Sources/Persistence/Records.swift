@@ -6,6 +6,7 @@
 // these records driver-only and the Domain pure. TEXT-backed enums live in
 // Schema.swift.
 
+import Domain
 import GRDB
 
 // swiftlint:disable identifier_name
