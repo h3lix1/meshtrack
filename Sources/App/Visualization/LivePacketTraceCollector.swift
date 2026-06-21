@@ -2,14 +2,27 @@
 // traces (SPEC §1). Each DecodedPacket becomes a per-gateway PacketReception;
 // receptions are grouped by packet id over a sliding window (the most-recent N
 // packets animate at once, oldest evicted). traces() reconstructs them via
-// PacketTraceBuilder, staggering startedAt by arrival so they animate in sequence.
-// Pure + tested; the view model feeds it from the ingest pipeline.
+// PacketTraceBuilder. Pure + tested; the view model feeds it from the ingest pipeline.
+//
+// Each packet records the animation-clock instant it first arrived (`arrivalClock`),
+// stamped by the caller from the SAME reference clock the overlay's TimelineView ticks
+// on (seconds since the reference date). `traces()` uses that instant as the trace's
+// `startedAt`, so a newly-arrived packet animates from progress 0 forward (Task 2).
+//
+// The previous behaviour staggered `startedAt` by a tiny per-index offset (0, 0.4, …)
+// while the overlay clock was ~7.9e8 s — `clock - startedAt` saturated every edge to
+// 1, so hop lines appeared instantly fully-drawn. Anchoring to the real arrival clock
+// fixes that. When no clock is supplied (replay/tests), it falls back to the legacy
+// per-index stagger so existing deterministic paths are unchanged.
 
 import Domain
 
 public struct LivePacketTraceCollector: Sendable {
     private var receptionsByPacket: [UInt32: [PacketReception]] = [:]
     private var arrivalOrder: [UInt32] = []
+    /// Animation-clock instant (seconds, reference-date based) each packet first
+    /// arrived. nil for packets ingested without a clock (legacy/replay path).
+    private var arrivalClockByPacket: [UInt32: Double] = [:]
     private let maxPackets: Int
 
     public init(maxPackets: Int = 12) {
@@ -21,7 +34,13 @@ public struct LivePacketTraceCollector: Sendable {
     }
 
     /// Fold one decoded packet in as a gateway reception of its packet id.
-    public mutating func ingest(_ packet: DecodedPacket) {
+    ///
+    /// - Parameter arrivalClock: the current animation-clock value (seconds since the
+    ///   reference date, the same clock `TimelineView(.animation)` ticks on). Stamped
+    ///   once, when the packet id is first seen, and used as the trace's `startedAt` so
+    ///   it animates from the moment it arrived. Omit (nil) for replay/tests, which
+    ///   keeps the deterministic per-index stagger.
+    public mutating func ingest(_ packet: DecodedPacket, arrivalClock: Double? = nil) {
         let reception = PacketReception(
             packetID: packet.packetID,
             fromNode: Int64(packet.from),
@@ -33,21 +52,30 @@ public struct LivePacketTraceCollector: Sendable {
         )
         if receptionsByPacket[packet.packetID] == nil {
             arrivalOrder.append(packet.packetID)
+            // Stamp arrival on first sight only — re-receptions of the same packet via
+            // other gateways must not reset its animation.
+            if let arrivalClock { arrivalClockByPacket[packet.packetID] = arrivalClock }
         }
         receptionsByPacket[packet.packetID, default: []].append(reception)
         while arrivalOrder.count > maxPackets {
-            receptionsByPacket[arrivalOrder.removeFirst()] = nil
+            let evicted = arrivalOrder.removeFirst()
+            receptionsByPacket[evicted] = nil
+            arrivalClockByPacket[evicted] = nil
         }
     }
 
-    /// Reconstruct traces for the windowed packets, oldest first, `startedAt`
-    /// staggered by arrival so the animation plays them in sequence.
+    /// Reconstruct traces for the windowed packets, oldest first.
+    ///
+    /// `startedAt` is each packet's recorded `arrivalClock` when present (so it draws
+    /// from 0 on the live overlay clock); otherwise it falls back to a per-index
+    /// `stagger` so the deterministic replay/test path is unchanged.
     public func traces(positions: [Int64: GeoPoint], stagger: Double = 0.4) -> [PacketTrace] {
         arrivalOrder.enumerated().flatMap { index, packetID in
-            PacketTraceBuilder.build(
+            let startedAt = arrivalClockByPacket[packetID] ?? Double(index) * stagger
+            return PacketTraceBuilder.build(
                 receptions: receptionsByPacket[packetID] ?? [],
                 positions: positions,
-                startedAt: Double(index) * stagger
+                startedAt: startedAt
             )
         }
     }

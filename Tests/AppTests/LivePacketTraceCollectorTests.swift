@@ -55,4 +55,24 @@ struct LivePacketTraceCollectorTests {
         #expect(traces.first { $0.id == 0x01 }?.startedAt == 0.0)
         #expect(traces.first { $0.id == 0x02 }?.startedAt == 0.5)
     }
+
+    @Test
+    func `arrivalClock anchors startedAt to the live animation clock`() {
+        // Task 2: a packet stamped with a real clock value must use it as startedAt so
+        // the overlay animates it from progress 0 (clock - startedAt ≈ 0), not saturated.
+        var collector = LivePacketTraceCollector()
+        collector.ingest(packet(id: 0x01, gateway: 0x0000_00FF), arrivalClock: 1000.0)
+        let trace = collector.traces(positions: positions).first { $0.id == 0x01 }
+        #expect(trace?.startedAt == 1000.0)
+    }
+
+    @Test
+    func `re-reception via another gateway keeps the original arrival clock`() {
+        var collector = LivePacketTraceCollector()
+        collector.ingest(packet(id: 0x01, gateway: 0x0000_00FF), arrivalClock: 500.0)
+        collector.ingest(packet(id: 0x01, gateway: 0x0000_00EE), arrivalClock: 900.0)
+        let trace = collector.traces(positions: positions).first { $0.id == 0x01 }
+        #expect(trace?.startedAt == 500.0) // stamped on first sight only
+        #expect(trace?.edges.count == 2)
+    }
 }
