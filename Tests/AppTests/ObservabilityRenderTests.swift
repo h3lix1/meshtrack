@@ -25,7 +25,8 @@
         @Test
         func `healthy and degraded dashboards render non-trivial bitmaps`() {
             #expect(renderedByteCount(IngestHealthView(viewModel: ObservabilityPreviewData.healthy())) > 1000)
-            #expect(renderedByteCount(IngestHealthView(viewModel: ObservabilityPreviewData.degraded())) > 1000)
+            #expect(renderedByteCount(IngestHealthView(viewModel: ObservabilityPreviewData.degraded())) >
+                1000)
         }
 
         @Test

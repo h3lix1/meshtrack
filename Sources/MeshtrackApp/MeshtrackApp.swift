@@ -52,7 +52,16 @@ struct MeshtrackApp: App {
 /// it overlays a "connecting…" affordance; once nodes arrive the map takes over.
 struct LiveRootView: View {
     let coordinator: LiveCoordinator
-    @State private var model = AppModel(nodes: [], traces: [], live: true)
+    @State private var model: AppModel
+
+    init(coordinator: LiveCoordinator) {
+        self.coordinator = coordinator
+        let model = AppModel(nodes: [], traces: [], live: true)
+        // Wire every section to its live, store-backed view (the headline MapKit map,
+        // node directory, telemetry, analytics, alerts, messages, health).
+        model.registerLiveSections(store: coordinator.store, clock: SystemWallClock())
+        _model = State(initialValue: model)
+    }
 
     var body: some View {
         ZStack {

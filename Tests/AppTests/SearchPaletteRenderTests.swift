@@ -23,9 +23,11 @@
 
         @Test
         func `palette renders results, empty and no-match states`() {
-            #expect(renderedByteCount(SearchPaletteView(viewModel: SearchPreviewData.viewModel(query: "base"))) > 1000)
+            #expect(renderedByteCount(SearchPaletteView(viewModel: SearchPreviewData
+                    .viewModel(query: "base"))) > 1000)
             #expect(renderedByteCount(SearchPaletteView(viewModel: SearchPreviewData.viewModel())) > 0)
-            #expect(renderedByteCount(SearchPaletteView(viewModel: SearchPreviewData.viewModel(query: "zzz"))) > 0)
+            #expect(renderedByteCount(SearchPaletteView(viewModel: SearchPreviewData
+                    .viewModel(query: "zzz"))) > 0)
         }
     }
 #endif

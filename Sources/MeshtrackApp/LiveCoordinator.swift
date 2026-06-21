@@ -35,7 +35,9 @@ final class LiveCoordinator {
     /// The broker host, for the "connecting…" affordance (never logs credentials).
     let brokerHost: String
 
-    private let store: MeshStore
+    /// The shared in-memory store; exposed so the shell can wire the store-backed
+    /// section view models (nodes / telemetry / analytics / alerts / messages).
+    let store: MeshStore
     private let settings: LiveBrokerSettings
     private let refreshInterval: Duration
     private var tasks: [Task<Void, Never>] = []
@@ -114,7 +116,7 @@ private struct DefaultChannelKeyStore: KeyStore {
 /// The real wall-clock adapter for the `Clock` port, confined to this composition
 /// root (Domain never reads `Date()`). Stamps each inbound frame's `receivedAt`,
 /// which becomes `observation.ingest_time` — the receive→publish latency source.
-private struct SystemWallClock: Domain.Clock {
+struct SystemWallClock: Domain.Clock {
     func now() -> Instant {
         Instant(nanosecondsSinceEpoch: Int64((Date().timeIntervalSince1970 * 1_000_000_000).rounded()))
     }

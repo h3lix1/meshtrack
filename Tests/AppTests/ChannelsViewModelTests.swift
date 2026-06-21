@@ -12,7 +12,7 @@ struct ChannelsViewModelTests {
         let nodes = [
             NodeRecord(node_num: 0x01, short_name: "BASE", first_seen_at: 0, last_heard_at: 0),
             NodeRecord(node_num: 0x02, long_name: "Repeater North", first_seen_at: 0, last_heard_at: 0),
-            NodeRecord(node_num: 0xA1B2_C3D4, first_seen_at: 0, last_heard_at: 0),
+            NodeRecord(node_num: 0xA1B2_C3D4, first_seen_at: 0, last_heard_at: 0)
         ]
         let index = ChannelsViewModel.senderIndex(nodes)
         #expect(index[0x01] == "BASE")
@@ -78,7 +78,7 @@ struct ChannelsViewModelTests {
             // newest-first input (matches recentMessages order)
             MessageRecord(packet_id: 30, from_num: 2, to_num: 0, channel: 99, body: "newest", rx_time: 300),
             MessageRecord(packet_id: 20, from_num: 1, to_num: 0, channel: 7, body: "b", rx_time: 200),
-            MessageRecord(packet_id: 10, from_num: 1, to_num: 0, channel: 7, body: "a", rx_time: 100),
+            MessageRecord(packet_id: 10, from_num: 1, to_num: 0, channel: 7, body: "a", rx_time: 100)
         ]
         let groups = ChannelsViewModel.group(records, senders: senders)
         #expect(groups.map(\.channel) == [99, 7]) // 99 last-active at 300 > 7 at 200
@@ -137,8 +137,14 @@ struct ChannelsViewModelTests {
     @Test
     func `attributed body highlights mention runs and preserves the full text`() {
         let display = ChannelsViewModel.display(
-            MessageRecord(packet_id: 1, from_num: 1, to_num: 0, channel: 7,
-                          body: "ping @ops now", rx_time: 0),
+            MessageRecord(
+                packet_id: 1,
+                from_num: 1,
+                to_num: 0,
+                channel: 7,
+                body: "ping @ops now",
+                rx_time: 0
+            ),
             senders: [:]
         )
         let attributed = ChannelsView.attributedBody(display)

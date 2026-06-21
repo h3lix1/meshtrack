@@ -74,7 +74,19 @@ public final class AppModel {
         register(.nodes) { [self] in AnyView(NodesView(nodes: nodes)) }
         register(.packets) { AnyView(PacketsView(packets: SampleNetwork.packets)) }
         register(.telemetry) { AnyView(TelemetryChartView(series: SampleNetwork.telemetry)) }
+        register(.analytics) {
+            AnyView(SectionMessageView(
+                title: "Analytics",
+                message: "Connect a live feed to see per-node SNR, hops, peers and heatmaps."
+            ))
+        }
         register(.alerts) { AnyView(AlertsView(alerts: SampleNetwork.alerts)) }
+        register(.messages) {
+            AnyView(SectionMessageView(
+                title: "Messages",
+                message: "Connect a broker to see decoded channel messages (monitor-only)."
+            ))
+        }
         register(.health) { AnyView(ObservabilityView(metrics: SampleNetwork.metrics)) }
         register(.fleet) { AnyView(FleetConfigView(rows: SampleNetwork.rollout)) }
     }

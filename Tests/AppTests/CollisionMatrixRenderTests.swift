@@ -22,13 +22,19 @@
 
         @Test
         func `populated collision matrix renders a non-trivial bitmap`() {
-            #expect(renderedByteCount(CollisionMatrixView(viewModel: CollisionMatrixPreviewData.viewModel())) > 1000)
+            #expect(
+                renderedByteCount(CollisionMatrixView(viewModel: CollisionMatrixPreviewData.viewModel())) >
+                    1000
+            )
         }
 
         @Test
         func `empty matrix and heatmap still render`() {
             #expect(renderedByteCount(CollisionMatrixView(viewModel: CollisionMatrixViewModel())) > 0)
-            #expect(renderedByteCount(CollisionHeatmap(buckets: CollisionMatrix.analyse([]).lastByteBuckets)) > 0)
+            #expect(
+                renderedByteCount(CollisionHeatmap(buckets: CollisionMatrix.analyse([]).lastByteBuckets)) >
+                    0
+            )
         }
     }
 #endif

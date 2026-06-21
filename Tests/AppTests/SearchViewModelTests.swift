@@ -81,7 +81,7 @@ struct SearchViewModelTests {
     @MainActor
     func `store reload dedupes channels across messages`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())
-        for index in 0..<3 {
+        for index in 0 ..< 3 {
             _ = try await store.recordMessage(MessageRecord(
                 packet_id: Int64(100 + index), from_num: 1, to_num: 2,
                 channel: 0, channel_name: "Ops", body: "m\(index)", rx_time: Int64(index), is_dm: false

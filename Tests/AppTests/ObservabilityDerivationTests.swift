@@ -63,7 +63,7 @@ struct ObservabilityDerivationTests {
         let health = IngestHealth(transports: [
             TransportHealth(transport: .mqtt, connected: true, framesReceived: 10),
             TransportHealth(transport: .serial, connected: false, framesReceived: 0),
-            TransportHealth(transport: .ble, connected: true, framesReceived: 3),
+            TransportHealth(transport: .ble, connected: true, framesReceived: 3)
         ])
         #expect(IngestHealthDerivation.connectedTransportCount(health) == 2)
     }
@@ -92,7 +92,7 @@ struct ObservabilityDerivationTests {
     func `transports tile reflects partial connectivity`() {
         let health = IngestHealth(transports: [
             TransportHealth(transport: .mqtt, connected: true, framesReceived: 10),
-            TransportHealth(transport: .serial, connected: false, framesReceived: 0),
+            TransportHealth(transport: .serial, connected: false, framesReceived: 0)
         ])
         let tile = IngestHealthDerivation.metrics(health, now: at(0)).first { $0.id == "transports" }
         #expect(tile?.value == "1/2")

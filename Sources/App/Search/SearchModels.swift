@@ -61,7 +61,9 @@ public struct SearchResult: Sendable, Equatable, Identifiable, Comparable {
     /// Higher is better. See `SearchRanker` for the scoring rules.
     public let score: Int
 
-    public var id: String { item.id }
+    public var id: String {
+        item.id
+    }
 
     public init(item: SearchItem, score: Int) {
         self.item = item

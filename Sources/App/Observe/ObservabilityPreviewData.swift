@@ -32,7 +32,7 @@ public enum ObservabilityPreviewData {
                 TransportHealth(
                     transport: .serial, connected: true, framesReceived: 60,
                     lastFrameAt: Instant(nanosecondsSinceEpoch: 590 * second)
-                ),
+                )
             ]
         )
     }
@@ -59,7 +59,7 @@ public enum ObservabilityPreviewData {
                 TransportHealth(
                     transport: .serial, connected: true, framesReceived: 40,
                     lastFrameAt: Instant(nanosecondsSinceEpoch: 700 * second)
-                ),
+                )
             ]
         )
     }

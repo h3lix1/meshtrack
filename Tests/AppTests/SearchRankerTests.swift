@@ -3,7 +3,11 @@ import Testing
 
 @Suite("Search ranking")
 struct SearchRankerTests {
-    private func item(_ title: String, _ keywords: [String], target: SearchTarget = .node(nodeNum: 1)) -> SearchItem {
+    private func item(
+        _ title: String,
+        _ keywords: [String],
+        target: SearchTarget = .node(nodeNum: 1)
+    ) -> SearchItem {
         SearchItem(
             id: title, kind: .node, title: title, subtitle: "",
             keywords: keywords, target: target
@@ -63,7 +67,7 @@ struct SearchRankerTests {
 
     @Test
     func `limit caps the number of results`() {
-        let corpus = (0..<30).map { item("n\($0)", ["base\($0)"]) }
+        let corpus = (0 ..< 30).map { item("n\($0)", ["base\($0)"]) }
         #expect(SearchRanker.rank(query: "base", in: corpus, limit: 5).count == 5)
     }
 

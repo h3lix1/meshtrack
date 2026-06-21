@@ -18,7 +18,7 @@ struct CollisionMatrixTests {
         let analysis = CollisionMatrix.analyse([
             CollisionNode(nodeNum: 0x1111_11D4, name: "a"),
             CollisionNode(nodeNum: 0x2222_22D4, name: "b"),
-            CollisionNode(nodeNum: 0x3333_3301, name: "c"),
+            CollisionNode(nodeNum: 0x3333_3301, name: "c")
         ])
         let d4 = analysis.lastByteBuckets[0xD4]
         #expect(d4.count == 2)
@@ -37,7 +37,7 @@ struct CollisionMatrixTests {
         #expect(analysis.lastByteBuckets[7].count == 1)
         #expect(analysis.lastByteBuckets[7].byteValue == 7)
         // Every other byte is an empty bucket.
-        #expect(analysis.lastByteBuckets[8].count == 0)
+        #expect(analysis.lastByteBuckets[8].nodes.isEmpty)
     }
 
     @Test
@@ -51,7 +51,7 @@ struct CollisionMatrixTests {
             CollisionNode(nodeNum: 0xAAAA_0001, name: "d"),
             CollisionNode(nodeNum: 0xBBBB_0001, name: "e"),
             // Unique short id — excluded.
-            CollisionNode(nodeNum: 0xCCCC_BEEF, name: "f"),
+            CollisionNode(nodeNum: 0xCCCC_BEEF, name: "f")
         ])
         #expect(analysis.shortIDCollisions.count == 2)
         // Worst (count 3) first.
@@ -67,7 +67,7 @@ struct CollisionMatrixTests {
             CollisionNode(nodeNum: 0x2222_22D4, name: "b"),
             CollisionNode(nodeNum: 0x3333_33D4, name: "c"),
             CollisionNode(nodeNum: 0x4444_44AA, name: "d"),
-            CollisionNode(nodeNum: 0x5555_55AA, name: "e"),
+            CollisionNode(nodeNum: 0x5555_55AA, name: "e")
         ])
         #expect(analysis.maxLastByteCollision == 3) // three d4s
         #expect(analysis.collidingByteCount == 2) // d4 and aa
@@ -79,7 +79,7 @@ struct CollisionMatrixTests {
         let analysis = CollisionMatrix.analyse([
             CollisionNode(nodeNum: 0x1111_11D4, name: "a"),
             CollisionNode(nodeNum: 0x2222_22D4, name: "b"),
-            CollisionNode(nodeNum: 0x3333_3301, name: "c"),
+            CollisionNode(nodeNum: 0x3333_3301, name: "c")
         ])
         // Two share d4 → 0.5 confidence each.
         #expect(analysis.relayConfidence(forNodeNum: 0x1111_11D4) == 0.5)
