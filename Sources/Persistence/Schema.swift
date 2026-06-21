@@ -22,6 +22,9 @@ public enum Table {
     public static let template = "template"
     /// Monitor-only decoded text messages (schema v3, SPEC §1 amended / ADR 0006).
     public static let message = "message"
+    /// Key-value store for non-secret app configuration (schema v4, Phase 8,
+    /// SPEC §2.5/§10). Secrets never live here — they go to the Keychain.
+    public static let appConfig = "app_config"
 }
 
 /// Node classification (SPEC §2.1) — the canonical type lives in Domain; persisted
