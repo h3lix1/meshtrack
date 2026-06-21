@@ -16,10 +16,13 @@ enum Snapshot {
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
         let nodes = SampleNetwork.nodes
-        let traces = SampleNetwork.traces
+        // Build the AppModel registry from sample data; the Network section uses
+        // the deterministic Canvas-only map (`live: false`, ADR 0007) so every
+        // section renders headlessly under ImageRenderer.
         for section in AppSection.allCases {
+            let model = AppModel(nodes: nodes, traces: SampleNetwork.traces, live: false)
             write(
-                RootView(section: section, nodes: nodes, traces: traces).frame(width: 1400, height: 880),
+                RootView(model: model, section: section).frame(width: 1400, height: 880),
                 to: "\(outputDir)/\(section.rawValue).png"
             )
         }
