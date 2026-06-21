@@ -26,3 +26,4 @@
 2026-06-20 P1 feat(ingest): PacketInspector debug formatter (decodes telemetry/position for display) [PHASE 1 DONE]
 2026-06-20 P2 refactor(domain): unify NodeClass in Domain (Persistence typealiases it)
 2026-06-20 P2 feat(ruleengine): rule model + config hierarchy (node→class→global) + stale/battery/voltage RuleEvaluator
+2026-06-20 P2 feat(ruleengine): AlertEngine state machine — firing/ack/resolved + cooldown + snooze + storm suppression
