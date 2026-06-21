@@ -23,6 +23,7 @@ public struct AlertKey: Hashable, Sendable {
 public struct Alert: Sendable, Equatable {
     public let type: AlertType
     public let nodeNum: UInt32
+    public var detail: String
     public var state: AlertState
     public var firedAt: Instant
     public var resolvedAt: Instant?
@@ -128,7 +129,8 @@ public struct AlertEngine: Sendable {
         snoozedUntil: Instant?
     ) -> AlertEvent? {
         var alert = Alert(
-            type: condition.type, nodeNum: condition.nodeNum, state: .firing, firedAt: now,
+            type: condition.type, nodeNum: condition.nodeNum, detail: condition.detail,
+            state: .firing, firedAt: now,
             resolvedAt: nil, ackedAt: nil, snoozedUntil: snoozedUntil,
             cooldownSeconds: condition.cooldownSeconds, wasAnnounced: false
         )

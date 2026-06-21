@@ -46,7 +46,7 @@ hardware validation deferred to the Phase 5 HIL tier.
 - [x] RuleEngine core + config hierarchy (node → class → global)
 - [x] `stale`, `battery_below`, `voltage_below` rules
 - [x] Alert state machine + cooldown/snooze/ack + storm suppression on reconnect
-- [ ] Notification Center delivery (+ delivery port stub for ntfy/webhook)
+- [x] Notification Center delivery (+ delivery port stub for ntfy/webhook)
 - [ ] Swift Charts telemetry history; retention + rollups
 
 **Done when:** stale/battery scenarios fire exactly the expected alerts; reconnect
