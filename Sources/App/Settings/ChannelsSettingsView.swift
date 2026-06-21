@@ -31,6 +31,7 @@ public struct ChannelsSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(Color(red: 0.03, green: 0.04, blue: 0.10))
+        .task { await viewModel.load() }
     }
 
     private var header: some View {
@@ -119,10 +120,13 @@ private struct ChannelSection: View {
     }
 
     private func add() {
-        guard !newName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        viewModel.addChannel(name: newName, kind: kind)
-        if viewModel.lastError == nil {
-            newName = ""
+        let name = newName
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        Task {
+            await viewModel.addChannel(name: name, kind: kind)
+            if viewModel.lastError == nil {
+                newName = ""
+            }
         }
     }
 }
@@ -153,11 +157,13 @@ private struct ChannelRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.cyan)
                 if channel.hasKey {
-                    Button("Clear") { viewModel.clearKey(forChannelHash: channel.hash) }
-                        .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.orange)
+                    Button("Clear") {
+                        Task { await viewModel.clearKey(forChannelHash: channel.hash) }
+                    }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.orange)
                 }
                 Button {
-                    viewModel.removeChannel(hash: channel.hash)
+                    Task { await viewModel.removeChannel(hash: channel.hash) }
                 } label: {
                     Image(systemName: "trash").font(.system(size: 12))
                 }
@@ -181,8 +187,12 @@ private struct ChannelRow: View {
                 .background(.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
                 .onSubmit(saveKey)
             Button("Default") {
-                viewModel.useDefaultKey(forChannelHash: channel.hash)
-                finishEditing()
+                Task {
+                    await viewModel.useDefaultKey(forChannelHash: channel.hash)
+                    if viewModel.lastError == nil {
+                        finishEditing()
+                    }
+                }
             }
             .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
             Button("Save", action: saveKey)
@@ -194,10 +204,13 @@ private struct ChannelRow: View {
     }
 
     private func saveKey() {
-        guard !pskText.isEmpty else { return }
-        viewModel.setKey(forChannelHash: channel.hash, pskText: pskText)
-        if viewModel.lastError == nil {
-            finishEditing()
+        let text = pskText
+        guard !text.isEmpty else { return }
+        Task {
+            await viewModel.setKey(forChannelHash: channel.hash, pskText: text)
+            if viewModel.lastError == nil {
+                finishEditing()
+            }
         }
     }
 
@@ -241,17 +254,24 @@ private struct ErrorBanner: View {
 
 #Preview("Channels & Keys") {
     let keys = InMemoryChannelKeyManager()
-    let defaultPSK = ChannelKeyMath.defaultPSK
-    func add(_ name: String, _ kind: ChannelKind, key: Bool) {
-        let hash = ChannelKeyMath.channelHash(name: name, psk: defaultPSK)
-        keys.addChannel(name: name, hash: hash, kind: kind)
-        if key {
-            try? keys.setKey(ChannelKey(psk: defaultPSK), forChannelHash: hash)
-        }
-    }
-    add("LongFast", .mqtt, key: true)
-    add("BayMesh", .mqtt, key: false)
-    add("admin", .local, key: true)
-    return ChannelsSettingsView(viewModel: ChannelsSettingsViewModel(keys: keys))
+    let viewModel = ChannelsSettingsViewModel(keys: keys)
+    return ChannelsSettingsView(viewModel: viewModel)
         .frame(width: 640, height: 560)
+        .task {
+            // Seed a few channels through the VM's async API so the preview shows
+            // a populated list; the view's own `.task` then reloads it.
+            await viewModel.addChannel(name: "LongFast", kind: .mqtt)
+            await viewModel.addChannel(name: "BayMesh", kind: .mqtt)
+            await viewModel.addChannel(name: "admin", kind: .local)
+            await viewModel.useDefaultKey(
+                forChannelHash: ChannelKeyMath.channelHash(
+                    name: "LongFast", psk: ChannelKeyMath.defaultPSK
+                )
+            )
+            await viewModel.useDefaultKey(
+                forChannelHash: ChannelKeyMath.channelHash(
+                    name: "admin", psk: ChannelKeyMath.defaultPSK
+                )
+            )
+        }
 }
