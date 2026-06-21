@@ -18,7 +18,7 @@ if [[ -z "${PROFDATA:-}" || -z "${XCTEST:-}" ]]; then
 fi
 
 EXE="$XCTEST/Contents/MacOS/$(basename "$XCTEST" .xctest)"
-CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine Sources/Provisioning Sources/Scenario)
+CORE=(Sources/Domain Sources/Persistence Sources/Transport Sources/RuleEngine Sources/Provisioning Sources/Scenario Sources/Ingest Sources/Crypto Sources/Logging)
 
 PCT="$(xcrun llvm-cov export -summary-only -instr-profile "$PROFDATA" "$EXE" "${CORE[@]}" 2>/dev/null \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(round(d["data"][0]["totals"]["lines"]["percent"],2))')"
