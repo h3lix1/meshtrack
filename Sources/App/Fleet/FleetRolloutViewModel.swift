@@ -230,6 +230,9 @@ public final class FleetRolloutViewModel {
     /// Record a finished node's real outcome, then — unless it halted the rollout —
     /// light the next pending node as `applying`.
     private func advance(after outcome: NodeRolloutOutcome) {
+        // Ignore any callback that lands after an abort/finish: only a rollout in
+        // flight may mutate rows, so a stale outcome can't resurrect an aborted run.
+        guard phase == .rolling else { return }
         guard let index = rows.firstIndex(where: { $0.member.nodeNum == outcome.nodeNum }) else { return }
         let status = Self.present(outcome.status)
         rows[index].status = status
