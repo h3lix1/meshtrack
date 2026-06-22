@@ -100,6 +100,11 @@ public final class AlertsConsoleViewModel {
 
     @ObservationIgnored private let store: MeshStore
     @ObservationIgnored private let clock: Clock
+    /// Default snooze duration (seconds) applied by the parameterless `snooze`
+    /// action. Phase 8 persists this in `app_config`; the lead injects the stored
+    /// value here in composition (Finding 12). Defaults to one hour so a console
+    /// constructed without the persisted value still behaves as before.
+    @ObservationIgnored public let defaultSnoozeSeconds: Double
     /// The lifecycle state machine, rehydrated from the persisted rows on `load`.
     @ObservationIgnored private var engine = AlertEngine()
     /// The full, unfiltered set from the last load — `regroup` filters from this.
@@ -107,9 +112,10 @@ public final class AlertsConsoleViewModel {
     /// node_num → display name, captured at load for relabeling derived items.
     @ObservationIgnored private var nodeNames: [Int64: String] = [:]
 
-    public init(store: MeshStore, clock: Clock) {
+    public init(store: MeshStore, clock: Clock, defaultSnoozeSeconds: Double = 3600) {
         self.store = store
         self.clock = clock
+        self.defaultSnoozeSeconds = defaultSnoozeSeconds
     }
 
     // MARK: Load
@@ -137,6 +143,13 @@ public final class AlertsConsoleViewModel {
         engine.acknowledge(type: item.type, nodeNum: UInt32(truncatingIfNeeded: item.nodeNum), at: now)
         try await persist(type: item.type, nodeNum: item.nodeNum)
         rebuildItems()
+    }
+
+    /// Snooze an alert for the persisted default duration (`defaultSnoozeSeconds`).
+    /// The console's Snooze button calls this so the operator's configured default
+    /// is honoured instead of a hardcoded hour (Finding 12).
+    public func snooze(_ item: AlertConsoleItem) async throws {
+        try await snooze(item, forSeconds: defaultSnoozeSeconds)
     }
 
     /// Snooze an alert for `seconds`: silences re-announcements until it expires.
@@ -211,7 +224,11 @@ public final class AlertsConsoleViewModel {
             fired_at: alert.firedAt.nanosecondsSinceEpoch,
             acked_at: alert.ackedAt?.nanosecondsSinceEpoch,
             resolved_at: alert.resolvedAt?.nanosecondsSinceEpoch,
-            payload_json: Self.payload(detail: alert.detail, snoozedUntil: alert.snoozedUntil)
+            payload_json: Self.payload(
+                detail: alert.detail,
+                snoozedUntil: alert.snoozedUntil,
+                cooldownSeconds: alert.cooldownSeconds
+            )
         )
         try await store.saveAlert(record)
     }
@@ -233,7 +250,10 @@ public final class AlertsConsoleViewModel {
                 type: AlertType(rawValue: record.type) ?? .stale,
                 nodeNum: UInt32(truncatingIfNeeded: record.node_num),
                 detail: detail(from: record.payload_json),
-                cooldownSeconds: 0
+                // Preserve the cooldown across rehydration (Finding 13): persisted
+                // inside payload_json, so a resolved alert stays suppressed for its
+                // full cooldown after relaunch instead of refiring immediately.
+                cooldownSeconds: cooldownSeconds(from: record.payload_json)
             ))
             engine.reconcile(present, now: Instant(nanosecondsSinceEpoch: record.fired_at), historical: true)
         }
@@ -334,10 +354,17 @@ public final class AlertsConsoleViewModel {
         NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 
-    /// Tiny JSON payload carrying the detail string + snooze; avoids a new column.
-    private static func payload(detail: String, snoozedUntil: Instant?) -> String? {
+    /// Tiny JSON payload carrying the detail string + snooze + cooldown; avoids a
+    /// new column. Cooldown is persisted so it survives rehydration (Finding 13);
+    /// `0` is omitted to keep payloads compact and backward-compatible.
+    static func payload(
+        detail: String,
+        snoozedUntil: Instant?,
+        cooldownSeconds: Double
+    ) -> String? {
         var dict: [String: String] = ["detail": detail]
         if let until = snoozedUntil { dict["snoozed_until"] = String(until.nanosecondsSinceEpoch) }
+        if cooldownSeconds > 0 { dict["cooldown_seconds"] = String(cooldownSeconds) }
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let json = String(data: data, encoding: .utf8) else { return nil }
         return json
@@ -350,6 +377,12 @@ public final class AlertsConsoleViewModel {
     private static func snoozedUntil(from payload: String?) -> Instant? {
         guard let raw = decode(payload)?["snoozed_until"], let nanos = Int64(raw) else { return nil }
         return Instant(nanosecondsSinceEpoch: nanos)
+    }
+
+    /// The persisted cooldown (seconds); `0` when absent (older rows / no cooldown).
+    private static func cooldownSeconds(from payload: String?) -> Double {
+        guard let raw = decode(payload)?["cooldown_seconds"], let value = Double(raw) else { return 0 }
+        return value
     }
 
     private static func decode(_ payload: String?) -> [String: String]? {
