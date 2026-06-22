@@ -27,6 +27,11 @@ public final class AppModel {
     /// (`true`) or renders the deterministic Canvas-only map (`false`, snapshots).
     public var live: Bool
 
+    /// The section currently selected in the shell, mirrored from `RootView` so the
+    /// live shell can show section-specific chrome (e.g. the VCR replay bar belongs to
+    /// the Network map only — item 2). Defaults to `.network`.
+    public var currentSection: AppSection = .network
+
     /// Cross-section navigation hook (Finding 19). Set by `AppShell`/`RootView` to
     /// update the selected section, so section views (e.g. the node directory's
     /// "Open analytics" / "Apply config" actions) can route the operator to another

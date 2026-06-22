@@ -82,7 +82,13 @@ public struct RootView: View {
         .environment(model)
         // Let section views route the operator between sections (Finding 19): the node
         // directory's "Open analytics" / "Apply config" actions update the selection.
-        .onAppear { model.onNavigate = { section = $0 } }
+        .onAppear {
+            model.onNavigate = { section = $0 }
+            model.currentSection = section
+        }
+        // Mirror the selection so the live shell can gate section-specific chrome
+        // (e.g. the VCR replay bar is Network-only — item 2).
+        .onChange(of: section) { _, newSection in model.currentSection = newSection }
     }
 }
 

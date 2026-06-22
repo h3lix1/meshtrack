@@ -51,18 +51,24 @@ struct LiveRootView: View {
             }
             ConnectionStatusBadge(status: coordinator.status)
                 .padding(16)
-            // The time-travel transport bar, anchored bottom-centre over the shell.
-            VCRControlView(
-                state: timeline.controlState,
-                actions: VCRControlActions(
-                    togglePlay: { timeline.togglePlay() },
-                    scrub: { timeline.scrub(toFraction: $0) },
-                    setSpeed: { timeline.setSpeed($0) },
-                    goLive: { timeline.goLive() }
+            // The time-travel transport bar — anchored bottom-centre, but ONLY over the
+            // Network map it controls (item 2); other sections don't have a timeline.
+            // `tick` drives the per-frame playback advance (item 1); without it Play
+            // flipped state but the playhead never moved.
+            if model.currentSection == .network {
+                VCRControlView(
+                    state: timeline.controlState,
+                    actions: VCRControlActions(
+                        togglePlay: { timeline.togglePlay() },
+                        scrub: { timeline.scrub(toFraction: $0) },
+                        setSpeed: { timeline.setSpeed($0) },
+                        goLive: { timeline.goLive() },
+                        tick: { timeline.tick(delta: $0) }
+                    )
                 )
-            )
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
         }
         // The ⌘K palette layers over every section; selecting routes via onNavigate.
         .commandPalette(search)
