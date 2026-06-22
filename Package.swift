@@ -10,7 +10,7 @@ let strict: [SwiftSetting] = [
 let package = Package(
     name: "Meshtrack",
     platforms: [
-        .macOS("26.0")
+        .macOS("26.6")
     ],
     products: [
         .executable(name: "meshtrackd", targets: ["meshtrackd"]),
