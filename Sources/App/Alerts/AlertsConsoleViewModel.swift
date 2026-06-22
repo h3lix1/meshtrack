@@ -236,8 +236,9 @@ public final class AlertsConsoleViewModel {
     // MARK: Pure mapping (testable without a store)
 
     /// Rebuild the engine from persisted rows so the console resumes the lifecycle
-    /// after an app restart.
-    static func rehydrate(_ records: [AlertRecord]) -> AlertEngine {
+    /// after an app restart. `nonisolated` (pure over value types) so the live
+    /// evaluator can reuse it off the main actor.
+    nonisolated static func rehydrate(_ records: [AlertRecord]) -> AlertEngine {
         var engine = AlertEngine()
         // Fire each row at its OWN fired_at (oldest first) so the rehydrated alert
         // keeps its real fired time — the console sorts on it. Reconciling all at
@@ -339,7 +340,7 @@ public final class AlertsConsoleViewModel {
 
     // MARK: Helpers
 
-    private static func condition(_ alert: Alert) -> AlertCondition {
+    nonisolated private static func condition(_ alert: Alert) -> AlertCondition {
         AlertCondition(
             type: alert.type, nodeNum: alert.nodeNum, detail: alert.detail,
             cooldownSeconds: alert.cooldownSeconds
@@ -350,14 +351,14 @@ public final class AlertsConsoleViewModel {
         node.short_name ?? node.long_name ?? hexID(node.node_num)
     }
 
-    static func hexID(_ nodeNum: Int64) -> String {
+    nonisolated static func hexID(_ nodeNum: Int64) -> String {
         NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 
     /// Tiny JSON payload carrying the detail string + snooze + cooldown; avoids a
     /// new column. Cooldown is persisted so it survives rehydration (Finding 13);
     /// `0` is omitted to keep payloads compact and backward-compatible.
-    static func payload(
+    nonisolated static func payload(
         detail: String,
         snoozedUntil: Instant?,
         cooldownSeconds: Double
@@ -370,22 +371,22 @@ public final class AlertsConsoleViewModel {
         return json
     }
 
-    private static func detail(from payload: String?) -> String {
+    nonisolated private static func detail(from payload: String?) -> String {
         decode(payload)?["detail"] ?? ""
     }
 
-    private static func snoozedUntil(from payload: String?) -> Instant? {
+    nonisolated private static func snoozedUntil(from payload: String?) -> Instant? {
         guard let raw = decode(payload)?["snoozed_until"], let nanos = Int64(raw) else { return nil }
         return Instant(nanosecondsSinceEpoch: nanos)
     }
 
     /// The persisted cooldown (seconds); `0` when absent (older rows / no cooldown).
-    private static func cooldownSeconds(from payload: String?) -> Double {
+    nonisolated private static func cooldownSeconds(from payload: String?) -> Double {
         guard let raw = decode(payload)?["cooldown_seconds"], let value = Double(raw) else { return 0 }
         return value
     }
 
-    private static func decode(_ payload: String?) -> [String: String]? {
+    nonisolated private static func decode(_ payload: String?) -> [String: String]? {
         guard let payload, let data = payload.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String]
         else { return nil }
