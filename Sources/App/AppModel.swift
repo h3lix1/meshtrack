@@ -27,6 +27,12 @@ public final class AppModel {
     /// (`true`) or renders the deterministic Canvas-only map (`false`, snapshots).
     public var live: Bool
 
+    /// Cross-section navigation hook (Finding 19). Set by `AppShell`/`RootView` to
+    /// update the selected section, so section views (e.g. the node directory's
+    /// "Open analytics" / "Apply config" actions) can route the operator to another
+    /// section instead of doing nothing. `nil` until the shell wires it.
+    @ObservationIgnored public var onNavigate: ((AppSection) -> Void)?
+
     /// Section → content-view provider. Resolved by `view(for:)`. Seeded with the
     /// built-in sections; feature streams override/extend via `register(_:_:)`.
     @ObservationIgnored private var registry: [AppSection: SectionProvider] = [:]
