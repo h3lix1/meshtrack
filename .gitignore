@@ -28,3 +28,6 @@ secrets.json
 
 # Claude Code local state (settings + transient agent worktrees)
 .claude/
+
+# Generated GUI snapshots (MeshtrackSnapshot dev tool output)
+Snapshots/
