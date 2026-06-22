@@ -52,9 +52,7 @@ coverage:
 	@bash scripts/check-coverage.sh
 
 mutation:
-	@if command -v muter >/dev/null 2>&1 && [ -f muter.conf.yml ]; then \
-		muter run ; \
-	else echo "⚠️  muter or muter.conf.yml absent; skipping mutation gate (CI enforces)"; fi
+	@bash scripts/check-mutation.sh
 
 protos-check:
 	@bash scripts/check-protobuf-codegen.sh
