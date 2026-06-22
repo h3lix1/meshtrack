@@ -25,6 +25,9 @@ public final class OffendersViewModel {
     public private(set) var persistedRows: [OffenderRow] = []
     /// Total receptions folded this session (headline + context).
     public private(set) var totalReceptions = 0
+    /// The node whose full why/how/when detail is open, or `nil` for the ranking list.
+    /// Master/detail selection within the section; set by tapping a row.
+    public private(set) var selectedNode: UInt32?
 
     private var aggregator = TrafficAggregator()
     private let store: MeshStore?
@@ -56,6 +59,27 @@ public final class OffendersViewModel {
             sinceLastPersist = 0
             persist()
         }
+    }
+
+    // MARK: Selection (master/detail)
+
+    /// The live why/how/when detail for the selected node, recomputed from the current
+    /// aggregate each access, or `nil` when nothing is selected (or the node has aged
+    /// out of the in-memory aggregate — e.g. a persisted-only row).
+    public var selectedDetail: OffenderDetail? {
+        guard let selectedNode else { return nil }
+        return aggregator.detail(forNode: selectedNode)
+    }
+
+    /// Open the detail for a node (tapping a row). Re-selecting the open node is a
+    /// no-op; pass a different node to switch.
+    public func select(nodeNum: UInt32) {
+        selectedNode = nodeNum
+    }
+
+    /// Return to the ranking list (the detail panel's back/close affordance).
+    public func clearSelection() {
+        selectedNode = nil
     }
 
     // MARK: Persistence
