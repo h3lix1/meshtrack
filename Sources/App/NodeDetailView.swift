@@ -4,6 +4,7 @@
 // rolling apply (AdminApplier / FleetApplier). Bespoke chip/switch controls so the
 // dark theme is consistent and the headless snapshot renders faithfully.
 
+import Domain
 import SwiftUI
 
 public struct NodeDetailView: View {
@@ -34,7 +35,7 @@ public struct NodeDetailView: View {
     }
 
     private var hexID: String {
-        String(format: "!%08x", UInt32(truncatingIfNeeded: node.id))
+        NodeID.hex(UInt32(truncatingIfNeeded: node.id))
     }
 
     public var body: some View {
