@@ -33,6 +33,33 @@ struct FleetStoreTests {
     }
 
     @Test
+    func `a template's broad config_json round-trips through the store intact`() async throws {
+        // Phase 10: the full protocol surface a template carries is JSON-encoded into
+        // the existing `config_json` column (no migration). Prove the column persists
+        // and reloads a non-trivial payload byte-for-byte.
+        let store = try makeStore()
+        let json = #"{"fields":{"modem_preset":"MEDIUM_FAST","mqtt_enabled":"true","tx_power":"20"}}"#
+        let id = try await store.upsertTemplate(TemplateRecord(
+            name: "Broad",
+            dsl: "{shortName}",
+            region: "US",
+            role: "ROUTER",
+            config_json: json
+        ))
+
+        let loaded = try #require(try await store.allTemplates().first { $0.id == id })
+        #expect(loaded.config_json == json)
+        #expect(loaded.role == "ROUTER")
+
+        // Overwrite in place with a different payload — the new JSON replaces the old.
+        let json2 = #"{"fields":{"hop_limit":"5"}}"#
+        _ = try await store.upsertTemplate(TemplateRecord(
+            id: id, name: "Broad", dsl: "{shortName}", region: "US", role: "ROUTER", config_json: json2
+        ))
+        #expect(try await store.allTemplates().first { $0.id == id }?.config_json == json2)
+    }
+
+    @Test
     func `node_config round-trips and overwrites`() async throws {
         let store = try makeStore()
         try await store.upsertNode(NodeRecord(node_num: 7, first_seen_at: 0, last_heard_at: 0))

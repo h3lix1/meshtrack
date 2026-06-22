@@ -198,6 +198,14 @@ public struct NodeDetailView: View {
 /// `"mqtt_enabled"`, …). The host turns `fields` into the desired config the diff
 /// compares against. `name` / `region` / `role` remain as convenience accessors over
 /// `fields` so existing call sites keep working unchanged.
+///
+/// Per-node override semantics (SPEC §2.7): a fleet `NodeTemplate` supplies the GROUP
+/// defaults — its `desiredConfig(for:)` is what a rollout applies across the targeted
+/// nodes. This `NodeConfigEdit` is the INDIVIDUAL override: an operator edits one node
+/// and applies on top, so the node's own value wins for the fields it changed while the
+/// rest of the template's defaults still stand. Because both paths flow through the same
+/// diff/apply pipeline, the override is just "apply the node edit after (or instead of)
+/// the template rollout" — the read-back verify then reflects the merged result.
 public struct NodeConfigEdit: Sendable, Equatable {
     public let nodeNum: Int64
     /// Owner long name (the human-facing node name). Kept as a distinct field
