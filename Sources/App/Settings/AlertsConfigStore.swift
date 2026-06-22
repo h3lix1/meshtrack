@@ -75,7 +75,7 @@ public enum AlertRuleScope: Sendable, Equatable, Hashable, Codable {
     }
 
     static func hexID(_ num: UInt32) -> String {
-        "!" + String(format: "%08x", num)
+        NodeID.hex(num)
     }
 }
 

@@ -331,7 +331,7 @@ public final class AlertsConsoleViewModel {
     }
 
     static func hexID(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 
     /// Tiny JSON payload carrying the detail string + snooze; avoids a new column.

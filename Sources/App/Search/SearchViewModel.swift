@@ -99,8 +99,8 @@ public final class SearchViewModel {
 
     /// Record-free node-item builder (also used by previews/tests without a store).
     nonisolated static func nodeItem(nodeNum: Int64, shortName: String?, longName: String?) -> SearchItem {
-        let hex = "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
-        let short = String(format: "%04x", UInt16(truncatingIfNeeded: nodeNum))
+        let hex = NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
+        let short = NodeID.shortHex(UInt32(truncatingIfNeeded: nodeNum))
         let name = shortName ?? longName ?? hex
         var keywords = [name, hex, short, String(nodeNum)]
         if let longName { keywords.append(longName) }
@@ -115,7 +115,7 @@ public final class SearchViewModel {
     }
 
     nonisolated static func packetItem(packetID: UInt32, fromNum: Int64) -> SearchItem {
-        let fromHex = "!" + String(format: "%08x", UInt32(truncatingIfNeeded: fromNum))
+        let fromHex = NodeID.hex(UInt32(truncatingIfNeeded: fromNum))
         return SearchItem(
             id: "packet-\(packetID)",
             kind: .packet,
