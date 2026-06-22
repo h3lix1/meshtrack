@@ -48,6 +48,11 @@ struct MeshtrackApp: App {
     /// The live theme applied across the app's chrome; seeded from the saved
     /// `AppSettings.themeID` and updated when the General picker selects a preset.
     @State private var themeController: ThemeController
+    /// Reconnect-on-save signal (Finding 1): the Connection settings save path bumps
+    /// it; `ContentView` observes its `token` and re-runs `resolveAndApply()`. Created
+    /// in `init` so the same instance is injected into both the Settings tab and the
+    /// content view.
+    @State private var configRevision: LiveConfigRevision
 
     /// Promotes the process to a regular foreground GUI app on launch — see
     /// `MeshtrackAppDelegate`. Required because `swift run MeshtrackApp` starts a bare
@@ -71,15 +76,18 @@ struct MeshtrackApp: App {
         // renders. (Doing it in `.onAppear` resolved the initially-selected tab
         // against an empty registry, so it stayed blank until the selection changed.)
         let themeController = ThemeController()
+        let revision = LiveConfigRevision()
         let model = SettingsModel()
         Self.registerTabs(
             on: model,
             ports: ConfigPorts(gateway: gateway, credentials: credentials, dataSources: dataSources),
             store: store,
-            themeController: themeController
+            themeController: themeController,
+            revision: revision
         )
         _settingsModel = State(initialValue: model)
         _themeController = State(initialValue: themeController)
+        _configRevision = State(initialValue: revision)
     }
 
     /// Open the durable on-disk store under Application Support, falling back to an
@@ -112,6 +120,7 @@ struct MeshtrackApp: App {
                 gateway: configGateway,
                 credentials: credentialStore,
                 dataSources: dataSourceStore,
+                revision: configRevision,
                 openConnectionSettings: openConnectionSettings
             )
             .frame(minWidth: 1100, minHeight: 720)
@@ -149,14 +158,16 @@ struct MeshtrackApp: App {
         on model: SettingsModel,
         ports: ConfigPorts,
         store: MeshStore,
-        themeController: ThemeController
+        themeController: ThemeController,
+        revision: LiveConfigRevision
     ) {
         model.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
                 gateway: ports.gateway,
                 credentials: ports.credentials,
                 test: { await probeBrokerConnection($0, password: $1) },
-                dataSourceStore: ports.dataSources
+                dataSourceStore: ports.dataSources,
+                revision: revision
             )))
         }
         model.register(.channels) {
@@ -213,6 +224,10 @@ struct ContentView: View {
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
     let dataSources: any DataSourceStore
+    /// Reconnect-on-save signal (Finding 1): bumped by the Connection settings save;
+    /// observing its `token` re-runs `resolveAndApply()` so a save goes live without
+    /// a relaunch. A successful save is also an EXPLICIT connect, so it forces a start.
+    let revision: LiveConfigRevision
     let openConnectionSettings: () -> Void
 
     @State private var coordinator: LiveCoordinator?
@@ -226,6 +241,12 @@ struct ContentView: View {
     var body: some View {
         content
             .task { await resolveAndApply() }
+            // A successful Settings save bumps the revision. Re-resolve AND force a
+            // connect: saving a connectable broker is an explicit operator action, so
+            // it goes live even when `autoConnect` is off (Finding 1 + Finding 2).
+            .onChange(of: revision.token) { _, _ in
+                Task { await connectNow() }
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -297,6 +318,13 @@ struct ContentView: View {
     /// needed (using the configured refresh cadence) and forces a connect.
     @MainActor private func connectNow() async {
         let settings = await (try? gateway.loadAppSettings()) ?? .default
+        // Refresh the onboarding "Connect now" eligibility against the latest save.
+        let brokerConfig = try? await gateway.loadBrokerConfig()
+        hasConnectableSource = LiveDataSource.resolve(
+            dataSource: dataSources.load(),
+            brokerConfig: brokerConfig,
+            password: { credentials.password(host: $0, username: $1) }
+        ) != nil
         let live = coordinator ?? LiveCoordinator(
             store: store,
             refreshInterval: .seconds(settings.refreshIntervalSeconds)
