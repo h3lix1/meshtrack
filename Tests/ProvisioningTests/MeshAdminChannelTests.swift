@@ -107,11 +107,15 @@ struct MeshAdminChannelTests {
     }
 
     @Test
-    func `apply validates before sending, rejecting an unknown region`() async throws {
+    func `the applier validates before this adapter sends, rejecting an unknown region`() async throws {
+        // Validation lives in the shared AdminApplier orchestration, so the over-the-air
+        // adapter inherits it: an unknown region is rejected before any batch is sent.
         let transport = FakeTransport()
         let channel = MeshAdminChannel(transport: transport, target: target)
+        let applier = AdminApplier(channel: channel)
+        let plan = ApplyPlan(changes: [ConfigChange(field: "region", from: nil, to: "ATLANTIS")])
         await #expect(throws: AdminMappingError.unknownRegion("ATLANTIS")) {
-            try await channel.apply([ConfigChange(field: "region", from: nil, to: "ATLANTIS")])
+            try await applier.apply(plan, template: template, context: context)
         }
         // Nothing was sent — validation gates the effect.
         #expect(await transport.batchCount == 0)
