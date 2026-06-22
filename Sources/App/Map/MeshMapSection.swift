@@ -105,7 +105,9 @@
                         clock: timeline.date.timeIntervalSinceReferenceDate,
                         hopDuration: settings.hopDuration,
                         mode: settings.mode,
-                        latencyMillis: latencyMillis
+                        latencyMillis: latencyMillis,
+                        focusedPacketID: selectedPacketID,
+                        showAllReceivers: settings.showAllReceivers
                     )
                 }
                 .allowsHitTesting(false)

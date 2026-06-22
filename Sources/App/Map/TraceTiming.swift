@@ -25,24 +25,30 @@ public enum TraceTimingMode: Sendable, Equatable {
 
 /// Pure timing/geometry for animating a single trace. Deterministic and Sendable.
 public enum TraceTiming {
-    /// Fraction [0, 1] of edge `index` that should be drawn at animation time
-    /// `clock` (seconds), for a trace that began at `startedAt`.
+    /// Fraction [0, 1] that edges at hop number `hopIndex` (1-based) should be drawn
+    /// at animation time `clock`, for a trace that began at `startedAt`.
     ///
-    /// - Sequential: edge `index` is delayed by `index * hopDuration`, then draws
-    ///   linearly over `hopDuration`.
+    /// Hop number — not edge position — drives the delay, so EVERY edge sharing a hop
+    /// number animates concurrently: hop 1 of every path draws first, then hop 2, … so
+    /// the wavefront expands ring-by-ring (item 2). A trace with parallel paths whose
+    /// hop-1 edges fan out from the source now lights them all at once instead of one
+    /// edge at a time.
+    ///
+    /// - Sequential: hop `n` is delayed by `(n-1) * hopDuration`, then draws linearly
+    ///   over `hopDuration`.
     /// - Equalise-finish: all edges share the same [startedAt, startedAt+hopDuration]
     ///   window, so the whole journey completes together regardless of hop count.
     public static func edgeProgress(
         clock: Double,
         startedAt: Double,
-        edgeIndex: Int,
+        hopIndex: Int,
         hopDuration: Double,
         mode: TraceTimingMode
     ) -> Double {
         let duration = max(hopDuration, .leastNonzeroMagnitude)
         let delay: Double = switch mode {
         case .sequential:
-            Double(edgeIndex) * duration
+            Double(max(0, hopIndex - 1)) * duration
         case .equaliseFinish:
             0
         }
