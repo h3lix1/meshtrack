@@ -1,3 +1,4 @@
+import Foundation
 import MeshProtos
 @testable import Provisioning
 import Testing
@@ -18,7 +19,7 @@ struct MeshAdminChannelTests {
         private var channel: Channel?
         var failSend = false
 
-        init(region: Config.LoRaConfig.RegionCode? = nil) {
+        init(region: Config.LoRaConfig.RegionCode? = nil, primaryChannel: Channel? = nil) {
             if let region {
                 var lora = Config.LoRaConfig()
                 lora.region = region
@@ -26,6 +27,7 @@ struct MeshAdminChannelTests {
                 config.lora = lora
                 configByType[.loraConfig] = config
             }
+            channel = primaryChannel
         }
 
         func setFailSend(_ value: Bool) {
@@ -144,6 +146,47 @@ struct MeshAdminChannelTests {
         let channels = batch.filter { if case .setChannel = $0.payloadVariant { true } else { false } }
         #expect(channels.count == 1)
         #expect(channels.first?.setChannel.settings.moduleSettings.positionPrecision == 16)
+    }
+
+    @Test
+    func `a precision-only apply preserves the existing primary channel settings`() async throws {
+        // SEED a primary channel the way a real node has it: a named channel with a
+        // PSK, uplink/downlink flags and an existing module setting. A precision-only
+        // apply must read-modify-write — `setChannel` REPLACES the channel, so a
+        // fresh ChannelSettings carrying only precision would wipe all of this.
+        var moduleSettings = ModuleSettings()
+        moduleSettings.positionPrecision = 10 // current precision, about to change
+        moduleSettings.isMuted = true // an unrelated module setting that must survive
+        var settings = ChannelSettings()
+        settings.name = "BayMesh"
+        settings.psk = Data([1, 2, 3, 4])
+        settings.uplinkEnabled = true
+        settings.downlinkEnabled = true
+        settings.moduleSettings = moduleSettings
+        var primary = Channel()
+        primary.index = 0
+        primary.role = .primary
+        primary.settings = settings
+
+        let transport = FakeTransport(region: .us, primaryChannel: primary)
+        let channel = MeshAdminChannel(transport: transport, target: target)
+
+        try await channel.apply([ConfigChange(field: "position_precision", from: "10", to: "16")])
+
+        // The single setChannel carries the NEW precision but every other setting
+        // the node already had is preserved (read-modify-write, not REPLACE-with-blank).
+        let batch = try #require(await transport.sentBatches.first)
+        let setChannel = try #require(
+            batch.first { if case .setChannel = $0.payloadVariant { true } else { false } }?.setChannel
+        )
+        #expect(setChannel.settings.moduleSettings.positionPrecision == 16) // updated
+        #expect(setChannel.settings.name == "BayMesh") // preserved
+        #expect(setChannel.settings.psk == Data([1, 2, 3, 4])) // preserved
+        #expect(setChannel.settings.uplinkEnabled) // preserved
+        #expect(setChannel.settings.downlinkEnabled) // preserved
+        #expect(setChannel.settings.moduleSettings.isMuted) // preserved
+        #expect(setChannel.index == 0) // still the primary
+        #expect(setChannel.role == .primary)
     }
 
     @Test
