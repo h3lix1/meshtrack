@@ -163,6 +163,17 @@ public final class NodeConfigFormState {
         values = baseline
     }
 
+    /// Seed the form for the TEMPLATE editor with the template's carried group
+    /// defaults as BOTH the displayed values and the baseline, so `changedFields`
+    /// surfaces exactly the edits the operator makes here. The caller folds those edits
+    /// back into the draft (which may have been mutated by other means), so the form
+    /// only ever overrides keys the operator actually touched in it — never clobbering a
+    /// draft scalar set elsewhere.
+    public init(templateFields: [String: String]) {
+        baseline = templateFields
+        values = templateFields
+    }
+
     /// Read the current edit value for `key` (or the section spec's first choice /
     /// "false" default when unseeded, so a control always has something to show).
     public func value(for spec: NodeConfigFieldSpec) -> String {

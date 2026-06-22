@@ -49,6 +49,57 @@ struct FleetConfigViewModelTests {
     }
 
     @Test
+    func `a saved template carries broad config fields through persistence`() async throws {
+        // Phase 10: the editor's broad form (`configForm`) feeds group defaults into
+        // the template; they must survive save → reload via `config_json`.
+        let store = try makeStore()
+        let viewModel = FleetConfigViewModel(store: store)
+        await viewModel.load()
+
+        viewModel.newTemplate()
+        viewModel.draft.name = "Broad Fleet"
+        viewModel.draft.region = "US"
+        // Operator edits broad fields in the shared form.
+        viewModel.configForm.set("MEDIUM_FAST", for: "modem_preset")
+        viewModel.configForm.set("true", for: "mqtt_enabled")
+        viewModel.configForm.set("20", for: "tx_power")
+        await viewModel.saveTemplate()
+
+        // The in-memory template already reflects the broad fields.
+        let template = viewModel.currentTemplate()
+        #expect(template.fields["modem_preset"] == "MEDIUM_FAST")
+        #expect(template.fields["mqtt_enabled"] == "true")
+
+        // Reselecting a fresh load reseeds the draft + form from persistence.
+        let id = try #require(viewModel.selectedTemplateID)
+        viewModel.newTemplate()
+        #expect(viewModel.configForm.values["modem_preset"] == nil) // cleared by new draft
+        viewModel.select(id)
+        #expect(viewModel.draft.fields["modem_preset"] == "MEDIUM_FAST")
+        #expect(viewModel.draft.fields["mqtt_enabled"] == "true")
+        #expect(viewModel.draft.fields["tx_power"] == "20")
+        #expect(viewModel.configForm.values["modem_preset"] == "MEDIUM_FAST")
+    }
+
+    @Test
+    func `an edit in the broad form overrides the seeded default without clobbering scalars`() async throws {
+        let store = try makeStore()
+        let viewModel = FleetConfigViewModel(store: store)
+        await viewModel.load()
+        viewModel.newTemplate()
+        viewModel.draft.name = "Edit Fleet"
+        viewModel.draft.role = "ROUTER" // set via the draft scalar (not the form)
+        viewModel.configForm.set("LONG_SLOW", for: "modem_preset") // set via the form
+        await viewModel.saveTemplate()
+
+        let id = try #require(viewModel.selectedTemplateID)
+        viewModel.select(id)
+        // Both the scalar-set role and the form-set modem preset persisted.
+        #expect(viewModel.draft.role == "ROUTER")
+        #expect(viewModel.draft.fields["modem_preset"] == "LONG_SLOW")
+    }
+
+    @Test
     func `delete removes the selected template`() async throws {
         let store = try makeStore()
         let viewModel = FleetConfigViewModel(store: store)
