@@ -93,6 +93,10 @@ public final class AppModel {
                 message: "Connect a live feed to see per-node SNR, hops, peers and heatmaps."
             ))
         }
+        // Mesh-traffic analytics (Phase 10): sample-seeded VMs for snapshot / first-run;
+        // the live shell overrides these with store-backed, packet-fed VMs.
+        register(.ports) { AnyView(PortStatsSection(viewModel: PortStatsViewModel.sample())) }
+        register(.offenders) { AnyView(OffendersSection(viewModel: OffendersViewModel.sample())) }
         register(.alerts) { AnyView(AlertsView(alerts: SampleNetwork.alerts)) }
         register(.messages) {
             AnyView(SectionMessageView(

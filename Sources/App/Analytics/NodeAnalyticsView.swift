@@ -28,7 +28,7 @@ public struct NodeAnalyticsView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(AnalyticsTheme.background)
-        .task { try? await viewModel.loadHeader() }
+        .task { try? await viewModel.load() }
     }
 
     private var header: some View {

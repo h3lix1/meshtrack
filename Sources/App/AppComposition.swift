@@ -28,7 +28,9 @@ public extension AppModel {
         store: MeshStore,
         clock: any Domain.Clock,
         adminLink: (any AdminLink)? = nil,
-        packetInspector: PacketInspectorViewModel? = nil
+        packetInspector: PacketInspectorViewModel? = nil,
+        portStats: PortStatsViewModel? = nil,
+        offenders: OffendersViewModel? = nil
     ) {
         let viz = VizSettings()
         // The production OTA channel factory over the live admin link (Finding 8). The
@@ -63,13 +65,16 @@ public extension AppModel {
                 viewModel: packetInspector ?? PacketInspectorSample.viewModel()
             ))
         }
+        // Telemetry + Analytics are per-node; the node PICKER (Phase 10) lets the
+        // operator choose any node — no longer pinned to `allNodes().first`, which is
+        // usually a transient passer-by with no retained data (items 7/8).
         register(.telemetry) {
-            AnyView(PerNodeSectionView(store: store, title: "Telemetry") { nodeNum in
+            AnyView(NodeDataSectionView(store: store, title: "Telemetry") { nodeNum in
                 TelemetryChartsView(viewModel: TelemetryChartsViewModel(store: store, nodeNum: nodeNum))
             })
         }
         register(.analytics) {
-            AnyView(PerNodeSectionView(store: store, title: "Analytics") { nodeNum in
+            AnyView(NodeDataSectionView(store: store, title: "Analytics") { nodeNum in
                 NodeAnalyticsView(viewModel: NodeAnalyticsViewModel(store: store, nodeNum: nodeNum))
             })
         }
@@ -82,7 +87,25 @@ public extension AppModel {
         register(.health) {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
+        registerTrafficSections(store: store, portStats: portStats, offenders: offenders)
         registerProvisioningSections(store: store, otaFactory: otaFactory)
+    }
+
+    /// Mesh-traffic analytics sections (Phase 10, items 11–13): Port Numbers + Largest
+    /// Offenders. Split out of `registerLiveSections` (lint body-length cap). The live
+    /// VMs are fed the decoded-packet stream by `LiveCoordinator` and passed in here so
+    /// the UI shows the SAME running aggregates; when absent (e.g. `AppModelTests`) a
+    /// store-backed VM is constructed so the sections still register.
+    @MainActor
+    private func registerTrafficSections(
+        store: MeshStore,
+        portStats: PortStatsViewModel?,
+        offenders: OffendersViewModel?
+    ) {
+        let portsVM = portStats ?? PortStatsViewModel(store: store)
+        let offendersVM = offenders ?? OffendersViewModel(store: store)
+        register(.ports) { AnyView(PortStatsSection(viewModel: portsVM)) }
+        register(.offenders) { AnyView(OffendersSection(viewModel: offendersVM)) }
     }
 
     /// The node-directory section. Split out of `registerLiveSections` (lint

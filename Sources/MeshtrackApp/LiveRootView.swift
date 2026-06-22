@@ -33,7 +33,9 @@ struct LiveRootView: View {
             store: coordinator.store,
             clock: SystemWallClock(),
             adminLink: LiveAdminLink(),
-            packetInspector: coordinator.packetInspector
+            packetInspector: coordinator.packetInspector,
+            portStats: coordinator.portStats,
+            offenders: coordinator.offenders
         )
         _model = State(initialValue: model)
         _search = State(initialValue: SearchViewModel(store: coordinator.store))
@@ -64,14 +66,29 @@ struct LiveRootView: View {
         }
         // The ⌘K palette layers over every section; selecting routes via onNavigate.
         .commandPalette(search)
-        // Mirror the live view model into the AppModel registry. Reading the
-        // @Observable nodes/traces here re-runs this body as packets arrive, and
-        // re-seeding the model rebuilds its section providers over the new data.
+        // Mirror the live view model into the AppModel registry — but ONLY while the
+        // VCR is live. When the operator scrubs into the past (`timeline.isReviewing`),
+        // the map must show the RECONSTRUCTED frame at the playhead, not the live feed
+        // (Phase 10 item 1: the replay bar previously moved but the map stayed live).
         .onChange(of: coordinator.viewModel.nodes) { _, nodes in
-            model.nodes = nodes
+            if !timeline.isReviewing { model.nodes = nodes }
         }
         .onChange(of: coordinator.viewModel.traces) { _, traces in
-            model.traces = traces
+            if !timeline.isReviewing { model.traces = traces }
+        }
+        // Switch the map source as the playhead enters/leaves review.
+        .onChange(of: timeline.isReviewing) { _, reviewing in
+            if reviewing {
+                model.nodes = timeline.nodes
+                model.traces = timeline.traces
+            } else {
+                model.nodes = coordinator.viewModel.nodes
+                model.traces = coordinator.viewModel.traces
+            }
+        }
+        // While reviewing, keep feeding the reconstructed frame as the playhead moves.
+        .onChange(of: timeline.traces) { _, traces in
+            if timeline.isReviewing { model.traces = traces }
         }
         // Refresh the palette corpus from the store each time it opens.
         .onChange(of: search.isPresented) { _, presented in
