@@ -114,10 +114,17 @@ final class LiveCoordinator {
     /// stream's, the stream restarts; identical → no-op. With nothing connectable the
     /// stream stops and the status goes offline. The broker password is read from the
     /// `CredentialStore` and held only in memory; it is never logged.
+    ///
+    /// `allowAutoStart` gates whether a connectable source is started automatically.
+    /// Launch passes `LiveStartupPolicy.shouldConnectOnLaunch(...)` so an operator who
+    /// turned `autoConnect` off stays offline until they explicitly connect; an already-
+    /// running stream still reconnects-on-change. An explicit `connect()` (the Connect
+    /// affordance / a successful Settings save) always starts, regardless of this gate.
     func applyConfig(
         gateway: any ConfigGateway,
         credentials: any CredentialStore,
-        dataSourceStore: any DataSourceStore
+        dataSourceStore: any DataSourceStore,
+        allowAutoStart: Bool = true
     ) async {
         let brokerConfig = try? await gateway.loadBrokerConfig()
         let resolved = LiveDataSource.resolve(
@@ -129,7 +136,35 @@ final class LiveCoordinator {
             stop()
             return
         }
+        // When auto-start is withheld (autoConnect off) and we are not already
+        // streaming, stay offline: don't begin a connection the operator didn't ask
+        // for. A live stream still reconnects-on-change so a saved edit takes effect.
+        guard allowAutoStart || isRunning else { return }
         apply(dataSource: resolved)
+    }
+
+    /// Explicit operator-initiated connect: resolve the active source and start the
+    /// live stream regardless of the `autoConnect` preference. Invoked from the
+    /// Connect affordance (onboarding / status bar) and from a successful Settings
+    /// save, so a user action always overrides `autoConnect == false`.
+    func connect(
+        gateway: any ConfigGateway,
+        credentials: any CredentialStore,
+        dataSourceStore: any DataSourceStore
+    ) async {
+        await applyConfig(
+            gateway: gateway,
+            credentials: credentials,
+            dataSourceStore: dataSourceStore,
+            allowAutoStart: true
+        )
+    }
+
+    /// Whether a live stream is currently running (a source is resolved and tasks are
+    /// active). Used to keep reconnect-on-change working while withholding a fresh
+    /// auto-start when `autoConnect` is off.
+    private var isRunning: Bool {
+        dataSource != nil
     }
 
     /// (Re)start the live stream against `newSettings` (an MQTT broker). Convenience

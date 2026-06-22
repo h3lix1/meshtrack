@@ -21,6 +21,20 @@ struct OnboardingView: View {
     let onSetUpConnection: () -> Void
     /// Continue into the sample-data shell to explore the app.
     let onExploreSample: () -> Void
+    /// Explicit connect (overriding `autoConnect == false`), shown ONLY when a
+    /// connectable source is already saved but the app stayed offline at launch
+    /// because auto-connect is off (Finding 2). `nil` hides the button.
+    var onConnectNow: (() -> Void)?
+
+    init(
+        onSetUpConnection: @escaping () -> Void,
+        onExploreSample: @escaping () -> Void,
+        onConnectNow: (() -> Void)? = nil
+    ) {
+        self.onSetUpConnection = onSetUpConnection
+        self.onExploreSample = onExploreSample
+        self.onConnectNow = onConnectNow
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +76,18 @@ struct OnboardingView: View {
 
     private var actions: some View {
         VStack(spacing: 12) {
+            if let onConnectNow {
+                Button(action: onConnectNow) {
+                    Label("Connect now", systemImage: "bolt.horizontal.circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(Color.green.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.plain)
+            }
+
             Button(action: onSetUpConnection) {
                 Label("Set up connection", systemImage: "gearshape")
                     .font(.system(size: 14, weight: .semibold))
