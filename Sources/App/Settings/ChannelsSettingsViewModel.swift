@@ -121,7 +121,9 @@ public enum ChannelKeyMath {
     /// `"AQ=="` in base64 (a single `0x01` byte expands to these 16 bytes). Shared
     /// by the public LongFast/MediumFast channels (SPEC §1, §10). Single source of
     /// truth: `MeshtasticChannelHash.defaultPSK`.
-    public static var defaultPSK: [UInt8] { MeshtasticChannelHash.defaultPSK }
+    public static var defaultPSK: [UInt8] {
+        MeshtasticChannelHash.defaultPSK
+    }
 
     /// The Meshtastic `MeshPacket.channel` hash: XOR of every byte of the channel
     /// name with every byte of the PSK, as a single byte widened to `UInt32`

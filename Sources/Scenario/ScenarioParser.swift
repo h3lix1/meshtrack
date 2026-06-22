@@ -205,9 +205,13 @@ public struct ScenarioParser: Sendable {
             return ExpectedAlert(type: type, count: count)
         }
     }
+}
 
-    // MARK: - Generic value helpers
+// MARK: - Generic value helpers
 
+/// Value-coercion utilities shared across the typed parse steps. Kept in an
+/// extension so the core parser body stays focused (and within lint limits).
+extension ScenarioParser {
     /// Yams may hand back `[String: Any]` or `[AnyHashable: Any]`; normalise to
     /// `[String: Any]` (dropping any non-string keys, which the schema never uses).
     private static func asMapping(_ value: Any) -> [String: Any]? {
