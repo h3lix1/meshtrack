@@ -153,13 +153,17 @@ public struct MeshStore: Sendable {
 
     // MARK: Messages (monitor-only, ADR 0006)
 
-    /// Append a decoded text message. Returns the row id.
+    /// Append a decoded text message, idempotent on `(packet_id, from_num)`
+    /// (schema v5). A re-delivery of the same logical message — e.g. via a
+    /// different gateway after a reconnect, which a fresh in-memory `DedupWindow`
+    /// would re-admit — is silently ignored rather than duplicating a chat line.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func recordMessage(_ message: MessageRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = message
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 
@@ -187,21 +191,28 @@ public struct MeshStore: Sendable {
 
     // MARK: Time-series
 
+    /// Append a telemetry sample, idempotent on `(node_num, t, kind, key)`
+    /// (schema v5). A re-delivered packet (e.g. via a different gateway after a
+    /// reconnect) is silently ignored rather than double-counting the metric.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func appendTelemetry(_ telemetry: TelemetryRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = telemetry
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 
+    /// Append a position fix, idempotent on `(node_num, t)` (schema v5). A
+    /// re-delivered packet is silently ignored rather than duplicating the fix.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func appendPositionFix(_ fix: PositionFixRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = fix
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 

@@ -39,7 +39,68 @@ public enum MeshtrackMigrator {
         migrator.registerMigration("v4") { db in
             try createAppConfig(db)
         }
+        // Phase 8 hardening: make app-payload extraction idempotent at the STORE
+        // layer (Finding 2). The pipeline's in-memory `DedupWindow` is recreated
+        // every `run()` (per reconnect/config change) and observation dedup is
+        // gateway-scoped, so a packet re-delivered via a different gateway after a
+        // reconnect could insert a duplicate message/telemetry/position row. A
+        // unique index on each table's natural key — combined with `INSERT OR
+        // IGNORE` in the store — makes "count once" durable across process/run
+        // boundaries rather than relying on the volatile window.
+        migrator.registerMigration("v5") { db in
+            try dedupeExtractionTables(db)
+            try addExtractionUniqueIndexes(db)
+        }
         return migrator
+    }
+
+    /// Collapse any pre-v5 duplicate extraction rows down to one per natural key
+    /// so the new unique indexes can be created without violating existing data.
+    /// Keeps the lowest `id` (earliest insert) per group; deletes the rest. A
+    /// fresh database has nothing to dedupe, so these run as cheap no-ops.
+    private static func dedupeExtractionTables(_ db: Database) throws {
+        // message: one row per (packet_id, from_num) — the same logical message.
+        try db.execute(sql: """
+        DELETE FROM \(Table.message) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.message) GROUP BY packet_id, from_num
+        )
+        """)
+        // telemetry: one row per (node_num, t, kind, key) — one sample.
+        try db.execute(sql: """
+        DELETE FROM \(Table.telemetry) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.telemetry) GROUP BY node_num, t, kind, key
+        )
+        """)
+        // position_fix: one row per (node_num, t) — one fix at an instant.
+        try db.execute(sql: """
+        DELETE FROM \(Table.positionFix) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.positionFix) GROUP BY node_num, t
+        )
+        """)
+    }
+
+    /// Unique indexes on the extraction tables' natural keys. With the store's
+    /// `INSERT OR IGNORE`, a re-delivered packet (e.g. via a different gateway
+    /// after a reconnect) is silently dropped instead of duplicating a row.
+    private static func addExtractionUniqueIndexes(_ db: Database) throws {
+        try db.create(
+            index: "idx_message_packet_from",
+            on: Table.message,
+            columns: ["packet_id", "from_num"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_telemetry_natural_key",
+            on: Table.telemetry,
+            columns: ["node_num", "t", "kind", "key"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_position_fix_natural_key",
+            on: Table.positionFix,
+            columns: ["node_num", "t"],
+            options: [.unique]
+        )
     }
 
     /// `app_config` — key-value store for non-secret app configuration (Phase 8).
