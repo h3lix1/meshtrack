@@ -38,8 +38,10 @@ struct MeshtrackApp: App {
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
     /// The persisted data-source selection (MQTT broker vs locally-attached node).
-    /// Non-secret; `UserDefaults`-backed so broker persistence stays untouched.
-    private let dataSourceStore: any DataSourceStore
+    /// Non-secret; backed by the shared `MeshStore` `app_config` table so it lives in
+    /// the same durable store as the rest of the config (Finding 23). Concrete type so
+    /// the composition root can `hydrate()` it from disk before resolving the source.
+    private let dataSourceStore: MeshStoreDataSourceStore
 
     /// The settings window's tab registry, populated eagerly in `init` (before the
     /// Settings window first renders) so the initially-selected tab shows its content.
@@ -67,7 +69,7 @@ struct MeshtrackApp: App {
         self.store = store
         let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
         let credentials: any CredentialStore = KeychainCredentialStore()
-        let dataSources: any DataSourceStore = UserDefaultsDataSourceStore()
+        let dataSources = MeshStoreDataSourceStore(store: store)
         configGateway = gateway
         credentialStore = credentials
         dataSourceStore = dataSources
@@ -223,7 +225,9 @@ struct ContentView: View {
     let store: MeshStore
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
-    let dataSources: any DataSourceStore
+    /// Concrete so the view can `hydrate()` the persisted selection from `app_config`
+    /// before resolving the live source (Finding 23).
+    let dataSources: MeshStoreDataSourceStore
     /// Reconnect-on-save signal (Finding 1): bumped by the Connection settings save;
     /// observing its `token` re-runs `resolveAndApply()` so a save goes live without
     /// a relaunch. A successful save is also an EXPLICIT connect, so it forces a start.
@@ -279,6 +283,9 @@ struct ContentView: View {
     /// connects explicitly via the Connect affordance (which calls `connectNow()`).
     @MainActor private func resolveAndApply() async {
         defer { resolved = true }
+        // Load the persisted data-source selection from app_config into the sync cache
+        // before resolving (Finding 23).
+        await dataSources.hydrate()
         await seedFromEnvIfNeeded()
         // Go live when the active source is connectable: an MQTT broker is configured,
         // OR a local node is selected with the coordinates it needs.
