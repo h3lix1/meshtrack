@@ -148,6 +148,31 @@ public struct CollisionMatrixView: View {
     }
 
     public var body: some View {
+        // The whole page scrolls: when a cell is selected, the detail card plus a long
+        // short-id list can overflow the window, so the cards live inside a `ScrollView`.
+        // The scrollable cards are factored into `pageContent` (a bespoke subview that
+        // lays out at its intrinsic height) so headless `ImageRenderer` snapshots — which
+        // have no scroll viewport — render the full stack instead of a collapsed strip.
+        // The cell `onTapGesture` lives only on the heatmap cells, so selecting a cell
+        // and scrolling the list never fight for the same gesture.
+        ScrollView(.vertical) {
+            pageContent
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(ObserveTheme.background)
+        .task {
+            // Store-backed VMs fetch their nodes here; memory-only VMs no-op.
+            try? await viewModel.load()
+            loaded = true
+        }
+    }
+
+    /// The page's scrollable card stack, extracted so headless render tests can target
+    /// it directly and so it sizes to its intrinsic height inside the `ScrollView`
+    /// (no trailing `Spacer`, which would expand unbounded in a vertical scroll view).
+    var pageContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             if viewModel.analysis.nodeCount == 0 {
@@ -159,15 +184,6 @@ public struct CollisionMatrixView: View {
                 }
                 shortIDCard
             }
-            Spacer(minLength: 0)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(ObserveTheme.background)
-        .task {
-            // Store-backed VMs fetch their nodes here; memory-only VMs no-op.
-            try? await viewModel.load()
-            loaded = true
         }
     }
 
@@ -176,12 +192,12 @@ public struct CollisionMatrixView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(loaded ? "No nodes yet" : "Loading…")
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
             Text(loaded
                 ? "The collision matrix populates as nodes are heard. Nothing to "
                 + "compare yet — relay-byte ambiguity needs at least two nodes."
                 : "Reading the node set from the store…")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(.system(size: 16)).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -193,7 +209,7 @@ public struct CollisionMatrixView: View {
             Text("Relay-byte collisions").font(.title.bold()).foregroundStyle(.white)
             Text("ids are 4 bytes but relay hints carry only the last — shared bytes "
                 + "make the previous-hop guess ambiguous")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(.system(size: 16)).foregroundStyle(.secondary)
         }
     }
 
@@ -201,20 +217,22 @@ public struct CollisionMatrixView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("LAST-BYTE MATRIX (16×16)")
-                    .font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+                    .font(.system(size: 14, weight: .bold)).tracking(1).foregroundStyle(.secondary)
                 Spacer()
                 Text("worst: \(viewModel.analysis.maxLastByteCollision) nodes · "
                     + "\(viewModel.analysis.collidingByteCount) ambiguous bytes")
-                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                    .font(.system(size: 14, design: .monospaced)).foregroundStyle(.secondary)
             }
             CollisionHeatmap(
                 buckets: viewModel.analysis.lastByteBuckets,
                 selectedByte: viewModel.selectedByte,
                 onTap: { viewModel.select(byte: $0) }
             )
-            .frame(height: 280)
+            // Tall enough that the doubled cell text (16pt value + 14pt ×count) fits
+            // crisply across all 16 rows; `minimumScaleFactor` stays as a safety net.
+            .frame(height: 600)
             Text("Tap an outlined (colliding) cell to inspect the nodes sharing that byte.")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .font(.system(size: 14)).foregroundStyle(.secondary)
         }
         .padding(16)
         .background(ObserveTheme.card, in: RoundedRectangle(cornerRadius: 12))
@@ -225,11 +243,11 @@ public struct CollisionMatrixView: View {
     private var detailCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let bucket = viewModel.selectedBucket {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Text("BYTE 0x\(bucket.key.uppercased())")
-                        .font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+                        .font(.system(size: 14, weight: .bold)).tracking(1).foregroundStyle(.secondary)
                     Text("× \(bucket.count) nodes share it")
-                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(.orange)
+                        .font(.system(size: 14, design: .monospaced)).foregroundStyle(.orange)
                     Spacer()
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -244,7 +262,7 @@ public struct CollisionMatrixView: View {
                 if !pairs.isEmpty {
                     Divider().overlay(Color.white.opacity(0.1))
                     Text("EARSHOT — could they be the same hop?")
-                        .font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+                        .font(.system(size: 14, weight: .bold)).tracking(1).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(pairs) { pair in
                             EarshotPairRow(pair: pair)
@@ -261,10 +279,10 @@ public struct CollisionMatrixView: View {
     private var shortIDCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("SHORT-ID COLLISIONS")
-                .font(.system(size: 10, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+                .font(.system(size: 14, weight: .bold)).tracking(1).foregroundStyle(.secondary)
             if viewModel.analysis.shortIDCollisions.isEmpty {
                 Text("No short-id collisions")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(.system(size: 16)).foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.analysis.shortIDCollisions) { bucket in
                     CollisionRow(bucket: bucket)
@@ -279,11 +297,11 @@ public struct CollisionMatrixView: View {
 #if DEBUG
     #Preview("Collision matrix") {
         CollisionMatrixView(viewModel: CollisionMatrixPreviewData.viewModel())
-            .frame(width: 760, height: 720)
+            .frame(width: 760, height: 900)
     }
 
     #Preview("Collision matrix — byte selected") {
         CollisionMatrixView(viewModel: CollisionMatrixPreviewData.selectedViewModel())
-            .frame(width: 760, height: 860)
+            .frame(width: 760, height: 1040)
     }
 #endif

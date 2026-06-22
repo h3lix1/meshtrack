@@ -12,14 +12,14 @@ struct CollisionRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Text(bucket.key)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
                 .foregroundStyle(.orange)
-                .frame(width: 44, alignment: .leading)
+                .frame(width: 66, alignment: .leading)
             Text(bucket.nodes.map(\.name).joined(separator: ", "))
-                .font(.system(size: 12)).foregroundStyle(.white)
+                .font(.system(size: 17)).foregroundStyle(.white)
             Spacer()
             Text("×\(bucket.count)")
-                .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                .font(.system(size: 16, design: .monospaced)).foregroundStyle(.secondary)
         }
     }
 }
@@ -31,19 +31,19 @@ struct CollisionNodeRow: View {
     let confidence: Double?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(node.name)
-                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 90, alignment: .leading)
+                .font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 130, alignment: .leading)
             Text(node.hexID)
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .font(.system(size: 17, design: .monospaced)).foregroundStyle(.secondary)
             Text(node.shortID)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.system(size: 17, weight: .bold, design: .monospaced))
                 .foregroundStyle(.orange)
             Spacer()
             if let confidence {
                 Text("conf \(String(format: "%.2f", confidence))")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 16, design: .monospaced))
                     .foregroundStyle(confidence < 1.0 ? .orange : .secondary)
             }
         }
@@ -56,13 +56,13 @@ struct EarshotPairRow: View {
     let pair: EarshotPair
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Text("\(pair.nodeA.shortID) ↔ \(pair.nodeB.shortID)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(.system(size: 17, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
             Spacer()
             Text(verdict)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 16, design: .monospaced))
                 .foregroundStyle(color)
         }
     }
@@ -168,10 +168,10 @@ private struct CollisionCell: View {
         if !isEmpty {
             VStack(spacing: 0) {
                 Text(String(format: "%02x", value))
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
                 if isCollision {
                     Text("×\(nodeCount)")
-                        .font(.system(size: 7, weight: .heavy, design: .monospaced))
+                        .font(.system(size: 14, weight: .heavy, design: .monospaced))
                 }
             }
             .foregroundStyle(.white)
