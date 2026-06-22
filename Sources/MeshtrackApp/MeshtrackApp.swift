@@ -55,6 +55,8 @@ struct MeshtrackApp: App {
     /// in `init` so the same instance is injected into both the Settings tab and the
     /// content view.
     @State private var configRevision: LiveConfigRevision
+    /// Deterministic Network-map workload selected by `--map-perf-fixture`.
+    private let perfFixture: MapPerfData?
 
     /// Promotes the process to a regular foreground GUI app on launch — see
     /// `MeshtrackAppDelegate`. Required because `swift run MeshtrackApp` starts a bare
@@ -65,6 +67,7 @@ struct MeshtrackApp: App {
     @Environment(\.openSettings) private var openSettings
 
     init() {
+        perfFixture = Self.perfFixtureFromArguments()
         let store = Self.openStore()
         self.store = store
         let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
@@ -116,15 +119,21 @@ struct MeshtrackApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(
-                root: root,
-                store: store,
-                gateway: configGateway,
-                credentials: credentialStore,
-                dataSources: dataSourceStore,
-                revision: configRevision,
-                openConnectionSettings: openConnectionSettings
-            )
+            Group {
+                if let perfFixture {
+                    MapPerfFixtureRootView(data: perfFixture)
+                } else {
+                    ContentView(
+                        root: root,
+                        store: store,
+                        gateway: configGateway,
+                        credentials: credentialStore,
+                        dataSources: dataSourceStore,
+                        revision: configRevision,
+                        openConnectionSettings: openConnectionSettings
+                    )
+                }
+            }
             .frame(minWidth: 1100, minHeight: 720)
             .preferredColorScheme(.dark)
             .appTheme(themeController.theme)
@@ -150,6 +159,21 @@ struct MeshtrackApp: App {
     private func openConnectionSettings() {
         root.settingsTab = .connection
         openSettings()
+    }
+
+    private static func perfFixtureFromArguments() -> MapPerfData? {
+        let args = CommandLine.arguments
+        for (index, arg) in args.enumerated() {
+            if arg == "--map-perf-fixture", args.indices.contains(index + 1) {
+                return MapPerfFixture.make(named: args[index + 1])
+            }
+            let prefix = "--map-perf-fixture="
+            if arg.hasPrefix(prefix) {
+                let name = String(arg.dropFirst(prefix.count))
+                return MapPerfFixture.make(named: name)
+            }
+        }
+        return nil
     }
 
     /// Register each Settings tab's content provider on `model`. Static and called

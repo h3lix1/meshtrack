@@ -46,6 +46,12 @@
         /// rebuilt then, or when their geometry actually changed, so a continuous drag
         /// just nudges the (cheap) marker offsets without overlay churn.
         func applySpiderfy(on mapView: MKMapView, settled: Bool) {
+            MapPerfSignpost.interval("map.spiderfy") {
+                applySpiderfyBody(on: mapView, settled: settled)
+            }
+        }
+
+        private func applySpiderfyBody(on mapView: MKMapView, settled: Bool) {
             lastSpiderfyAt = ProcessInfo.processInfo.systemUptime
             let annotations = mapView.annotations.compactMap { $0 as? MeshNodeAnnotation }
             guard !annotations.isEmpty else {

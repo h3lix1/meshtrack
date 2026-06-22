@@ -4,13 +4,19 @@
   "gates": {
     "coverage_min_pct": 80,
     "mutation_min_score": 60,
-    "ingestion_min_msgs_per_sec": 5000
+    "ingestion_min_msgs_per_sec": 5000,
+    "map_pan_zoom_p95_frame_ms": 16.7,
+    "map_hitch_count_max": 0,
+    "map_projection_duplicate_calls_max": 1
   },
   "metrics": {
     "coverage_pct": 92.2,
     "mutation_score": null,
     "ingestion_msgs_per_sec": 5000,
     "p95_query_latency_ms": null,
+    "map_pan_zoom_p95_frame_ms": null,
+    "map_hitch_count": null,
+    "map_projection_duplicate_calls": 1,
     "todo_fixme_count": 0,
     "doc_coverage_pct": null
   },

@@ -28,12 +28,15 @@
         public private(set) var regionRevision: Int = 0
         /// Latest projection from the live map, or nil before the map has laid out.
         public private(set) var projection: MapProjection?
+        /// True while the user/MapKit camera is actively panning or zooming.
+        public private(set) var isInteracting = false
 
         public init() {}
 
         /// Called by the substrate's coordinator after the map region settles.
-        func update(projection: MapProjection) {
+        func update(projection: MapProjection, isInteracting: Bool) {
             self.projection = projection
+            self.isInteracting = isInteracting
             regionRevision &+= 1
         }
     }
@@ -121,22 +124,33 @@
         // MARK: Sync
 
         private func sync(map: MKMapView, context: Context) {
-            let desired = nodes.map(MeshNodeAnnotation.init(node:))
-            let existing = map.annotations.compactMap { $0 as? MeshNodeAnnotation }
+            let desired = MapPerfSignpost.interval("map.annotation.sync") {
+                var desired: [MeshNodeAnnotation] = []
+                var desiredByID: [Int64: MeshNodeAnnotation] = [:]
+                desired.reserveCapacity(nodes.count)
+                desiredByID.reserveCapacity(nodes.count)
+                for node in nodes {
+                    let annotation = MeshNodeAnnotation(node: node)
+                    desired.append(annotation)
+                    desiredByID[annotation.nodeID] = annotation
+                }
 
-            let desiredIDs = Set(desired.map(\.nodeID))
-            let existingIDs = Set(existing.map(\.nodeID))
+                let existing = map.annotations.compactMap { $0 as? MeshNodeAnnotation }
+                let existingIDs = Set(existing.map(\.nodeID))
+                let desiredIDs = Set(desiredByID.keys)
 
-            let toRemove = existing.filter { !desiredIDs.contains($0.nodeID) }
-            let toAdd = desired.filter { !existingIDs.contains($0.nodeID) }
-            if !toRemove.isEmpty { map.removeAnnotations(toRemove) }
-            // Update coordinates of survivors in place (a node may have moved).
-            for annotation in existing where desiredIDs.contains(annotation.nodeID) {
-                if let match = desired.first(where: { $0.nodeID == annotation.nodeID }) {
+                let toRemove = existing.filter { !desiredIDs.contains($0.nodeID) }
+                let toAdd = desired.filter { !existingIDs.contains($0.nodeID) }
+                if !toRemove.isEmpty { map.removeAnnotations(toRemove) }
+                // Update coordinates of survivors in place (a node may have moved).
+                for annotation in existing {
+                    guard let match = desiredByID[annotation.nodeID],
+                          annotation.differs(from: match) else { continue }
                     annotation.apply(match)
                 }
+                if !toAdd.isEmpty { map.addAnnotations(toAdd) }
+                return desired
             }
-            if !toAdd.isEmpty { map.addAnnotations(toAdd) }
 
             // Auto-fit happens at most ONCE ever (first-ever launch, when nodes first
             // appear). It is NOT re-run when nodes are added later — that was the bug
@@ -150,7 +164,7 @@
             // the SwiftUI update and spins the view graph (a startup beachball). The
             // `fit()` above also triggers the region-change delegate, which publishes.
             let coordinator = context.coordinator
-            Task { @MainActor in coordinator.publishProjection() }
+            Task { @MainActor in coordinator.publishProjection(interacting: false, force: false) }
         }
 
         private func fit(map: MKMapView, to annotations: [MeshNodeAnnotation]) {
@@ -196,11 +210,15 @@
             /// Wall-clock time of the last spiderfy pass — throttles the per-frame
             /// continuous-motion path (item 5).
             var lastSpiderfyAt: TimeInterval = 0
+            /// Wall-clock time of the last projection publish during continuous motion.
+            private var lastProjectionPublishAt: TimeInterval = 0
             /// The leader-line endpoints (anchor+displaced screen points keyed by id) from
             /// the last pass; lets us skip the overlay remove/add when nothing moved.
             var lastLeaderSignature: [Int64: SpiderLeaderKey] = [:]
             /// Min seconds between continuous-motion spiderfy passes.
             static let spiderfyInterval: TimeInterval = 0.1
+            /// Cap overlay camera updates to 60 Hz even on higher-frequency callbacks.
+            static let projectionPublishInterval: TimeInterval = 1.0 / 60.0
 
             init(state: MeshMapState, regionStore: MapRegionStore, onSelectNode: ((Int64) -> Void)?) {
                 self.state = state
@@ -238,21 +256,35 @@
             }
 
             /// Build a MapProjection from the live map and hand it to the shared state.
-            func publishProjection() {
+            func publishProjection(interacting: Bool, force: Bool) {
+                if !force, interacting {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    guard now - lastProjectionPublishAt >= Self.projectionPublishInterval else { return }
+                    lastProjectionPublishAt = now
+                }
+                publishProjectionNow(interacting: interacting)
+            }
+
+            private func publishProjectionNow(interacting: Bool) {
                 guard let map else { return }
                 // The map view is the overlay's coordinate space; convert lat/lon → its
                 // own bounds. Capturing `map` weakly avoids a retain cycle; if it's gone
                 // we project to the origin (the overlay will simply have nothing to draw).
-                let projection = MapProjection { [weak map] geo in
-                    guard let map else { return .zero }
-                    let coordinate = CLLocationCoordinate2D(latitude: geo.latitude, longitude: geo.longitude)
-                    return map.convert(coordinate, toPointTo: map)
+                let projection = MapPerfSignpost.interval("map.projection.publish") {
+                    MapProjection { [weak map] geo in
+                        guard let map else { return .zero }
+                        let coordinate = CLLocationCoordinate2D(
+                            latitude: geo.latitude,
+                            longitude: geo.longitude
+                        )
+                        return map.convert(coordinate, toPointTo: map)
+                    }
                 }
-                state.update(projection: projection)
+                state.update(projection: projection, isInteracting: interacting)
             }
 
             public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-                publishProjection()
+                publishProjection(interacting: false, force: true)
                 // The gesture/animation has settled — do the full, authoritative spiderfy
                 // pass (fan markers + rebuild leader lines) exactly once here.
                 applySpiderfy(on: mapView, settled: true)
@@ -260,7 +292,7 @@
             }
 
             public func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-                publishProjection()
+                publishProjection(interacting: true, force: false)
                 // Fires every frame during a continuous pan/zoom. Item 5: keep the cheap
                 // projection publish so the Canvas overlay tracks the map, but THROTTLE
                 // the expensive spiderfy (O(n²) cluster + overlay remove/add) so it runs

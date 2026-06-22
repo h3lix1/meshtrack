@@ -40,3 +40,36 @@ public protocol TraceProjection {
 
 extension GeoProjection: TraceProjection {}
 extension MapProjection: TraceProjection {}
+
+/// Caches projection results within one render pass.
+///
+/// Live map drawing often asks for the same endpoint several times in a frame:
+/// edge body, badge head, latency chip and receiver rings all share coordinates.
+/// The MapKit-backed projection is main-thread work, so one conversion per unique
+/// coordinate is the budget we want the overlay to hold.
+final class CachedTraceProjection<Base: TraceProjection>: TraceProjection {
+    private struct Key: Hashable {
+        let latitude: UInt64
+        let longitude: UInt64
+
+        init(_ geo: GeoPoint) {
+            latitude = geo.latitude.bitPattern
+            longitude = geo.longitude.bitPattern
+        }
+    }
+
+    private let base: Base
+    private var cache: [Key: CGPoint] = [:]
+
+    init(base: Base) {
+        self.base = base
+    }
+
+    func point(for geo: GeoPoint) -> CGPoint {
+        let key = Key(geo)
+        if let cached = cache[key] { return cached }
+        let point = base.point(for: geo)
+        cache[key] = point
+        return point
+    }
+}

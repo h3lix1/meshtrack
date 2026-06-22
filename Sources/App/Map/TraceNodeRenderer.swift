@@ -29,6 +29,11 @@ extension TraceRenderer {
         let color = Self.nodeColor(node)
         let coreRadius: CGFloat = node.isGateway ? 9 : 6
 
+        if detail == .interactive {
+            context.fill(circle(at: center, radius: coreRadius), with: .color(color.opacity(0.88)))
+            return
+        }
+
         context.drawLayer { layer in
             layer.addFilter(.blur(radius: node.isGateway ? 16 : 10))
             layer.fill(circle(at: center, radius: 16), with: .color(color.opacity(0.6)))
