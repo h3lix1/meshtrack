@@ -45,10 +45,8 @@ public enum ChannelPreset: String, CaseIterable, Sendable, Identifiable {
 
     /// The default 16-byte channel PSK (Meshtastic's expansion of the 1-byte key
     /// `0x01`). Every public preset uses this PSK, so its hash is name-dependent only.
-    static let defaultPSK: [UInt8] = [
-        0xD4, 0xF1, 0xBB, 0x3A, 0x20, 0x29, 0x07, 0x59,
-        0xF0, 0xBC, 0xFF, 0xAB, 0xCF, 0x4E, 0x69, 0x01
-    ]
+    /// Single source of truth: `MeshtasticChannelHash.defaultPSK`.
+    static var defaultPSK: [UInt8] { MeshtasticChannelHash.defaultPSK }
 
     /// The channel hash a device transmits for this preset (the byte in
     /// `MeshPacket.channel`): XOR-fold of the name bytes XOR the PSK fold.
@@ -63,13 +61,9 @@ public enum ChannelPreset: String, CaseIterable, Sendable, Identifiable {
 
     /// Meshtastic's channel-hash fold: `xorBytes(name) ^ xorBytes(psk)`.
     /// Exposed `static` so tests can pin the algorithm independently of the presets.
+    /// Delegates to the shared `MeshtasticChannelHash` so this resolver and the
+    /// settings screen's `ChannelKeyMath` can never drift.
     static func hash(name: String, psk: [UInt8]) -> UInt32 {
-        let nameFold = xorFold(Array(name.utf8))
-        let pskFold = xorFold(psk)
-        return UInt32(nameFold ^ pskFold)
-    }
-
-    private static func xorFold(_ bytes: [UInt8]) -> UInt8 {
-        bytes.reduce(UInt8(0)) { $0 ^ $1 }
+        MeshtasticChannelHash.channelHash(name: name, psk: psk)
     }
 }
