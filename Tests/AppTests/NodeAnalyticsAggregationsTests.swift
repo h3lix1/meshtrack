@@ -67,6 +67,26 @@ struct NodeAnalyticsAggregationsTests {
     }
 
     @Test
+    func `distribution drops non-finite samples without trapping and bins the rest`() {
+        // A single NaN or Inf reaching the histogram used to trap: Int(NaN)/Int(.inf)
+        // crashes, and NaN defeats the index clamps. Here the bad samples must be
+        // filtered, leaving the finite ones binned and summarised correctly.
+        let dist = NodeAnalytics.distribution(
+            of: [0, .nan, 10, .infinity, 20, -.infinity], binCount: 2
+        )
+        #expect(dist.sampleCount == 3) // only 0, 10, 20 counted
+        #expect(dist.minValue == 0)
+        #expect(dist.maxValue == 20)
+        #expect(dist.mean == 10)
+        #expect(dist.bins.reduce(0) { $0 + $1.count } == 3)
+    }
+
+    @Test
+    func `distribution of only non-finite samples is empty`() {
+        #expect(NodeAnalytics.distribution(of: [.nan, .infinity, -.infinity]) == .empty)
+    }
+
+    @Test
     func `snr and rssi distributions ignore nil samples`() {
         let observations = [
             observation(snr: -5, rssi: -90),

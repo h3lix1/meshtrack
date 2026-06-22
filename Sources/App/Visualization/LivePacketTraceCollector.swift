@@ -66,12 +66,19 @@ public struct LivePacketTraceCollector: Sendable {
 
     /// Reconstruct traces for the windowed packets, oldest first.
     ///
-    /// `startedAt` is each packet's recorded `arrivalClock` when present (so it draws
-    /// from 0 on the live overlay clock); otherwise it falls back to a per-index
-    /// `stagger` so the deterministic replay/test path is unchanged.
+    /// The window picks ONE `startedAt` regime so the overlay clock never mixes scales:
+    /// if EVERY windowed packet carries a recorded `arrivalClock` (reference-date based,
+    /// ~7.9e8 s), all packets use their real arrival clocks and draw from progress 0.
+    /// If ANY packet lacks one (replay/tests, or a clockless packet beside clocked
+    /// ones), the whole window falls back UNIFORMLY to the per-index `stagger`. Mixing
+    /// the two — a ~0.4 stagger against a ~7.9e8 clock in the same frame — made hop
+    /// lines saturate to fully-drawn instantly, which this avoids.
     public func traces(positions: [Int64: GeoPoint], stagger: Double = 0.4) -> [PacketTrace] {
-        arrivalOrder.enumerated().flatMap { index, packetID in
-            let startedAt = arrivalClockByPacket[packetID] ?? Double(index) * stagger
+        let allClocked = arrivalOrder.allSatisfy { arrivalClockByPacket[$0] != nil }
+        return arrivalOrder.enumerated().flatMap { index, packetID in
+            let startedAt = allClocked
+                ? (arrivalClockByPacket[packetID] ?? Double(index) * stagger)
+                : Double(index) * stagger
             return PacketTraceBuilder.build(
                 receptions: receptionsByPacket[packetID] ?? [],
                 positions: positions,
