@@ -127,4 +127,68 @@ struct FleetConfigViewModelTests {
         // Re-planning is now an idempotent no-op — proof the node took the change.
         #expect(try await applier.plan(template: template, context: context).isNoOp)
     }
+
+    @Test
+    func `store-backed channel rejects an invalid region before persisting`() async throws {
+        // Validation lives in the shared AdminApplier orchestration, so the GUI-wired
+        // store-backed adapter inherits it: a typo'd region is rejected up front rather
+        // than written to the record and then "verified" as success.
+        let store = try makeStore()
+        try await seed(store, node: 1, role: "CLIENT", short: "old")
+
+        let channel = StoreBackedAdminChannel(store: store, nodeNum: 1)
+        let applier = AdminApplier(channel: channel)
+        let template = NodeTemplate(name: "t", region: "US", role: "ROUTER", shortNameDSL: "new")
+        let context = NamingContext(id: "!00000001", shortName: "old", role: "CLIENT")
+
+        // A plan carrying a bogus region (e.g. a template typo) must not reach the store.
+        let plan = ApplyPlan(changes: [ConfigChange(field: "region", from: nil, to: "UX")])
+        await #expect(throws: AdminMappingError.unknownRegion("UX")) {
+            try await applier.apply(plan, template: template, context: context)
+        }
+
+        // Nothing was persisted — the node config snapshot was never written.
+        #expect(try await store.fetchNodeConfig(nodeNum: 1) == nil)
+    }
+
+    @Test
+    func `store-backed apply coalesces duplicate config fields (last wins, no trap)`() async throws {
+        // Two changes share a field: apply must not trap on Dictionary(uniqueKeysWithValues:);
+        // it coalesces to the later value rather than crashing.
+        let store = try makeStore()
+        try await seed(store, node: 1, role: "CLIENT")
+
+        let channel = StoreBackedAdminChannel(store: store, nodeNum: 1)
+        try await channel.apply([
+            ConfigChange(field: "region", from: nil, to: "EU_868"),
+            ConfigChange(field: "region", from: nil, to: "US")
+        ])
+
+        #expect(try await store.fetchNodeConfig(nodeNum: 1)?.region == "US")
+    }
+
+    @Test
+    func `duplicate nodeNum candidates de-dup to one sane rollout member (no trap)`() throws {
+        // A node present both as a discovered node and a stored row appears twice in
+        // candidates. De-dup keeps the first per nodeNum so keying the rollout's names
+        // by nodeNum never traps and only one row is built per node.
+        func candidate(_ num: Int64, name: String) -> FleetConfigViewModel.MemberCandidate {
+            FleetConfigViewModel.MemberCandidate(
+                nodeNum: num, name: name, hexid: FleetConfigViewModel.hexID(num),
+                shortName: name, longName: nil, role: "CLIENT", isMine: true, isManaged: true
+            )
+        }
+
+        let deduped = FleetConfigViewModel.dedupByNodeNum([
+            candidate(1, name: "first"),
+            candidate(1, name: "second"), // same nodeNum — the trapping duplicate
+            candidate(2, name: "other")
+        ])
+
+        #expect(deduped.map(\.nodeNum) == [1, 2])
+        #expect(deduped.first { $0.nodeNum == 1 }?.name == "first") // first wins
+        // Keying by nodeNum is now safe — this would have trapped on the duplicate.
+        let names = Dictionary(uniqueKeysWithValues: deduped.map { ($0.nodeNum, $0.name) })
+        #expect(names == [1: "first", 2: "other"])
+    }
 }
