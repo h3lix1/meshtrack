@@ -159,6 +159,96 @@ struct ChannelsViewModelTests {
     }
 
     @Test
+    func `channel label prefers the newest non-empty name over an older empty one`() {
+        // Same channel: oldest row is unnamed, a newer one carries "LongFast".
+        let rows = [
+            MessageRecord(packet_id: 1, from_num: 1, to_num: 0, channel: 0xAB, body: "a", rx_time: 100),
+            MessageRecord(
+                packet_id: 2, from_num: 1, to_num: 0, channel: 0xAB,
+                channel_name: "LongFast", body: "b", rx_time: 200
+            )
+        ]
+        let name = ChannelsViewModel.channelName(rows, channel: 0xAB)
+        #expect(name.label == "LongFast") // newest name wins, not the older hash
+        #expect(name.isUnnamed == false)
+    }
+
+    @Test
+    func `channel label falls back to the hash when no row was ever named`() {
+        let rows = [
+            MessageRecord(packet_id: 1, from_num: 1, to_num: 0, channel: 0xAB, body: "a", rx_time: 100),
+            MessageRecord(packet_id: 2, from_num: 1, to_num: 0, channel: 0xAB, body: "b", rx_time: 200)
+        ]
+        let name = ChannelsViewModel.channelName(rows, channel: 0xAB)
+        #expect(name.label == "#ab")
+        #expect(name.isUnnamed)
+    }
+
+    @Test
+    func `grouping uses the newest channel name even when input is newest-first`() {
+        // recentMessages order is newest-first; the named row arrives before the
+        // older unnamed one in the input, yet the label must still be the newest name.
+        let records = [
+            MessageRecord(
+                packet_id: 2, from_num: 1, to_num: 0, channel: 7,
+                channel_name: "Renamed", body: "new", rx_time: 200
+            ),
+            MessageRecord(packet_id: 1, from_num: 1, to_num: 0, channel: 7, body: "old", rx_time: 100)
+        ]
+        let groups = ChannelsViewModel.group(records, senders: [:])
+        #expect(groups.first?.name == "Renamed")
+        #expect(groups.first?.isUnnamed == false)
+    }
+
+    @Test
+    @MainActor
+    func `refresh reflects a message recorded after the initial load (Finding 18)`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        try await store.recordMessage(MessageRecord(
+            packet_id: 1, from_num: 1, to_num: 0, channel: 7,
+            channel_name: "LongFast", body: "first", rx_time: 100
+        ))
+
+        let viewModel = ChannelsViewModel(store: store)
+        try await viewModel.load()
+        #expect(viewModel.channels.first?.messageCount == 1)
+
+        // Live ingest persists a new message AFTER the first load …
+        try await store.recordMessage(MessageRecord(
+            packet_id: 2, from_num: 1, to_num: 0, channel: 7,
+            channel_name: "LongFast", body: "second", rx_time: 200
+        ))
+        // … the view model only sees it after the refresh seam runs.
+        try await viewModel.refresh()
+        #expect(viewModel.channels.first?.messageCount == 2)
+        #expect(viewModel.channels.first?.messages.map(\.body) == ["first", "second"])
+    }
+
+    @Test
+    @MainActor
+    func `refresh adopts a channel name that arrives after the initial load (Finding 18)`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // First message on the channel is unnamed → a hash label.
+        try await store.recordMessage(MessageRecord(
+            packet_id: 1, from_num: 1, to_num: 0, channel: 0xAB, body: "hi", rx_time: 100
+        ))
+        let viewModel = ChannelsViewModel(store: store)
+        try await viewModel.load()
+        #expect(viewModel.channels.first?.name == "#ab")
+        #expect(viewModel.channels.first?.isUnnamed == true)
+
+        // A later reception carries the real name; refresh must adopt it.
+        try await store.recordMessage(MessageRecord(
+            packet_id: 2, from_num: 1, to_num: 0, channel: 0xAB,
+            channel_name: "MediumFast", body: "yo", rx_time: 200
+        ))
+        try await viewModel.refresh()
+        #expect(viewModel.channels.first?.name == "MediumFast")
+        #expect(viewModel.channels.first?.isUnnamed == false)
+    }
+
+    @Test
     @MainActor
     func `selectedSummary defaults to the first channel and follows selection`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())

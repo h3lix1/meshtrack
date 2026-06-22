@@ -146,6 +146,28 @@ public final class ChannelsViewModel {
         }
     }
 
+    /// Re-read the store so live ingest is reflected after the first `load()`.
+    /// Identical to `load()` (kept as a named seam the view + auto-refresh call;
+    /// the lead may swap this for a store-observation push without touching the
+    /// view). The current selection is preserved when its channel still exists.
+    public func refresh() async throws {
+        try await load()
+    }
+
+    /// Poll the store on a fixed interval so the transcript follows live ingest
+    /// (Finding 18: `ChannelsView` previously loaded once and never updated). Runs
+    /// until the surrounding `Task` is cancelled (e.g. the view disappears). A
+    /// failed refresh is swallowed so a transient store error never tears down the
+    /// loop. Injection seam: the lead can replace this with a store-observation
+    /// stream; the unit tests drive `refresh()` directly.
+    public func startAutoRefresh(every interval: Duration = .seconds(2)) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled { return }
+            try? await refresh()
+        }
+    }
+
     /// Select a channel by hash (read-only navigation).
     public func select(_ channel: Int64) {
         selectedChannel = channel
@@ -183,7 +205,10 @@ public final class ChannelsViewModel {
             let rows = (byChannel[channel] ?? [])
                 .sorted { $0.rx_time < $1.rx_time }
             let messages = rows.map { display($0, senders: senders) }
-            let name = channelName(rows.first)
+            // Derive the label from the NEWEST recorded name, not `rows.first`
+            // (oldest): otherwise a stale unnamed/hash label sticks even after a
+            // newer message carries a real channel name (Finding 18).
+            let name = channelName(rows, channel: channel)
             return ChannelSummary(
                 channel: channel,
                 name: name.label,
@@ -223,6 +248,28 @@ public final class ChannelsViewModel {
         }
         let hash = record?.channel ?? 0
         let hex = String(format: "%x", UInt32(truncatingIfNeeded: hash))
+        return ("#" + hex, true)
+    }
+
+    /// A channel's display label derived from its rows: the NEWEST non-empty
+    /// `channel_name` wins, so a real name set later overrides an earlier
+    /// unnamed/hash reception (Finding 18). Falls back to a `#<hex>` hash label
+    /// when no row ever carried a name. `rows` may be in any order; recency is
+    /// decided by `rx_time` (with `id` as the tie-break for equal times).
+    nonisolated static func channelName(
+        _ rows: [MessageRecord],
+        channel: Int64
+    ) -> (label: String, isUnnamed: Bool) {
+        let newestNamed = rows
+            .filter { !($0.channel_name ?? "").isEmpty }
+            .max { lhs, rhs in
+                if lhs.rx_time != rhs.rx_time { return lhs.rx_time < rhs.rx_time }
+                return (lhs.id ?? 0) < (rhs.id ?? 0)
+            }
+        if let name = newestNamed?.channel_name, !name.isEmpty {
+            return (name, false)
+        }
+        let hex = String(format: "%x", UInt32(truncatingIfNeeded: channel))
         return ("#" + hex, true)
     }
 

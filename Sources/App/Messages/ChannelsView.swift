@@ -25,7 +25,10 @@ public struct ChannelsView: View {
         }
         .frame(minWidth: 760, minHeight: 520)
         .task {
+            // Initial load, then follow live ingest until the view disappears
+            // (the .task is cancelled on teardown, ending the loop) — Finding 18.
             try? await viewModel.load()
+            await viewModel.startAutoRefresh()
         }
     }
 
