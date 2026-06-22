@@ -6,15 +6,36 @@
 
 import Domain
 import Persistence
+import Provisioning
 import SwiftUI
 
 public extension AppModel {
     /// Register every section to its store-backed bespoke view. The Network section
     /// uses the real MapKit substrate (G1, ADR 0007) when MapKit is available, else
     /// the deterministic Canvas map already registered by default.
+    ///
+    /// `adminLink` is the production over-the-air admin primitive (Finding 8). When
+    /// provided, the Fleet + Provision sections apply through the real OTA path
+    /// (`MeshAdminChannel` → `LiveAdminTransport`) instead of the same-DB
+    /// `StoreBackedAdminChannel` echo. `nil` keeps the store-backed default (sample /
+    /// snapshot / first-run, where there is no radio).
+    ///
+    /// `packetInspector` is the live, coordinator-fed packet inspector (Finding 17).
+    /// When provided, the `.packets` section renders real decoded traffic (instead of
+    /// `PacketInspectorSample`) and its `latencyMillis` feeds the map's latency overlay.
     @MainActor
-    func registerLiveSections(store: MeshStore, clock: any Domain.Clock) {
+    func registerLiveSections(
+        store: MeshStore,
+        clock: any Domain.Clock,
+        adminLink: (any AdminLink)? = nil,
+        packetInspector: PacketInspectorViewModel? = nil
+    ) {
         let viz = VizSettings()
+        // The production OTA channel factory over the live admin link (Finding 8). The
+        // closures replace the store-backed `channelFor` defaults so an apply SENDS
+        // real begin → set… → commit admin messages and verifies by reading config
+        // back — no more same-DB echo. `nil` when no radio link is wired.
+        let otaFactory = adminLink.map { OTAAdminChannelFactory(link: $0) }
 
         #if canImport(MapKit) && os(macOS)
             register(.network) { [self] in
@@ -25,17 +46,31 @@ public extension AppModel {
                     nodes: nodes,
                     traces: traces,
                     settings: viz,
+                    // Live receive→publish latency per packet from the inspector feeds
+                    // the map's latency overlay (Finding 17).
+                    latencyMillis: packetInspector?.latencyMillis ?? [:],
                     availablePresets: presets,
                     store: store
                 ))
             }
         #endif
 
-        register(.nodes) {
-            AnyView(NodeDirectoryView(viewModel: NodeDirectoryViewModel(store: store)))
+        register(.nodes) { [self] in
+            // Route the directory's actions to real sections (Finding 19): "Open
+            // analytics" jumps to Analytics, "Apply config" jumps to Fleet Config —
+            // no more no-op callbacks.
+            AnyView(NodeDirectoryView(
+                viewModel: NodeDirectoryViewModel(store: store),
+                onApply: { _ in self.onNavigate?(.fleet) },
+                onOpenAnalytics: { _ in self.onNavigate?(.analytics) }
+            ))
         }
         register(.packets) {
-            AnyView(PacketInspectorSection(viewModel: PacketInspectorSample.viewModel()))
+            // Live decoded traffic when wired; sample data only when there's no
+            // coordinator (snapshot / first-run) (Finding 17).
+            AnyView(PacketInspectorSection(
+                viewModel: packetInspector ?? PacketInspectorSample.viewModel()
+            ))
         }
         register(.telemetry) {
             AnyView(PerNodeSectionView(store: store, title: "Telemetry") { nodeNum in
@@ -57,11 +92,18 @@ public extension AppModel {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
         register(.fleet) {
-            AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(store: store)))
+            AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(
+                store: store,
+                channelFor: otaFactory?.fleetChannelFor()
+            )))
         }
         register(.provision) {
             AnyView(ProvisioningWorkflowView(
-                viewModel: ProvisioningWorkflowFactory.make(store: store, draft: .init(), channelFor: nil)
+                viewModel: ProvisioningWorkflowFactory.make(
+                    store: store,
+                    draft: .init(),
+                    channelFor: otaFactory?.provisionChannelFor()
+                )
             ))
         }
     }
@@ -101,8 +143,12 @@ struct PerNodeSectionView<Content: View>: View {
 struct AlertsSectionView: View {
     @State private var alerts: AlertsConsoleViewModel
     @State private var arming: ArmingFlowViewModel
+    /// The shared store, retained so `.task` can read the persisted default-snooze
+    /// duration before the console's first Snooze (Finding 12).
+    private let store: MeshStore
 
     init(store: MeshStore, clock: any Domain.Clock) {
+        self.store = store
         _alerts = State(initialValue: AlertsConsoleViewModel(store: store, clock: clock))
         _arming = State(initialValue: ArmingFlowViewModel(store: store, clock: clock))
     }
@@ -115,10 +161,14 @@ struct AlertsSectionView: View {
             suppressed: alerts.suppressedNodes,
             arming: arming.rows,
             onAcknowledge: { item in Task { try? await alerts.acknowledge(item) } },
-            onSnooze: { item in Task { try? await alerts.snooze(item, forSeconds: 3600) } },
+            // Honour the operator's persisted default-snooze duration (Finding 12),
+            // loaded in `.task` below — no more hardcoded 3600s.
+            onSnooze: { item in Task { try? await alerts.snooze(item) } },
             onResolve: { item in Task { try? await alerts.resolve(item) } }
         )
         .task {
+            alerts.defaultSnoozeSeconds = await (try? AlertDefaultSnoozeStore.load(from: store))
+                ?? AlertDefaultSnoozeStore.fallbackSeconds
             try? await alerts.load()
             try? await arming.load()
         }

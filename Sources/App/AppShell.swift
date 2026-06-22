@@ -75,6 +75,9 @@ public struct RootView: View {
         .background(theme.backgroundColor)
         .tint(theme.accentColor)
         .environment(model)
+        // Let section views route the operator between sections (Finding 19): the node
+        // directory's "Open analytics" / "Apply config" actions update the selection.
+        .onAppear { model.onNavigate = { section = $0 } }
     }
 }
 
