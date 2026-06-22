@@ -75,21 +75,36 @@ final class LiveCoordinator {
     private var tasks: [Task<Void, Never>] = []
 
     /// The well-known Meshtastic default channel key (PSK index 1, "AQ=="), shared
-    /// by the public MediumFast/LongFast channels and applied to every channel
-    /// hash — mirrors the proven `meshtrackd replay` wiring.
-    private static let defaultKey = ChannelKey(psk: [
-        0xD4, 0xF1, 0xBB, 0x3A, 0x20, 0x29, 0x07, 0x59,
-        0xF0, 0xBC, 0xFF, 0xAB, 0xCF, 0x4E, 0x69, 0x01
-    ])
+    /// by the public MediumFast/LongFast channels. Used as the *fallback* for any
+    /// channel hash the operator hasn't registered a custom PSK for — custom PSKs
+    /// are resolved from the Keychain registry first (see `keyStore`).
+    private static let defaultKey = ChannelKey(psk: MeshtasticChannelHash.defaultPSK)
+
+    /// The live channel-key resolver: custom PSKs registered in Channels & Keys
+    /// (held in the Keychain, keyed by channel hash) are resolved FIRST, with the
+    /// public default PSK as the fallback. This is what lets a non-default-PSK
+    /// channel entered in settings actually decrypt in the live app (Finding 8).
+    private let keyStore: any KeyStore
 
     /// Build a coordinator over a fresh in-memory store. The broker connection is
     /// resolved later via `applyBrokerConfig(_:)` / `start(settings:)`, so the
     /// coordinator exists before any broker is configured (first-run/onboarding).
     /// `refreshInterval` is the cadence of the slow `loadNodes()` loop that surfaces
     /// newly-positioned nodes.
-    init(store: MeshStore, refreshInterval: Duration = .seconds(3)) {
+    ///
+    /// `keyStore` resolves the decrypt key per channel hash. It defaults to a
+    /// `ChannelKeyResolver` over the real `KeychainKeyStore`, so custom PSKs the
+    /// operator registered in Channels & Keys are resolved by hash, with the public
+    /// default PSK as the fallback (Finding 8). Injectable for tests.
+    init(
+        store: MeshStore,
+        refreshInterval: Duration = .seconds(3),
+        keyStore: (any KeyStore)? = nil
+    ) {
         self.refreshInterval = refreshInterval
         self.store = store
+        self.keyStore = keyStore
+            ?? ChannelKeyResolver(primary: KeychainKeyStore(), defaultKey: Self.defaultKey)
         viewModel = NetworkViewModel(store: store)
     }
 
@@ -142,7 +157,7 @@ final class LiveCoordinator {
 
         let adapter = newSource.makeTransport(clock: SystemWallClock())
         let decoder = PacketDecoder(
-            keyStore: DefaultChannelKeyStore(key: Self.defaultKey),
+            keyStore: keyStore,
             decryptor: AESCTRPacketDecryptor()
         )
         let pipeline = IngestPipeline(store: store, decoder: decoder)
@@ -192,16 +207,6 @@ final class LiveCoordinator {
         if case .connecting(host) = status {
             status = .connected(host: host)
         }
-    }
-}
-
-/// Returns the default channel key for every channel hash (the public Meshtastic
-/// channels all share the default PSK). The single live-app key store; the durable
-/// per-channel keys live in Keychain for managed channels (future work).
-private struct DefaultChannelKeyStore: KeyStore {
-    let key: ChannelKey
-    func key(forChannelHash _: UInt32) -> ChannelKey? {
-        key
     }
 }
 
