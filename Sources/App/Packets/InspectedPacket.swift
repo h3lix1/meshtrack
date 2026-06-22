@@ -172,10 +172,28 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
         ReceptionLatency.between(rxTime: packet.rxTime, ingestTime: ingestTime)
     }
 
-    /// Latency in milliseconds (rounded), when known. Signed: a negative value
-    /// means clock skew (the node's rx_time is ahead of our ingest clock).
+    /// Raw latency in milliseconds (rounded), when an ingest time is known. Signed
+    /// and *unsanitised* — a wildly large or negative value reflects the node's
+    /// skewed RTC, not real transport latency. Use `plausibleLatencyMillis` for
+    /// anything user-facing or fed into stats; this raw value backs the diagnostics
+    /// readout in the detail pane.
     public var latencyMillis: Int? {
         latency.map { Int(($0.seconds * 1000).rounded()) }
+    }
+
+    /// Whether this reception's latency is within the sane band (i.e. the node's
+    /// `rx_time` looks trustworthy). False when the node's RTC is clearly skewed.
+    /// Also false when no ingest time is known.
+    public var latencyIsPlausible: Bool {
+        latency?.isPlausible ?? false
+    }
+
+    /// Latency in milliseconds *only when plausible* — `nil` when the reception's
+    /// `rx_time` is implausible (stale node RTC) or no ingest time is known. This
+    /// is the value the master/detail UI, the distribution, and the map overlay
+    /// consume so skewed-clock garbage never reaches them.
+    public var plausibleLatencyMillis: Int? {
+        latency?.plausibleMillis
     }
 
     /// A free-text haystack for the inspector's text filter: hex ids, port, payload.
