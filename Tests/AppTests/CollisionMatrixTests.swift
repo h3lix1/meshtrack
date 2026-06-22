@@ -156,3 +156,155 @@ struct CollisionMatrixTests {
         #expect(viewModel.analysis.lastByteBuckets[0xD4].count == 4)
     }
 }
+
+@Suite("Earshot range analysis")
+struct EarshotTests {
+    // Two points ~1.3 km apart in central London.
+    private let london = GeoPoint(latitude: 51.5074, longitude: -0.1278)
+    private let londonNorth = GeoPoint(latitude: 51.5194, longitude: -0.1270)
+    private let edinburgh = GeoPoint(latitude: 55.9533, longitude: -3.1883)
+
+    @Test
+    func `nearby nodes are in range`() {
+        let range = Earshot.classify(a: london, b: londonNorth)
+        guard case let .inRange(meters) = range else {
+            Issue.record("expected inRange, got \(range)")
+            return
+        }
+        #expect(meters > 1000 && meters < 2000)
+    }
+
+    @Test
+    func `distant nodes are out of range`() {
+        let range = Earshot.classify(a: london, b: edinburgh)
+        guard case let .outOfRange(meters) = range else {
+            Issue.record("expected outOfRange, got \(range)")
+            return
+        }
+        // London → Edinburgh is ~530 km.
+        #expect(meters > 500_000)
+    }
+
+    @Test
+    func `a missing position yields unknown`() {
+        #expect(Earshot.classify(a: london, b: nil) == .unknown)
+        #expect(Earshot.classify(a: nil, b: edinburgh) == .unknown)
+        #expect(Earshot.classify(a: nil, b: nil) == .unknown)
+    }
+
+    @Test
+    func `the threshold is the in-range boundary and is configurable`() {
+        // ~1.3 km apart: in range at 10 km default, out of range at 1 km.
+        if case .inRange = Earshot.classify(a: london, b: londonNorth) {} else {
+            Issue.record("expected in range at default threshold")
+        }
+        if case .outOfRange = Earshot.classify(a: london, b: londonNorth, maxRangeMeters: 1000) {} else {
+            Issue.record("expected out of range at a 1 km threshold")
+        }
+    }
+
+    @Test
+    func `default threshold is ten kilometres`() {
+        #expect(Earshot.defaultMaxRangeMeters == 10000)
+    }
+
+    @Test
+    func `pairs enumerates every distinct pair in a colliding bucket`() {
+        let analysis = CollisionMatrix.analyse([
+            CollisionNode(nodeNum: 0x1111_11D4, name: "a"),
+            CollisionNode(nodeNum: 0x2222_22D4, name: "b"),
+            CollisionNode(nodeNum: 0x3333_33D4, name: "c")
+        ])
+        let pairs = Earshot.pairs(in: analysis.lastByteBuckets[0xD4], positions: [:])
+        // 3 nodes → C(3,2) = 3 pairs, all unknown (no positions supplied).
+        #expect(pairs.count == 3)
+        #expect(pairs.allSatisfy { $0.range == .unknown })
+        // Pairs respect ascending nodeNum order within each pair.
+        #expect(pairs.allSatisfy { $0.a.nodeNum < $0.b.nodeNum })
+    }
+
+    @Test
+    func `pairs classifies each pair from its positions`() throws {
+        let a = CollisionNode(nodeNum: 0x1111_11D4, name: "a")
+        let b = CollisionNode(nodeNum: 0x2222_22D4, name: "b")
+        let c = CollisionNode(nodeNum: 0x3333_33D4, name: "c")
+        let analysis = CollisionMatrix.analyse([a, b, c])
+        let positions: [Int64: GeoPoint] = [
+            a.nodeNum: london,
+            b.nodeNum: londonNorth,
+            c.nodeNum: edinburgh
+        ]
+        let pairs = Earshot.pairs(in: analysis.lastByteBuckets[0xD4], positions: positions)
+        // a↔b nearby = in range; a↔c and b↔c far = out of range.
+        let ab = try #require(pairs.first { $0.a.nodeNum == a.nodeNum && $0.b.nodeNum == b.nodeNum })
+        let ac = try #require(pairs.first { $0.a.nodeNum == a.nodeNum && $0.b.nodeNum == c.nodeNum })
+        if case .inRange = ab.range {} else { Issue.record("a↔b should be in range") }
+        if case .outOfRange = ac.range {} else { Issue.record("a↔c should be out of range") }
+    }
+
+    @Test
+    func `a non-colliding bucket has no pairs`() {
+        let analysis = CollisionMatrix.analyse([CollisionNode(nodeNum: 0x07, name: "a")])
+        #expect(Earshot.pairs(in: analysis.lastByteBuckets[0x07], positions: [:]).isEmpty)
+        #expect(Earshot.pairs(in: analysis.lastByteBuckets[0x08], positions: [:]).isEmpty)
+    }
+}
+
+@Suite("Collision matrix selection + positions")
+@MainActor
+struct CollisionMatrixSelectionTests {
+    @Test
+    func `selecting a colliding byte exposes its bucket and earshot pairs`() throws {
+        let viewModel = CollisionMatrixPreviewData.selectedViewModel()
+        let bucket = try #require(viewModel.selectedBucket)
+        #expect(bucket.byteValue == 0xD4)
+        #expect(bucket.count == 4)
+        // The preview seeds in-range, out-of-range, and unknown verdicts.
+        let pairs = viewModel.selectedEarshotPairs
+        #expect(pairs.contains { if case .inRange = $0.range { true } else { false } })
+        #expect(pairs.contains { if case .outOfRange = $0.range { true } else { false } })
+        #expect(pairs.contains { $0.range == .unknown })
+    }
+
+    @Test
+    func `tapping a single-occupant or empty cell clears the selection`() {
+        let viewModel = CollisionMatrixPreviewData.selectedViewModel()
+        #expect(viewModel.selectedByte == 0xD4)
+        // 0x7f has a single node (MOBILE) → not selectable.
+        viewModel.select(byte: 0x7F)
+        #expect(viewModel.selectedByte == nil)
+        #expect(viewModel.selectedBucket == nil)
+    }
+
+    @Test
+    func `tapping the selected byte again deselects it`() {
+        let viewModel = CollisionMatrixPreviewData.selectedViewModel()
+        viewModel.select(byte: 0xD4)
+        #expect(viewModel.selectedByte == nil)
+    }
+
+    @Test
+    func `store-backed load fetches positions for colliding nodes only`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // Two nodes share 0xd4; one has a fix, one does not. A unique node is ignored.
+        try await store.markHeard(nodeNum: 0xA1B2_C3D4, at: Instant(nanosecondsSinceEpoch: 1))
+        try await store.markHeard(nodeNum: 0x9988_77D4, at: Instant(nanosecondsSinceEpoch: 2))
+        try await store.markHeard(nodeNum: 0x3333_3301, at: Instant(nanosecondsSinceEpoch: 3))
+        _ = try await store.appendPositionFix(
+            PositionFixRecord(node_num: 0xA1B2_C3D4, t: 10, lat: 51.5, lon: -0.12)
+        )
+
+        let viewModel = CollisionMatrixViewModel(store: store)
+        try await viewModel.load()
+        // Only the colliding node with a fix is present.
+        #expect(viewModel.positions[0xA1B2_C3D4] != nil)
+        #expect(viewModel.positions[0x9988_77D4] == nil)
+        #expect(viewModel.positions[0x3333_3301] == nil)
+
+        viewModel.select(byte: 0xD4)
+        let pairs = viewModel.selectedEarshotPairs
+        // One node lacks a fix → the single pair is unknown.
+        #expect(pairs.count == 1)
+        #expect(pairs.first?.range == .unknown)
+    }
+}

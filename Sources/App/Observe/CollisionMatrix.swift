@@ -110,6 +110,96 @@ public struct CollisionAnalysis: Sendable, Equatable {
     }
 }
 
+/// Whether two nodes colliding on a relay byte are plausibly within radio earshot
+/// of each other — i.e. whether the relay ambiguity is *physically* realisable. If
+/// two nodes share a last byte but are 400 km apart, they can't both be the previous
+/// hop into the same gateway, so the ambiguity is only nominal.
+public enum EarshotRange: Sendable, Equatable {
+    /// Both positions known and within the max-range threshold — the relay ambiguity
+    /// is physically plausible.
+    case inRange(meters: Double)
+    /// Both positions known but beyond the threshold — they can't both be the hop.
+    case outOfRange(meters: Double)
+    /// One or both positions unknown — can't decide.
+    case unknown
+
+    /// The pair distance in metres, when both positions are known.
+    public var meters: Double? {
+        switch self {
+        case let .inRange(meters), let .outOfRange(meters): meters
+        case .unknown: nil
+        }
+    }
+}
+
+/// One earshot verdict for an ordered pair of colliding nodes (`a` before `b` by
+/// `nodeNum`, matching bucket order).
+public struct EarshotPair: Sendable, Equatable, Identifiable {
+    public let a: CollisionNode
+    public let b: CollisionNode
+    public let range: EarshotRange
+
+    /// Stable id: the two node numbers, smaller first.
+    public var id: String {
+        "\(a.nodeNum)-\(b.nodeNum)"
+    }
+
+    public init(a: CollisionNode, b: CollisionNode, range: EarshotRange) {
+        self.a = a
+        self.b = b
+        self.range = range
+    }
+}
+
+/// The pure earshot analyser. Classifies the pairwise relay ambiguity inside one
+/// collision bucket as physically realisable or not, using last-known positions and
+/// a configurable max-range threshold. `Sendable`, no I/O, unit-tested.
+public enum Earshot {
+    /// Default LoRa max-range threshold, in metres (~10 km). Meshtastic ground-level
+    /// LoRa links are typically a few km in clutter and reach ~10 km with reasonable
+    /// line-of-sight; record-breaking links go much further, but 10 km is a defensible
+    /// "could plausibly be the same hop" cut-off for everyday terrain. Tune per fleet.
+    public static let defaultMaxRangeMeters = 10000.0
+
+    /// Classify a single pair given their (optional) last-known positions.
+    public static func classify(
+        a: GeoPoint?,
+        b: GeoPoint?,
+        maxRangeMeters: Double = defaultMaxRangeMeters
+    ) -> EarshotRange {
+        guard let a, let b else { return .unknown }
+        let meters = Haversine.distanceMeters(from: a, to: b)
+        return meters <= maxRangeMeters ? .inRange(meters: meters) : .outOfRange(meters: meters)
+    }
+
+    /// Every distinct ordered pair of nodes in `bucket`, classified by earshot. The
+    /// bucket is already in ascending `nodeNum` order, so `a.nodeNum < b.nodeNum` for
+    /// each pair. Positions are looked up by `nodeNum`; missing → `.unknown`. Returns
+    /// `[]` for a non-colliding bucket (nothing to compare).
+    public static func pairs(
+        in bucket: CollisionBucket,
+        positions: [Int64: GeoPoint],
+        maxRangeMeters: Double = defaultMaxRangeMeters
+    ) -> [EarshotPair] {
+        guard bucket.nodes.count > 1 else { return [] }
+        var result: [EarshotPair] = []
+        let nodes = bucket.nodes
+        for i in nodes.indices {
+            for j in (i + 1) ..< nodes.count {
+                let a = nodes[i]
+                let b = nodes[j]
+                let range = classify(
+                    a: positions[a.nodeNum],
+                    b: positions[b.nodeNum],
+                    maxRangeMeters: maxRangeMeters
+                )
+                result.append(EarshotPair(a: a, b: b, range: range))
+            }
+        }
+        return result
+    }
+}
+
 /// The pure collision analyser.
 public enum CollisionMatrix {
     /// Analyse `nodes`: group by last byte (full 256-bucket grid) and by short id
