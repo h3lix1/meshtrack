@@ -25,6 +25,11 @@ public enum Table {
     /// Key-value store for non-secret app configuration (schema v4, Phase 8,
     /// SPEC §2.5/§10). Secrets never live here — they go to the Keychain.
     public static let appConfig = "app_config"
+    /// Bounded sliding-window extraction-dedup ledger (schema v6, Phase 9,
+    /// Finding 5). One last-seen row per packet identity, checked against the 600s
+    /// window so dedup is durable across runs but does not drop legitimate later
+    /// rows the way the v5 permanent unique indexes did (SPEC §2.4).
+    public static let dedupSeen = "dedup_seen"
 }
 
 /// Node classification (SPEC §2.1) — the canonical type lives in Domain; persisted

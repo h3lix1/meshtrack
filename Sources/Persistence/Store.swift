@@ -175,17 +175,17 @@ public struct MeshStore: Sendable {
 
     // MARK: Messages (monitor-only, ADR 0006)
 
-    /// Append a decoded text message, idempotent on `(packet_id, from_num)`
-    /// (schema v5). A re-delivery of the same logical message — e.g. via a
-    /// different gateway after a reconnect, which a fresh in-memory `DedupWindow`
-    /// would re-admit — is silently ignored rather than duplicating a chat line.
-    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
+    /// Append a decoded text message. Cross-run/reconnect idempotency is enforced
+    /// by the windowed `admitExtraction` ledger the pipeline consults BEFORE this
+    /// call (schema v6, Finding 5), not by a permanent unique index — so a legitimate
+    /// later message reusing the same `(packet_id, from_num)` after the dedup window
+    /// is recorded rather than silently dropped forever. Returns the new row id.
     @discardableResult
     public func recordMessage(_ message: MessageRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = message
-            try record.insert(db, onConflict: .ignore)
-            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
         }
     }
 
@@ -216,28 +216,85 @@ public struct MeshStore: Sendable {
 
     // MARK: Time-series
 
-    /// Append a telemetry sample, idempotent on `(node_num, t, kind, key)`
-    /// (schema v5). A re-delivered packet (e.g. via a different gateway after a
-    /// reconnect) is silently ignored rather than double-counting the metric.
-    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
+    /// Append a telemetry sample. Re-delivery idempotency is enforced once per
+    /// packet by the windowed `admitExtraction` ledger the pipeline consults before
+    /// extracting (schema v6, Finding 5) — not by a permanent `(node_num, t, kind,
+    /// key)` unique index, which would also have dropped two genuinely-distinct
+    /// samples that share that coarse key. Returns the new row id.
     @discardableResult
     public func appendTelemetry(_ telemetry: TelemetryRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = telemetry
-            try record.insert(db, onConflict: .ignore)
-            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
         }
     }
 
-    /// Append a position fix, idempotent on `(node_num, t)` (schema v5). A
-    /// re-delivered packet is silently ignored rather than duplicating the fix.
-    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
+    /// Append a position fix. Re-delivery idempotency is enforced once per packet by
+    /// the windowed `admitExtraction` ledger the pipeline consults before extracting
+    /// (schema v6, Finding 5), not by a permanent `(node_num, t)` unique index that
+    /// would also drop two distinct fixes a node reported at the same instant.
+    /// Returns the new row id.
     @discardableResult
     public func appendPositionFix(_ fix: PositionFixRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = fix
-            try record.insert(db, onConflict: .ignore)
-            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
+        }
+    }
+
+    // MARK: Windowed extraction dedup (SPEC §2.4, schema v6)
+
+    /// Atomically admit (or reject) the once-only extraction of a packet, keyed by
+    /// its identity `(from_num, packet_id)`, against the sliding `windowSeconds`
+    /// window — the DURABLE companion to the pipeline's in-memory `DedupWindow`,
+    /// which is recreated each `run()` and so cannot span a reconnect.
+    ///
+    /// Returns `true` when this is the first sighting within the window (proceed to
+    /// extract telemetry/position/message) and `false` when the same identity was
+    /// extracted less than `windowSeconds` ago (skip — a re-delivery). A first
+    /// sighting OR an expired one records/slides the ledger row; expired rows are
+    /// pruned so the ledger stays bounded. This intentionally lets the SAME identity
+    /// recur after the window (legitimate packet-id reuse) — the bug the v5 permanent
+    /// unique index caused (Finding 5).
+    public func admitExtraction(
+        packetID: Int64,
+        fromNum: Int64,
+        at instant: Instant,
+        windowSeconds: Double = 600
+    ) async throws -> Bool {
+        let key = "\(fromNum):\(packetID)"
+        let now = instant.nanosecondsSinceEpoch
+        let windowNanos = Int64((windowSeconds * 1_000_000_000).rounded())
+        return try await writer.write { db in
+            // Prune everything older than the window relative to `now` (bounded size).
+            try db.execute(
+                sql: "DELETE FROM \(Table.dedupSeen) WHERE last_seen_at < ?",
+                arguments: [now - windowNanos]
+            )
+            let previous = try Int64.fetchOne(
+                db,
+                sql: "SELECT last_seen_at FROM \(Table.dedupSeen) WHERE key = ?",
+                arguments: [key]
+            )
+            if let previous, now - previous <= windowNanos {
+                // Seen within the window — a duplicate. Slide the window forward.
+                try db.execute(
+                    sql: "UPDATE \(Table.dedupSeen) SET last_seen_at = ? WHERE key = ?",
+                    arguments: [now, key]
+                )
+                return false
+            }
+            // First sighting (or the prior one expired): record/refresh and admit.
+            try db.execute(
+                sql: """
+                INSERT INTO \(Table.dedupSeen) (key, last_seen_at) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET last_seen_at = excluded.last_seen_at
+                """,
+                arguments: [key, now]
+            )
+            return true
         }
     }
 

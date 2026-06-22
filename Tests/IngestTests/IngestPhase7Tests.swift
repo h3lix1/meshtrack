@@ -273,9 +273,12 @@ struct IngestPhase7Tests {
     // in-memory `DedupWindow`, and observation dedup is gateway-scoped. So the
     // same packet re-delivered via a DIFFERENT gateway after a reconnect:
     //   • passes observation dedup (new gateway = new provenance row), and
-    //   • is re-admitted by the fresh window.
-    // The store's v5 unique indexes are the only thing that keeps extraction
-    // "count once" — proving the durable idempotency these tests assert.
+    //   • is re-admitted by the fresh in-memory window.
+    // The store's DURABLE windowed dedup ledger (`admitExtraction`, schema v6) is
+    // what keeps extraction "count once" across runs — proving the durable
+    // idempotency these tests assert. Unlike the v5 permanent unique index it
+    // replaced (Finding 5), it is bounded to the dedup window, so a legitimate
+    // packet-id reuse after the window is recorded, not dropped forever.
 
     @Test
     func `a message re-delivered via a different gateway after a reconnect is not duplicated`(
@@ -337,6 +340,58 @@ struct IngestPhase7Tests {
             )
         ]))
         #expect(try await store.positionFixes(forNode: 7).count == 1)
+    }
+
+    // MARK: Windowed (not permanent) extraction dedup (Finding 5)
+
+    @Test
+    func `a message re-delivered within the window across a reconnect dedups (Finding 5)`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // First connection ingests via gw1 at t=0.
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw1", body: "hi", at: at(0))
+        ]))
+        // Reconnect → fresh in-memory DedupWindow; re-delivered via gw2 well inside
+        // the 600s window. The DURABLE ledger (not a permanent index) absorbs it.
+        let summary = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw2", body: "hi", at: at(120))
+        ]))
+        #expect(summary.observationsRecorded == 1) // new gateway = new provenance
+        #expect(summary.extractionsDeduped == 0) // fresh window re-admitted …
+        #expect(try await store.recentMessages().count == 1) // … but ledger kept it once
+    }
+
+    @Test
+    func `the same packet identity after the window records a NEW extraction (Finding 5)`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw1", body: "first", at: at(0))
+        ]))
+        // 601s later the window has elapsed, so a legitimate packet-id reuse is a
+        // NEW message — the v5 permanent unique index would have dropped it forever.
+        // A different gateway keeps it past the (correct, permanent) observation
+        // exact-re-delivery guard, isolating the extraction window under test.
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw2", body: "reused", at: at(601))
+        ]))
+        #expect(try await store.recentMessages().count == 2)
+    }
+
+    @Test
+    func `two distinct telemetry samples sharing the coarse natural key are both kept (Finding 5)`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // Two DIFFERENT packets from the same node at the same rx_time → same coarse
+        // (node_num, t, kind, key) for battery_pct. v5's unique index dropped the
+        // second; with v6 the windowed ledger keys on packet identity, so both are kept.
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            telemetryFrame(from: 7, packetID: 1, gateway: "!gw1", at: at(0)),
+            telemetryFrame(from: 7, packetID: 2, gateway: "!gw1", at: at(0))
+        ]))
+        let battery = try await store.telemetry(forNode: 7).filter { $0.key == "battery_pct" }
+        #expect(battery.count == 2) // both samples recorded, not collapsed to one
     }
 
     @Test
