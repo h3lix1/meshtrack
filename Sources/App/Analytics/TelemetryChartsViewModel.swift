@@ -27,6 +27,9 @@ public final class TelemetryChartsViewModel {
     public private(set) var environmentSeries: [TelemetrySeries.Built] = []
     /// The resolution the current series were read at (for the caption).
     public private(set) var resolution: TelemetryResolution = .raw
+    /// Whether at least one `load()` has completed, so the view can tell a genuinely
+    /// empty node ("no telemetry yet") from one that simply hasn't loaded yet.
+    public private(set) var loaded = false
 
     @ObservationIgnored private let store: MeshStore
     /// Injected clock so the window's lower bound is deterministic in tests.
@@ -78,6 +81,7 @@ public final class TelemetryChartsViewModel {
             let records = try await store.dailyTelemetry(forNode: nodeNum)
             buildFromRollups(records, resolution: .daily, lowerBound: lowerBound)
         }
+        loaded = true
     }
 
     private func buildFromRollups(
