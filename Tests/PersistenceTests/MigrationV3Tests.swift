@@ -133,4 +133,29 @@ struct MigrationV3Tests {
         #expect(recent.map(\.body) == ["world", "dm", "hello"]) // newest-first
         #expect(recent.first(where: { $0.is_dm })?.body == "dm")
     }
+
+    @Test
+    func `messages with equal rx_time order deterministically by id (Finding 13)`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // Three messages on the same channel sharing one rx_time. With only an
+        // rx_time order the transcript could flicker between loads; the id
+        // tie-break makes it stable.
+        for index in 1...3 {
+            try await store.recordMessage(MessageRecord(
+                packet_id: Int64(index), from_num: Int64(index), to_num: 0xFFFF_FFFF,
+                channel: 8, channel_name: "MediumFast", body: "m\(index)", rx_time: 500
+            ))
+        }
+
+        // Per-channel feed (oldest-first): ascending id among the equal rx_time.
+        let onChannel = try await store.messages(channel: 8)
+        #expect(onChannel.map(\.body) == ["m1", "m2", "m3"])
+        // recentMessages (newest-first): descending id among the equal rx_time.
+        let recent = try await store.recentMessages()
+        #expect(recent.map(\.body) == ["m3", "m2", "m1"])
+
+        // Repeated reads return the identical order (no flicker).
+        let again = try await store.recentMessages()
+        #expect(again.map(\.body) == recent.map(\.body))
+    }
 }
