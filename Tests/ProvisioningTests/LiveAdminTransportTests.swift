@@ -29,7 +29,9 @@ struct LiveAdminTransportTests {
             }
         }
 
-        func setFailExchange(_ value: Bool) { failExchange = value }
+        func setFailExchange(_ value: Bool) {
+            failExchange = value
+        }
 
         func exchange(_ message: AdminMessage, with _: AdminTarget) async throws -> AdminMessage? {
             if failExchange { throw AdminTransportError.notConnected }
@@ -68,7 +70,9 @@ struct LiveAdminTransportTests {
 
         /// The kinds of messages sent, in order (begin/set/commit/get…), for asserting
         /// the transaction shape without matching on payload bytes.
-        func sentKinds() -> [String] { sent.map(Self.kind) }
+        func sentKinds() -> [String] {
+            sent.map(Self.kind)
+        }
 
         private func store(_ config: Config) {
             switch config.payloadVariant {
@@ -97,7 +101,8 @@ struct LiveAdminTransportTests {
     private let context = NamingContext(id: "!aabb1234")
 
     @Test
-    func `the production apply path SENDS begin-set-commit admin messages and verifies via read-back`() async throws {
+    func `the production apply path SENDS begin-set-commit admin messages and verifies via read-back`(
+    ) async throws {
         // A node currently on EU_868; the template wants US + a router role + an owner.
         let link = SpyAdminLink(region: .eu868)
         let transport = LiveAdminTransport(link: link)
@@ -233,7 +238,9 @@ struct LiveAdminTransportTests {
         private(set) var didGetChannel = false
         private(set) var lastSetChannel: Channel?
 
-        func seedChannel(_ value: Channel) { channel = value }
+        func seedChannel(_ value: Channel) {
+            channel = value
+        }
 
         func exchange(_ message: AdminMessage, with _: AdminTarget) async throws -> AdminMessage? {
             let wire: [UInt8] = try message.serializedBytes()

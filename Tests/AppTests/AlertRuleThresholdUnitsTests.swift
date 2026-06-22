@@ -21,8 +21,8 @@ struct AlertRuleThresholdUnitsTests {
     @Test
     func `stale converts editor hours to canonical seconds and back`() {
         // 24 editor hours == 86,400 canonical seconds.
-        #expect(AlertRuleType.stale.canonicalThreshold(fromEditor: 24) == 86_400)
-        #expect(AlertRuleType.stale.editorThreshold(fromCanonical: 86_400) == 24)
+        #expect(AlertRuleType.stale.canonicalThreshold(fromEditor: 24) == 86400)
+        #expect(AlertRuleType.stale.editorThreshold(fromCanonical: 86400) == 24)
         // Round-trips losslessly across a range of editor values.
         for hours in [1.0, 6, 12, 24, 48, 720] {
             let seconds = AlertRuleType.stale.canonicalThreshold(fromEditor: hours)
@@ -51,14 +51,14 @@ struct AlertRuleThresholdUnitsTests {
 
         // …and the underlying (persisted) store holds canonical SECONDS.
         let persisted = try #require(try await inner.allRules().first { $0.type == .stale })
-        #expect(persisted.threshold == 86_400)
+        #expect(persisted.threshold == 86400)
     }
 
     @Test
     func `reading back through the decorator round-trips 24h in the editor`() async throws {
         // Seed the inner store with the canonical seconds value the DB would hold.
         let inner = InMemoryAlertRuleStore([
-            AlertRuleRecord(scope: .global, type: .stale, threshold: 86_400)
+            AlertRuleRecord(scope: .global, type: .stale, threshold: 86400)
         ])
         let store = HoursToSecondsAlertRuleStore(wrapping: inner)
 
@@ -99,7 +99,7 @@ struct AlertRuleThresholdUnitsTests {
 
         // Persisted canonically as seconds (what RuleEvaluator compares against).
         let persisted = try #require(try await inner.allRules().first { $0.type == .stale })
-        #expect(persisted.threshold == 86_400)
+        #expect(persisted.threshold == 86400)
 
         // A fresh editor over the same decorator reads 24h back.
         let reader = AlertsConfigViewModel(rules: store)
@@ -135,7 +135,7 @@ struct AlertRuleThresholdUnitsTests {
         // Just past 24 HOURS of silence DOES fire stale.
         let after24h = RuleEvaluator.conditions(
             for: snapshot, rules: rules,
-            now: Instant.epoch.adding(seconds: 86_400 + 1), management: managed
+            now: Instant.epoch.adding(seconds: 86400 + 1), management: managed
         )
         #expect(after24h.map(\.type) == [.stale])
     }

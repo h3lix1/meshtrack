@@ -49,6 +49,7 @@ public enum AlertRuleType: String, Sendable, Equatable, Hashable, CaseIterable, 
     }
 
     // MARK: Editor ↔ canonical (persisted/evaluated) unit conversion
+
     //
     // Finding 11: the editor shows the `stale` threshold in HOURS, but the canonical
     // value the engine evaluates (and that is persisted) is SECONDS — `RuleEvaluator`
