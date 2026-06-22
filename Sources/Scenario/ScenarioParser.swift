@@ -54,6 +54,9 @@ public struct ScenarioParser: Sendable {
         let arm = try parseArm(mapping, node: node)
         let fixes = try parseFixes(mapping, node: node)
         let silenceHours = try optionalDouble(mapping, key: "silence_hours", node: node)
+        // ADR 0008: omitted `managed` defaults to managed (single-fleet); declare
+        // `managed: false` to assert a stranger's node is never alerted.
+        let isManaged = try optionalBool(mapping, key: "managed", node: node) ?? true
         let expected = try parseExpectedAlerts(mapping, node: node)
 
         return Scenario(
@@ -62,6 +65,7 @@ public struct ScenarioParser: Sendable {
             arm: arm,
             fixes: fixes,
             silenceHours: silenceHours,
+            isManaged: isManaged,
             expectedAlerts: expected
         )
     }
@@ -280,6 +284,18 @@ public struct ScenarioParser: Sendable {
     ) throws -> Int? {
         guard mapping[key] != nil else { return nil }
         return try requireInt(mapping, key: key, node: node)
+    }
+
+    private static func optionalBool(
+        _ mapping: [String: Any],
+        key: String,
+        node: String
+    ) throws -> Bool? {
+        guard let raw = mapping[key] else { return nil }
+        guard let value = raw as? Bool else {
+            throw ScenarioParseError.wrongType(key: key, node: node, expected: "boolean")
+        }
+        return value
     }
 
     /// Accept `Int` and `Double` scalars as a `Double`. Yams types integral
