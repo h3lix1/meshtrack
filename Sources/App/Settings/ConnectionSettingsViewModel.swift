@@ -72,19 +72,25 @@ public final class ConnectionSettingsViewModel {
     @ObservationIgnored private let test: ConnectionTest
     @ObservationIgnored private let dataSourceStore: any DataSourceStore
     @ObservationIgnored private let serialDevices: any SerialDeviceEnumerator
+    /// Bumped on a successful `save()` so the live composition root re-resolves and
+    /// (re)connects without a relaunch (Finding 1). Optional — snapshots/tests that
+    /// don't wire a live coordinator pass `nil`.
+    @ObservationIgnored private let revision: LiveConfigRevision?
 
     public init(
         gateway: any ConfigGateway,
         credentials: any CredentialStore,
         test: @escaping ConnectionTest,
         dataSourceStore: any DataSourceStore = UserDefaultsDataSourceStore(),
-        serialDevices: any SerialDeviceEnumerator = POSIXSerialDeviceEnumerator()
+        serialDevices: any SerialDeviceEnumerator = POSIXSerialDeviceEnumerator(),
+        revision: LiveConfigRevision? = nil
     ) {
         self.gateway = gateway
         self.credentials = credentials
         self.test = test
         self.dataSourceStore = dataSourceStore
         self.serialDevices = serialDevices
+        self.revision = revision
     }
 
     // MARK: Data-source helpers
@@ -191,6 +197,10 @@ public final class ConnectionSettingsViewModel {
             username: config.username
         )
         didSave = true
+        // Tell the live composition root the config changed so it reconnects without
+        // a relaunch — saving a connectable broker goes live, switching the active
+        // source restarts the stream (Finding 1).
+        revision?.bump()
     }
 
     // MARK: Test connection
