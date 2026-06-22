@@ -102,6 +102,29 @@ struct TimelineViewModelTests {
     }
 
     @Test
+    func `play from live rewinds off the edge so playback advances instead of bouncing`() async throws {
+        let viewModel = try await model(seededStore())
+        try await viewModel.load()
+        #expect(viewModel.mode == .live)
+        #expect(viewModel.playhead == viewModel.window.end)
+
+        // Play from live used to leave the playhead pinned at window.end, so the first
+        // tick saw advanced >= end and snapped straight back to live.
+        viewModel.play()
+        #expect(viewModel.mode == .review)
+        #expect(viewModel.playhead < viewModel.window.end)
+        let afterPlay = viewModel.playhead
+
+        // A real-time tick must move the playhead forward and stay in review, not
+        // immediately bounce back to live.
+        viewModel.tick(delta: 100)
+        #expect(viewModel.mode == .review)
+        #expect(viewModel.isPlaying)
+        #expect(viewModel.playhead > afterPlay)
+        #expect(viewModel.playhead < viewModel.window.end)
+    }
+
+    @Test
     func `tick does nothing when paused or live`() async throws {
         let viewModel = try await model(seededStore())
         try await viewModel.load()
