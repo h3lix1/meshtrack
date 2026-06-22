@@ -59,6 +59,11 @@ final class LiveCoordinator {
     /// view model (Finding 17). Backs the `.packets` section with real traffic instead
     /// of sample data, and its `latencyMillis` feeds the map's latency overlay.
     let packetInspector: PacketInspectorViewModel
+    /// Mesh-traffic aggregators (Phase 10), fed from the same decoded-packet tap as the
+    /// network/inspector VMs. Back the Port Numbers + Largest Offenders sections with
+    /// real running totals; both snapshot their aggregates to the store periodically.
+    let portStats: PortStatsViewModel
+    let offenders: OffendersViewModel
     /// The connection state for the status indicator (endpoint only, never secrets).
     private(set) var status: LiveConnectionStatus = .offline
 
@@ -136,6 +141,8 @@ final class LiveCoordinator {
         }
         viewModel = NetworkViewModel(store: store)
         packetInspector = PacketInspectorViewModel(clock: SystemWallClock())
+        portStats = PortStatsViewModel(store: store)
+        offenders = OffendersViewModel(store: store)
     }
 
     /// Resolve the active data source from the persisted selection (`DataSourceStore`)
@@ -228,6 +235,8 @@ final class LiveCoordinator {
         let pipeline = IngestPipeline(store: store, decoder: decoder)
         let model = viewModel
         let inspector = packetInspector
+        let ports = portStats
+        let offenderStats = offenders
         // A @MainActor tap that promotes the status to `.connected`; capturing this
         // closure (rather than `self`) keeps the Sendable ingest closure clean.
         let onFirstPacket: @MainActor @Sendable () -> Void = { [weak self] in
@@ -242,6 +251,8 @@ final class LiveCoordinator {
             _ = try? await pipeline.run(adapter) { packet in
                 await model.ingest(packet)
                 await inspector.ingest(packet)
+                await ports.ingest(packet)
+                await offenderStats.ingest(packet)
                 await onFirstPacket()
             }
         })

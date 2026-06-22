@@ -7,9 +7,10 @@
 //
 // Input seams (mirrors `NetworkViewModel`):
 //   * `observations` — provenance rows (rx_snr, rx_rssi, hop_start/limit,
-//     gateway_id, rx_time). The store exposes no observation-fetch yet, so the
-//     live coordinator (G2) feeds them in via `setObservations`; tests seed them
-//     directly. SNR/RSSI, hops, peers and the heatmap derive from these.
+//     gateway_id, rx_time). `load()` reads them from the store
+//     (`observations(forNode:)`, Phase 10 item 7); the live coordinator (G2) can also
+//     push them via `setObservations`/`ingest`; tests seed them directly. SNR/RSSI,
+//     hops, peers and the heatmap derive from these.
 //   * `packets` — decoded packets carrying the `MeshPort` the breakdown needs
 //     (the observation table has no port column). Fed via `ingest`/`setPackets`.
 //
@@ -89,6 +90,16 @@ public final class NodeAnalyticsViewModel {
         if let record = try await store.fetchNode(nodeNum: nodeNum) {
             nodeName = NetworkViewModel.displayName(record)
         }
+    }
+
+    /// Load the header AND the node's stored observations (Phase 10 item 7). The
+    /// signal / hops / peers / activity tabs derive from these — previously they had
+    /// no store-backed source and the section rendered empty regardless of node. The
+    /// packet-type tab still needs the live packet feed (the observation table carries
+    /// no port column), so it stays empty until packets arrive via `ingest`/`setPackets`.
+    public func load() async throws {
+        try await loadHeader()
+        try await setObservations(store.observations(forNode: nodeNum))
     }
 
     // MARK: Input seams
