@@ -1,12 +1,17 @@
 // PacketInspectorViewModel — the composition seam for the packet inspector (G6).
 // Holds a sliding window of recently decoded packets (fed via an `ingest` seam
 // mirroring NetworkViewModel), each turned into a pure InspectedPacket with a
-// byte-level breakdown + decoded field summary. Surfaces filters (port/node/
-// channel/text), master/detail selection, per-packet receive→publish latency, and
-// a latency distribution.
+// byte-level breakdown + decoded field summary.
 //
-// @MainActor @Observable; all the heavy lifting (breakdown, filtering, latency,
-// distribution) is in pure helpers so this stays a thin, testable coordinator.
+// The master list is aggregated by packet id (item 10): one row per id, grouping
+// every reception (relay/gateway duplicate) of that packet, so the live list is no
+// longer a flood of duplicates. The detail pane unfolds the full per-packet story.
+// Filters (port/node/channel/text) act on the aggregated list. Per-reception
+// latency is sanitised (item 9): receptions whose node RTC is skewed out of the
+// plausible band are excluded from the distribution and the `latencyMillis` map.
+//
+// @MainActor @Observable; all the heavy lifting (breakdown, grouping, filtering,
+// latency, distribution) is in pure helpers so this stays a thin coordinator.
 
 import Domain
 import Foundation
@@ -15,7 +20,9 @@ import Observation
 @Observable
 @MainActor
 public final class PacketInspectorViewModel {
-    /// The newest-first sliding window of inspected packets (capped at `maxPackets`).
+    /// The newest-first sliding window of inspected *receptions* (capped at
+    /// `maxPackets`). One logical packet may appear several times here (relay
+    /// duplicates) — the master list aggregates them by id.
     public private(set) var packets: [InspectedPacket] = []
 
     /// The active filter; setting it re-derives the selection if it falls out.
@@ -23,9 +30,9 @@ public final class PacketInspectorViewModel {
         didSet { dropStaleSelection() }
     }
 
-    /// The user's explicit master/detail pick (`sequence`). Nil means "follow the
+    /// The user's explicit master/detail pick (a packet id). Nil means "follow the
     /// newest visible packet" — the live default. Set it to pin the detail pane.
-    public var selectedID: InspectedPacket.ID?
+    public var selectedID: UInt32?
 
     private let clock: Clock
     private let maxPackets: Int
@@ -34,7 +41,7 @@ public final class PacketInspectorViewModel {
     /// - Parameters:
     ///   - clock: source of the ingest wall-clock used to compute latency for live
     ///     packets. Production wires `SystemClock`; tests wire `InjectedClock`.
-    ///   - maxPackets: sliding-window size; oldest evicted past this.
+    ///   - maxPackets: sliding-window size (in receptions); oldest evicted past this.
     public init(clock: Clock, maxPackets: Int = 200) {
         self.clock = clock
         self.maxPackets = max(1, maxPackets)
@@ -66,16 +73,21 @@ public final class PacketInspectorViewModel {
 
     // MARK: Derived (master/detail + filters)
 
-    /// The window after the active filter, newest first — the master list.
-    public var visiblePackets: [InspectedPacket] {
-        filter.apply(to: packets)
+    /// Every reception grouped into one aggregate per packet id, newest id first.
+    public var aggregatedPackets: [AggregatedPacket] {
+        AggregatedPacket.group(packets)
     }
 
-    /// The packet shown in the detail pane: the selection if still visible, else
-    /// the newest visible packet.
-    public var selected: InspectedPacket? {
+    /// The aggregated window after the active filter, newest first — the master list.
+    public var visiblePackets: [AggregatedPacket] {
+        filter.apply(to: aggregatedPackets)
+    }
+
+    /// The aggregate shown in the detail pane: the selection if still visible, else
+    /// the newest visible aggregate.
+    public var selected: AggregatedPacket? {
         let visible = visiblePackets
-        if let selectedID, let hit = visible.first(where: { $0.id == selectedID }) {
+        if let selectedID, let hit = visible.first(where: { $0.packetID == selectedID }) {
             return hit
         }
         return visible.first
@@ -99,31 +111,38 @@ public final class PacketInspectorViewModel {
 
     /// Receive→publish latency in milliseconds per packet id — the public surface
     /// the map overlay (`MeshMapSection(latencyMillis:)`) and analytics consume.
-    /// When a packet id has several receptions in the window, the most recent one
-    /// wins (newest-first iteration, first write kept).
+    /// Skewed-RTC receptions are excluded (item 9): only *plausible* latencies are
+    /// published. When a packet id has several plausible receptions, the most recent
+    /// one wins (newest-first iteration, first write kept).
     public var latencyMillis: [UInt32: Int] {
         var result: [UInt32: Int] = [:]
         for inspection in packets { // newest first
             guard result[inspection.packetID] == nil else { continue }
-            if let millis = inspection.latencyMillis { result[inspection.packetID] = millis }
+            if let millis = inspection.plausibleLatencyMillis {
+                result[inspection.packetID] = millis
+            }
         }
         return result
     }
 
     /// The latency distribution over the *visible* (filtered) window — the small
-    /// histogram + summary stats shown in the detail/analytics area.
+    /// histogram + summary stats. Only plausible receptions contribute (item 9),
+    /// so a node with a skewed clock no longer poisons the histogram.
     public var latencyDistribution: LatencyDistribution {
-        LatencyDistribution(millis: visiblePackets.compactMap(\.latencyMillis))
+        let samples = visiblePackets
+            .flatMap(\.receptions)
+            .compactMap(\.plausibleLatencyMillis)
+        return LatencyDistribution(millis: samples)
     }
 
     // MARK: Internals
 
     /// Clear an explicit selection that's no longer visible (filtered out or
     /// evicted from the window), so the detail pane falls back to the newest
-    /// visible packet rather than going blank.
+    /// visible aggregate rather than going blank.
     private func dropStaleSelection() {
         guard let selectedID else { return }
-        if !visiblePackets.contains(where: { $0.id == selectedID }) {
+        if !visiblePackets.contains(where: { $0.packetID == selectedID }) {
             self.selectedID = nil
         }
     }
