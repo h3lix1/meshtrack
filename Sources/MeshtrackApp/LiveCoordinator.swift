@@ -239,13 +239,33 @@ final class LiveCoordinator {
             }
         })
 
-        // Slow refresh: surface nodes as soon as they report a position, and re-derive
-        // the default-PSK gate from the registry + tombstone so a default-channel
-        // removal stops default-key decoding within a refresh cycle (Finding 16).
+        // The live alert loop's reusable ports (Finding 7): a store-backed snapshot
+        // source, the configured rule store (HOURS→SECONDS over the GRDB adapter), the
+        // store sink, and a wall clock. The management lookup is rebuilt per pass so it
+        // tracks the latest ownership classification.
+        let snapshotSource = StoreAlertSnapshotSource(store: store)
+        let ruleStore = HoursToSecondsAlertRuleStore(wrapping: MeshStoreAlertRuleStore(store: store))
+        let alertSink = store
+        let alertClock = SystemWallClock()
+
+        // Slow refresh: surface nodes as soon as they report a position; re-derive the
+        // default-PSK gate from the registry + tombstone so a default-channel removal
+        // stops default-key decoding within a refresh cycle (Finding 16); and run live
+        // telemetry through RuleEvaluator → AlertEngine → store so battery/stale/voltage
+        // alerts the console shows are actually generated (Finding 7).
         tasks.append(Task { [refreshInterval, channelManager] in
             while !Task.isCancelled {
                 try? await model.loadNodes()
                 await channelManager?.refreshDefaultGate()
+                let management = await StoreAlertNodeManagementLookup(store: store)
+                let evaluator = LiveAlertEvaluator(
+                    snapshots: snapshotSource,
+                    rules: ruleStore,
+                    management: management,
+                    sink: alertSink,
+                    clock: alertClock
+                )
+                _ = try? await evaluator.evaluate()
                 try? await Task.sleep(for: refreshInterval)
             }
         })
