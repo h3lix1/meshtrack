@@ -44,6 +44,9 @@ public struct LivePacketTraceCollector: Sendable {
         let reception = PacketReception(
             packetID: packet.packetID,
             fromNode: Int64(packet.from),
+            // Thread the addressed recipient through so the builder can mark the last-hop
+            // destination (item 8). Broadcast/self addresses are filtered downstream.
+            toNode: Int64(packet.to),
             gatewayNode: packet.gatewayID.map { Int64($0) },
             relayNode: packet.relayNode ?? 0,
             hopStart: Int(packet.hopStart ?? 0),
