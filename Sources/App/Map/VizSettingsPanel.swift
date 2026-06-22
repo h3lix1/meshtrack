@@ -76,6 +76,15 @@ public struct VizSettingsPanel: View {
             }
             .toggleStyle(.switch)
             .controlSize(.small)
+            Toggle(isOn: $settings.showAllReceivers) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Show all receivers").font(.caption)
+                    Text("ring every node that heard the focused packet")
+                        .font(.system(size: 9)).foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
         }
     }
 

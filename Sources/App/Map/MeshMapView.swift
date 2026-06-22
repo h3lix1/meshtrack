@@ -193,6 +193,14 @@
             /// Debounces persisting the region so a pan/zoom gesture saves once it
             /// settles, not on every intermediate frame.
             private var saveWorkItem: DispatchWorkItem?
+            /// Wall-clock time of the last spiderfy pass — throttles the per-frame
+            /// continuous-motion path (item 5).
+            var lastSpiderfyAt: TimeInterval = 0
+            /// The leader-line endpoints (anchor+displaced screen points keyed by id) from
+            /// the last pass; lets us skip the overlay remove/add when nothing moved.
+            var lastLeaderSignature: [Int64: SpiderLeaderKey] = [:]
+            /// Min seconds between continuous-motion spiderfy passes.
+            static let spiderfyInterval: TimeInterval = 0.1
 
             init(state: MeshMapState, regionStore: MapRegionStore, onSelectNode: ((Int64) -> Void)?) {
                 self.state = state
@@ -245,61 +253,20 @@
 
             public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
                 publishProjection()
-                applySpiderfy(on: mapView)
+                // The gesture/animation has settled — do the full, authoritative spiderfy
+                // pass (fan markers + rebuild leader lines) exactly once here.
+                applySpiderfy(on: mapView, settled: true)
                 scheduleRegionSave()
             }
 
             public func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
                 publishProjection()
-                applySpiderfy(on: mapView)
-            }
-
-            // MARK: Spiderfy (Task 3)
-
-            /// Identifier for the thin leader-line overlays drawn from a fanned marker
-            /// back to its true (shared) coordinate.
-            private static let leaderTitle = "spiderfy-leader"
-
-            /// Fan out co-located markers and draw their leader lines. Runs on every
-            /// region change: at a given zoom, only markers that still project within a
-            /// few pixels of each other are fanned, so as you zoom in real neighbours
-            /// separate on their own and only genuinely-stacked nodes stay fanned.
-            func applySpiderfy(on mapView: MKMapView) {
-                let annotations = mapView.annotations.compactMap { $0 as? MeshNodeAnnotation }
-                guard !annotations.isEmpty else { return }
-                let points = annotations.map {
-                    (id: $0.nodeID, point: mapView.convert($0.coordinate, toPointTo: mapView))
-                }
-                let placements = Spiderfier.spiderfy(points: points)
-                let byID = Dictionary(uniqueKeysWithValues: placements.map { ($0.id, $0) })
-
-                // Offset each marker view to its fanned position (screen y is down, which
-                // matches MKAnnotationView.centerOffset on macOS).
-                for annotation in annotations {
-                    guard let view = mapView.view(for: annotation),
-                          let placement = byID[annotation.nodeID] else { continue }
-                    view.centerOffset = CGPoint(
-                        x: placement.displaced.x - placement.anchor.x,
-                        y: placement.displaced.y - placement.anchor.y
-                    )
-                }
-
-                refreshLeaderLines(on: mapView, placements: placements)
-            }
-
-            /// Replace the leader-line overlays with one per fanned marker (true anchor
-            /// → displaced marker), converting screen points back to coordinates.
-            private func refreshLeaderLines(on mapView: MKMapView, placements: [SpiderfiedPlacement]) {
-                let stale = mapView.overlays.filter { ($0.title ?? nil) == Self.leaderTitle }
-                mapView.removeOverlays(stale)
-                let leaders = placements.filter(\.isFanned).map { placement -> MKPolyline in
-                    let anchor = mapView.convert(placement.anchor, toCoordinateFrom: mapView)
-                    let displaced = mapView.convert(placement.displaced, toCoordinateFrom: mapView)
-                    let line = MKPolyline(coordinates: [anchor, displaced], count: 2)
-                    line.title = Self.leaderTitle
-                    return line
-                }
-                if !leaders.isEmpty { mapView.addOverlays(leaders) }
+                // Fires every frame during a continuous pan/zoom. Item 5: keep the cheap
+                // projection publish so the Canvas overlay tracks the map, but THROTTLE
+                // the expensive spiderfy (O(n²) cluster + overlay remove/add) so it runs
+                // at most once per `spiderfyInterval`, not 60×/sec. The settled callback
+                // above guarantees a final correct pass when motion stops.
+                throttledSpiderfy(on: mapView)
             }
 
             public func mapView(
