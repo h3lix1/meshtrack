@@ -45,26 +45,38 @@ public struct PacketInspectorSection: View {
                     .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
             }
             FilterBar(viewModel: viewModel)
-            ScrollViewReaderless {
-                VStack(spacing: 4) {
-                    ForEach(viewModel.visiblePackets) { aggregate in
-                        PacketRow(
-                            aggregate: aggregate,
-                            isSelected: aggregate.packetID == viewModel.selected?.packetID
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture { viewModel.selectedID = aggregate.packetID }
-                    }
-                    if viewModel.visiblePackets.isEmpty {
-                        Text(viewModel.packets.isEmpty ? "Awaiting traffic…" : "No packets match the filter.")
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 24)
-                    }
-                }
+            // The rows live in a vertical ScrollView anchored at the TOP (item 5): the
+            // list is newest-first, so new arrivals appear at the top without shoving
+            // the viewport, and selecting a row never scrolls. `rowStack` is a bespoke,
+            // intrinsically-sized subview (no trailing Spacer, no stock List) — mirrors
+            // CollisionMatrixView's `pageContent` so headless ImageRenderer snapshots
+            // render the whole stack instead of a collapsed strip.
+            ScrollView(.vertical) {
+                rowStack
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
         .padding(12)
+    }
+
+    /// The bespoke, intrinsically-sized row stack inside the master ScrollView.
+    private var rowStack: some View {
+        VStack(spacing: 4) {
+            ForEach(viewModel.visiblePackets) { aggregate in
+                PacketRow(
+                    aggregate: aggregate,
+                    isSelected: aggregate.packetID == viewModel.selected?.packetID
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { viewModel.selectedID = aggregate.packetID }
+            }
+            if viewModel.visiblePackets.isEmpty {
+                Text(viewModel.packets.isEmpty ? "Awaiting traffic…" : "No packets match the filter.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 24)
+            }
+        }
     }
 
     // MARK: Detail
@@ -80,15 +92,6 @@ public struct PacketInspectorSection: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-}
-
-/// A non-clipping vertical container so the bespoke list renders fully under the
-/// headless snapshot gate (stock ScrollView renders badly headless).
-private struct ScrollViewReaderless<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content; Spacer(minLength: 0) }
     }
 }
 
