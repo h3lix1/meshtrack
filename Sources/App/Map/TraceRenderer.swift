@@ -12,6 +12,11 @@
 import Domain
 import SwiftUI
 
+public enum TraceRenderDetail: Sendable, Equatable {
+    case full
+    case interactive
+}
+
 /// Stateless drawing for traces + node glows over any `TraceProjection`.
 @MainActor
 public struct TraceRenderer {
@@ -23,19 +28,23 @@ public struct TraceRenderer {
     public var focusedPacketID: UInt32?
     /// Whether to mark every node that received the focused packet (item 6).
     public var showAllReceivers: Bool
+    /// Full detail when the map is settled; lightweight strokes during pan/zoom.
+    public var detail: TraceRenderDetail
 
     public init(
         clock: Double,
         hopDuration: Double,
         mode: TraceTimingMode,
         focusedPacketID: UInt32? = nil,
-        showAllReceivers: Bool = false
+        showAllReceivers: Bool = false,
+        detail: TraceRenderDetail = .full
     ) {
         self.clock = clock
         self.hopDuration = hopDuration
         self.mode = mode
         self.focusedPacketID = focusedPacketID
         self.showAllReceivers = showAllReceivers
+        self.detail = detail
     }
 
     private func isFocused(_ id: UInt32) -> Bool {
@@ -82,17 +91,17 @@ public struct TraceRenderer {
             drawEdge(edge, segment: segment, color: color, in: &context)
             // When this packet is focused, label EACH hop with its hop number along the
             // path (item 3) — not just the final/max hop badge below.
-            if focused, fraction > 0.35 {
+            if detail == .full, focused, fraction > 0.35 {
                 let mid = TraceTiming.lerp(segment.start, segment.end, min(fraction, 0.5))
                 drawHopTick(edge.hopIndex, at: mid, color: color, in: context)
             }
         }
         // When focused + the toggle is on, mark every node that received this packet,
         // annotated with the hop at which it heard it (item 6).
-        if focused, showAllReceivers {
+        if detail == .full, focused, showAllReceivers {
             drawReceivers(trace, in: &context, projection: projection)
         }
-        if let badge = badgePoint(trace, projection: projection) {
+        if detail == .full, let badge = badgePoint(trace, projection: projection) {
             drawBadge(
                 "\(trace.hops)\u{2009}hop\(trace.hops == 1 ? "" : "s")",
                 at: badge,
@@ -121,6 +130,19 @@ public struct TraceRenderer {
         line.move(to: start)
         line.addLine(to: tip)
         let dash: [CGFloat] = edge.kind == .guessed ? [7, 6] : []
+
+        if detail == .interactive {
+            context.stroke(
+                line,
+                with: .color(color.opacity(0.82)),
+                style: StrokeStyle(
+                    lineWidth: edge.kind == .guessed ? 1.2 : 2.0,
+                    lineCap: .round,
+                    dash: dash
+                )
+            )
+            return
+        }
 
         // Drawn portion (source → tip): a soft glow under a crisp core. The line grows
         // from the source toward the gateway as `fraction` advances (item 2).

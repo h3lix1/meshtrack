@@ -55,20 +55,28 @@
                 // re-render whenever the map's camera moves.
                 _ = state.regionRevision
                 guard let projection = state.projection else { return }
+                let cachedProjection = CachedTraceProjection(base: projection)
+                let detail: TraceRenderDetail = state.isInteracting ? .interactive : .full
                 let renderer = TraceRenderer(
                     clock: clock, hopDuration: hopDuration, mode: mode,
-                    focusedPacketID: focusedPacketID, showAllReceivers: showAllReceivers
+                    focusedPacketID: focusedPacketID,
+                    showAllReceivers: showAllReceivers,
+                    detail: detail
                 )
-                renderer.drawTraces(traces, in: &context, projection: projection)
-                renderer.drawNodes(nodes, in: &context, projection: projection)
-                for trace in traces {
-                    guard let latencyMs = latencyMillis[trace.id] else { continue }
-                    renderer.drawLatencyTooltip(
-                        trace,
-                        latencyMillis: latencyMs,
-                        in: &context,
-                        projection: projection
-                    )
+                MapPerfSignpost.interval("map.overlay.draw") {
+                    renderer.drawTraces(traces, in: &context, projection: cachedProjection)
+                    if detail == .full {
+                        renderer.drawNodes(nodes, in: &context, projection: cachedProjection)
+                        for trace in traces {
+                            guard let latencyMs = latencyMillis[trace.id] else { continue }
+                            renderer.drawLatencyTooltip(
+                                trace,
+                                latencyMillis: latencyMs,
+                                in: &context,
+                                projection: cachedProjection
+                            )
+                        }
+                    }
                 }
             }
             .allowsHitTesting(false)

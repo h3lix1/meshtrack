@@ -41,6 +41,15 @@
             batteryPercent = other.batteryPercent
             hopsFromGateway = other.hopsFromGateway
         }
+
+        func differs(from other: MeshNodeAnnotation) -> Bool {
+            coordinate.latitude != other.coordinate.latitude
+                || coordinate.longitude != other.coordinate.longitude
+                || title != other.title
+                || isGateway != other.isGateway
+                || batteryPercent != other.batteryPercent
+                || hopsFromGateway != other.hopsFromGateway
+        }
     }
 
     /// A compact circular marker for a node; gateways read teal, members blue-violet by
