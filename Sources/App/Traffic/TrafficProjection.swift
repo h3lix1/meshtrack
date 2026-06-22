@@ -46,6 +46,60 @@ public enum TrafficProjection {
         return Array(rows.sorted(by: offenderOrder).prefix(max(0, limit)))
     }
 
+    /// The full why/how/when detail for one node, or `nil` if the node is unknown.
+    /// Pure derivation over the per-node counters — see `OffenderDetail`.
+    public static func offenderDetail(
+        _ aggregator: TrafficAggregator,
+        forNode nodeNum: UInt32
+    ) -> OffenderDetail? {
+        guard let counters = aggregator.nodes[nodeNum] else { return nil }
+        return OffenderDetail(
+            nodeNum: nodeNum,
+            receptions: counters.receptions,
+            emitted: counters.emitted,
+            spread: counters.gateways.count,
+            packetsPerMinute: packetsPerMinute(counters),
+            dominantPort: dominantPort(counters),
+            ports: portRows(for: counters),
+            gateways: counters.gateways.sorted(),
+            minHops: counters.minHops ?? 0,
+            maxHops: counters.maxHops,
+            firstSeen: counters.firstSeen,
+            lastSeen: counters.lastSeen,
+            activity: activityRows(for: counters)
+        )
+    }
+
+    /// Per-port breakdown for one node, sorted by receptions descending (dominant
+    /// first), tie-broken by raw port for determinism.
+    static func portRows(for counters: NodeCounters) -> [OffenderPortRow] {
+        let total = max(counters.receptions, 1)
+        return counters.portReceptions
+            .map { raw, receptions in
+                OffenderPortRow(
+                    descriptor: PortCatalog.descriptor(forRawValue: raw),
+                    emitted: counters.portEmitted[raw] ?? 0,
+                    receptions: receptions,
+                    share: Double(receptions) / Double(total)
+                )
+            }
+            .sorted { lhs, rhs in
+                lhs.receptions != rhs.receptions
+                    ? lhs.receptions > rhs.receptions
+                    : lhs.descriptor.rawValue < rhs.descriptor.rawValue
+            }
+    }
+
+    /// The minute-by-minute activity histogram for one node, ascending by minute.
+    /// Gaps (silent minutes within the window) are filled with zero buckets so the
+    /// sparkline reads as a true timeline rather than a compressed bar list.
+    static func activityRows(for counters: NodeCounters) -> [ActivityBucketRow] {
+        guard let last = counters.minuteBuckets.keys.max() else { return [] }
+        return (0 ... last).map { minute in
+            ActivityBucketRow(minute: minute, receptions: counters.minuteBuckets[minute] ?? 0)
+        }
+    }
+
     /// Busiest-channels extra: channel rows sorted by receptions descending.
     public static func channelRows(_ aggregator: TrafficAggregator) -> [ChannelTrafficRow] {
         let total = max(aggregator.totalReceptions, 1)

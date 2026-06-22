@@ -40,6 +40,15 @@ public struct NodeCounters: Sendable, Equatable {
     public var gateways: Set<UInt32> = []
     /// Per-port reception tally, so the offenders screen can name a dominant port.
     public var portReceptions: [Int: Int] = [:]
+    /// Per-port DISTINCT logical packets, so the detail panel can show what a node
+    /// actually originates per port (not just flood copies).
+    public var portEmitted: [Int: Int] = [:]
+    /// Smallest and largest hop count seen for this node's traffic — its hop range.
+    public var minHops: Int?
+    public var maxHops: Int = 0
+    /// Reception count per whole-minute bucket since `firstSeen`, the activity-over-
+    /// time histogram driving the detail panel's sparkline. Key 0 is the first minute.
+    public var minuteBuckets: [Int: Int] = [:]
     /// First and last reception instants — the chattiness-over-time window.
     public var firstSeen: Instant?
     public var lastSeen: Instant?
@@ -74,7 +83,7 @@ public struct TrafficAggregator: Sendable, Equatable {
 
         foldTotals(packet, isNew: isNewIdentity, hops: hops)
         foldPort(raw, packet: packet, location: location, hops: hops, isNew: isNewIdentity)
-        foldNode(packet, raw: raw, location: location, isNew: isNewIdentity)
+        foldNode(packet, raw: raw, location: location, hops: hops, isNew: isNewIdentity)
     }
 
     private mutating func foldTotals(_ packet: DecodedPacket, isNew: Bool, hops: Int) {
@@ -104,16 +113,34 @@ public struct TrafficAggregator: Sendable, Equatable {
         _ packet: DecodedPacket,
         raw: Int,
         location: UInt32?,
+        hops: Int,
         isNew: Bool
     ) {
         var counters = nodes[packet.from] ?? NodeCounters()
         counters.receptions += 1
-        if isNew { counters.emitted += 1 }
+        if isNew {
+            counters.emitted += 1
+            counters.portEmitted[raw, default: 0] += 1
+        }
         if let location { counters.gateways.insert(location) }
         counters.portReceptions[raw, default: 0] += 1
-        if counters.firstSeen == nil { counters.firstSeen = packet.rxTime }
+        counters.minHops = counters.minHops.map { min($0, hops) } ?? hops
+        counters.maxHops = max(counters.maxHops, hops)
+        let start = counters.firstSeen ?? packet.rxTime
+        if counters.firstSeen == nil { counters.firstSeen = start }
+        let bucket = max(0, Int(packet.rxTime.secondsSince(start) / 60))
+        counters.minuteBuckets[bucket, default: 0] += 1
         counters.lastSeen = packet.rxTime
         nodes[packet.from] = counters
+    }
+
+    // MARK: Detail
+
+    /// The full why/how/when picture for one node (per-port breakdown, gateways, hop
+    /// range, first/last seen, activity histogram), or `nil` if the node is unknown.
+    /// A pure, `Sendable` snapshot — delegates to `TrafficProjection` for the shaping.
+    public func detail(forNode nodeNum: UInt32) -> OffenderDetail? {
+        TrafficProjection.offenderDetail(self, forNode: nodeNum)
     }
 
     // MARK: Derivations

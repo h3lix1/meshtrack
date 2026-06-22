@@ -1,15 +1,19 @@
-// OffendersView — the Largest-offenders screen (item 12). Ranks nodes by mesh-
-// traffic burden with enough detail to act: node id, packets emitted, flood
+// OffendersView — the Largest-offenders screen (items 12 / 3+4). Ranks nodes by
+// mesh-traffic burden with enough detail to act: node id, packets emitted, flood
 // receptions, spread across gateways, packets-per-minute (chattiness), and the
-// node's dominant port. Bespoke dark-theme view (no stock List/ScrollView) so it
-// snapshots deterministically. The view model hydrates an all-time ranking from the
-// durable `node_traffic_stat` table on appear.
+// node's dominant port. Tapping a row opens a per-node why/how/when detail panel
+// (`OffenderDetailView`). Bespoke dark-theme views (no stock List/ScrollView/Toggle)
+// so they snapshot deterministically; the ranking lives inside a `ScrollView` around
+// a bespoke `rankingContent` subview (intrinsic height) so a long list is reachable
+// yet headless `ImageRenderer` snapshots render the full stack. The view model
+// hydrates an all-time ranking from the durable `node_traffic_stat` table on appear.
 
 import Domain
 import SwiftUI
 
 /// The section wrapper the composition root registers: owns the live view model,
-/// loads the persisted all-time ranking on appear, and renders the screen.
+/// loads the persisted all-time ranking on appear, and renders either the ranking or
+/// (when a row is selected) the per-node detail panel.
 public struct OffendersSection: View {
     @State private var viewModel: OffendersViewModel
 
@@ -18,22 +22,59 @@ public struct OffendersSection: View {
     }
 
     public var body: some View {
-        OffendersView(rows: viewModel.rows, totalReceptions: viewModel.totalReceptions)
-            .task { await viewModel.loadPersisted() }
+        Group {
+            if let detail = viewModel.selectedDetail {
+                OffenderDetailView(detail: detail, rank: rank(of: detail.nodeNum)) {
+                    viewModel.clearSelection()
+                }
+            } else {
+                OffendersView(
+                    rows: viewModel.rows,
+                    totalReceptions: viewModel.totalReceptions,
+                    onSelect: { viewModel.select(nodeNum: $0) }
+                )
+            }
+        }
+        .task { await viewModel.loadPersisted() }
+    }
+
+    /// 1-based rank of a node within the current ranking, for the detail header.
+    private func rank(of nodeNum: UInt32) -> Int? {
+        viewModel.rows.firstIndex { $0.nodeNum == nodeNum }.map { $0 + 1 }
     }
 }
 
-/// The pure presentation view: hand it ranked rows, it draws.
+/// The pure presentation view: hand it ranked rows, it draws. The ranking scrolls;
+/// `onSelect` (when set) makes each row a tap target opening the detail panel.
 public struct OffendersView: View {
     public let rows: [OffenderRow]
     public let totalReceptions: Int
+    private let onSelect: ((UInt32) -> Void)?
 
-    public init(rows: [OffenderRow], totalReceptions: Int) {
+    public init(rows: [OffenderRow], totalReceptions: Int, onSelect: ((UInt32) -> Void)? = nil) {
         self.rows = rows
         self.totalReceptions = totalReceptions
+        self.onSelect = onSelect
     }
 
     public var body: some View {
+        // The ranking can be long, so it lives inside a vertical `ScrollView`. The
+        // scrollable rows are factored into `rankingContent` (a bespoke subview that
+        // lays out at intrinsic height, no trailing unbounded `Spacer`) so headless
+        // `ImageRenderer` snapshots — which have no scroll viewport — render the full
+        // list instead of a collapsed strip. Mirrors `CollisionMatrixView.pageContent`.
+        ScrollView(.vertical) {
+            rankingContent
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(OffenderTheme.background)
+        .foregroundStyle(.white)
+    }
+
+    /// The scrollable card stack: header, column headings, and the ranked rows.
+    var rankingContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             columnHeadings
@@ -41,15 +82,15 @@ public struct OffendersView: View {
                 emptyState
             } else {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    OffenderRowView(rank: index + 1, row: row, peak: rows.first?.receptions ?? 1)
+                    OffenderRowView(
+                        rank: index + 1,
+                        row: row,
+                        peak: rows.first?.receptions ?? 1,
+                        onSelect: onSelect
+                    )
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(red: 0.03, green: 0.04, blue: 0.10))
-        .foregroundStyle(.white)
     }
 
     private var header: some View {
@@ -63,6 +104,10 @@ public struct OffendersView: View {
                 metric("RANKED NODES", "\(rows.count)")
             }
             .padding(.top, 4)
+            if onSelect != nil, !rows.isEmpty {
+                Text("Tap a node to inspect why / how / when it offends.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).padding(.top, 2)
+            }
         }
     }
 
@@ -94,11 +139,12 @@ public struct OffendersView: View {
     }
 }
 
-/// One ranked offender row.
+/// One ranked offender row. A tap target when `onSelect` is wired (opens detail).
 struct OffenderRowView: View {
     let rank: Int
     let row: OffenderRow
     let peak: Int
+    var onSelect: ((UInt32) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -118,14 +164,20 @@ struct OffenderRowView: View {
                 Text(row.dominantPort?.name ?? "—")
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                     .lineLimit(1).frame(width: 150, alignment: .leading).padding(.leading, 10)
+                if onSelect != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 0)
             }
             burdenBar
         }
         .padding(.vertical, 7)
+        .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             Rectangle().fill(.white.opacity(0.05)).frame(height: 1)
         }
+        .onTapGesture { onSelect?(row.nodeNum) }
     }
 
     private var perMinuteLabel: String {
@@ -145,7 +197,18 @@ struct OffenderRowView: View {
 
     /// Top offenders glow red→amber; the long tail cools to blue.
     private var rankColor: Color {
-        switch rank {
+        OffenderTheme.rankColor(rank)
+    }
+}
+
+/// Shared palette for the offenders screen + detail panel, so both read identically.
+enum OffenderTheme {
+    static let background = Color(red: 0.03, green: 0.04, blue: 0.10)
+    static let card = Color(red: 0.08, green: 0.10, blue: 0.18)
+
+    /// Top offenders glow red→amber; the long tail cools to blue. `nil`/0 ranks cool.
+    static func rankColor(_ rank: Int?) -> Color {
+        switch rank ?? 0 {
         case 1: Color(red: 0.95, green: 0.42, blue: 0.38)
         case 2, 3: Color(red: 0.97, green: 0.7, blue: 0.34)
         default: Color(red: 0.45, green: 0.72, blue: 0.95)
