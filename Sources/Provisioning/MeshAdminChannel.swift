@@ -25,12 +25,14 @@ public struct MeshAdminChannel: AdminChannel {
     private let target: AdminTarget
     /// The config-types `currentConfig()` reads when nothing narrower is known.
     /// Region is always read (legal — it must be confirmed present, SPEC §2.9).
+    /// Position precision is NOT a config-type — it is read from the primary
+    /// channel (see `currentConfig`'s `channel: true`).
     private let baselineConfigTypes: Set<AdminMessage.ConfigType>
 
     public init(
         transport: any AdminTransport,
         target: AdminTarget,
-        baselineConfigTypes: Set<AdminMessage.ConfigType> = [.loraConfig, .deviceConfig, .positionConfig]
+        baselineConfigTypes: Set<AdminMessage.ConfigType> = [.loraConfig, .deviceConfig]
     ) {
         self.transport = transport
         self.target = target
@@ -38,11 +40,13 @@ public struct MeshAdminChannel: AdminChannel {
     }
 
     /// Read the node's current provisionable config into the string snapshot the
-    /// diff compares against. Requests the baseline config-types plus the owner.
+    /// diff compares against. Requests the baseline config-types, the owner, and
+    /// the primary channel (which carries position precision).
     public func currentConfig() async throws -> [String: String] {
         let readback = try await transport.readback(
             configTypes: baselineConfigTypes,
             owner: true,
+            channel: true,
             from: target
         )
         return Self.snapshot(from: readback)
@@ -60,7 +64,7 @@ public struct MeshAdminChannel: AdminChannel {
     }
 
     /// Flatten a multi-config read-back into the diff snapshot, merging each
-    /// config-type's contribution plus the owner.
+    /// config-type's contribution plus the owner and the primary channel.
     static func snapshot(from readback: AdminReadback) -> [String: String] {
         var snapshot: [String: String] = [:]
         for config in readback.configs {
@@ -68,7 +72,9 @@ public struct MeshAdminChannel: AdminChannel {
                 snapshot[key] = value
             }
         }
-        for (key, value) in AdminMessageMapping.snapshot(config: nil, owner: readback.owner) {
+        for (key, value) in AdminMessageMapping.snapshot(
+            config: nil, owner: readback.owner, channel: readback.channel
+        ) {
             snapshot[key] = value
         }
         return snapshot
