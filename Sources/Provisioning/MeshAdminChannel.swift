@@ -48,12 +48,12 @@ public struct MeshAdminChannel: AdminChannel {
         return Self.snapshot(from: readback)
     }
 
-    /// Apply confirmed changes: validate, build the begin→set…→commit admin
-    /// messages, and send them over the transport. (Read-back verification is the
+    /// Apply confirmed changes: build the begin→set…→commit admin messages and
+    /// send them over the transport. (Validation runs upstream in `AdminApplier`,
+    /// shared across every adapter; read-back verification is also the
     /// `AdminApplier`'s job, which re-reads via `currentConfig()`.)
     public func apply(_ changes: [ConfigChange]) async throws {
         guard !changes.isEmpty else { return }
-        try AdminMessageMapping.validate(changes)
         let messages = try AdminMessageMapping.messages(for: changes)
         guard !messages.isEmpty else { return }
         try await transport.send(messages, to: target)

@@ -127,4 +127,27 @@ struct FleetConfigViewModelTests {
         // Re-planning is now an idempotent no-op — proof the node took the change.
         #expect(try await applier.plan(template: template, context: context).isNoOp)
     }
+
+    @Test
+    func `store-backed channel rejects an invalid region before persisting`() async throws {
+        // Validation lives in the shared AdminApplier orchestration, so the GUI-wired
+        // store-backed adapter inherits it: a typo'd region is rejected up front rather
+        // than written to the record and then "verified" as success.
+        let store = try makeStore()
+        try await seed(store, node: 1, role: "CLIENT", short: "old")
+
+        let channel = StoreBackedAdminChannel(store: store, nodeNum: 1)
+        let applier = AdminApplier(channel: channel)
+        let template = NodeTemplate(name: "t", region: "US", role: "ROUTER", shortNameDSL: "new")
+        let context = NamingContext(id: "!00000001", shortName: "old", role: "CLIENT")
+
+        // A plan carrying a bogus region (e.g. a template typo) must not reach the store.
+        let plan = ApplyPlan(changes: [ConfigChange(field: "region", from: nil, to: "UX")])
+        await #expect(throws: AdminMappingError.unknownRegion("UX")) {
+            try await applier.apply(plan, template: template, context: context)
+        }
+
+        // Nothing was persisted — the node config snapshot was never written.
+        #expect(try await store.fetchNodeConfig(nodeNum: 1) == nil)
+    }
 }
