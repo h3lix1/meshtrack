@@ -251,7 +251,7 @@ public final class FleetConfigViewModel {
     }
 
     private func buildRollout() -> FleetRolloutViewModel {
-        let chosen = candidates.filter { selected.contains($0.nodeNum) }
+        let chosen = Self.dedupByNodeNum(candidates.filter { selected.contains($0.nodeNum) })
         let members = chosen.map { candidate in
             FleetMember(
                 nodeNum: candidate.nodeNum,
@@ -272,6 +272,15 @@ public final class FleetConfigViewModel {
             names: names,
             haltOnFailure: haltOnFailure
         )
+    }
+
+    /// Keep the first candidate per `nodeNum`. A node can appear twice in
+    /// `candidates` (e.g. discovered AND also a stored row); without this, keying
+    /// the rollout's `names` Dictionary by `nodeNum` would trap on the duplicate,
+    /// and two rollout rows would be built for one node.
+    nonisolated static func dedupByNodeNum(_ candidates: [MemberCandidate]) -> [MemberCandidate] {
+        var seen: Set<Int64> = []
+        return candidates.filter { seen.insert($0.nodeNum).inserted }
     }
 
     nonisolated static func hexID(_ nodeNum: Int64) -> String {
