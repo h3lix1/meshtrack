@@ -46,7 +46,9 @@ public enum ChannelPreset: String, CaseIterable, Sendable, Identifiable {
     /// The default 16-byte channel PSK (Meshtastic's expansion of the 1-byte key
     /// `0x01`). Every public preset uses this PSK, so its hash is name-dependent only.
     /// Single source of truth: `MeshtasticChannelHash.defaultPSK`.
-    static var defaultPSK: [UInt8] { MeshtasticChannelHash.defaultPSK }
+    static var defaultPSK: [UInt8] {
+        MeshtasticChannelHash.defaultPSK
+    }
 
     /// The channel hash a device transmits for this preset (the byte in
     /// `MeshPacket.channel`): XOR-fold of the name bytes XOR the PSK fold.

@@ -201,6 +201,7 @@ struct IngestPhase7Tests {
     }
 
     // MARK: Reconnect-then-redeliver idempotency (Finding 2)
+
     //
     // A reconnect/config change starts a FRESH `run()` with a brand-new
     // in-memory `DedupWindow`, and observation dedup is gateway-scoped. So the
@@ -250,10 +251,24 @@ struct IngestPhase7Tests {
     ) async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())
         _ = try await pipeline(store).run(StubTransport(queued: [
-            positionFrame(from: 7, packetID: 99, gateway: "!gw1", latI: 377_749_000, lonI: -1_224_194_000, at: at(0))
+            positionFrame(
+                from: 7,
+                packetID: 99,
+                gateway: "!gw1",
+                latI: 377_749_000,
+                lonI: -1_224_194_000,
+                at: at(0)
+            )
         ]))
         _ = try await pipeline(store).run(StubTransport(queued: [
-            positionFrame(from: 7, packetID: 99, gateway: "!gw2", latI: 377_749_000, lonI: -1_224_194_000, at: at(0))
+            positionFrame(
+                from: 7,
+                packetID: 99,
+                gateway: "!gw2",
+                latI: 377_749_000,
+                lonI: -1_224_194_000,
+                at: at(0)
+            )
         ]))
         #expect(try await store.positionFixes(forNode: 7).count == 1)
     }

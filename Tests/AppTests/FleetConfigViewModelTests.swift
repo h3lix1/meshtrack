@@ -168,10 +168,10 @@ struct FleetConfigViewModelTests {
     }
 
     @Test
-    func `duplicate nodeNum candidates de-dup to one sane rollout member (no trap)`() throws {
-        // A node present both as a discovered node and a stored row appears twice in
-        // candidates. De-dup keeps the first per nodeNum so keying the rollout's names
-        // by nodeNum never traps and only one row is built per node.
+    func `duplicate nodeNum candidates de-dup to one sane rollout member (no trap)`() {
+        /// A node present both as a discovered node and a stored row appears twice in
+        /// candidates. De-dup keeps the first per nodeNum so keying the rollout's names
+        /// by nodeNum never traps and only one row is built per node.
         func candidate(_ num: Int64, name: String) -> FleetConfigViewModel.MemberCandidate {
             FleetConfigViewModel.MemberCandidate(
                 nodeNum: num, name: name, hexid: FleetConfigViewModel.hexID(num),

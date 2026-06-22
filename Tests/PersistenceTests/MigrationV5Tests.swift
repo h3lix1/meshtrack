@@ -48,10 +48,10 @@ struct MigrationV5Tests {
 
         // The duplicate rows were collapsed to one per natural key …
         let counts = try await queue.read { db in
-            (
-                message: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM message") ?? -1,
-                telemetry: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM telemetry") ?? -1,
-                position: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM position_fix") ?? -1
+            try (
+                message: Int.fetchOne(db, sql: "SELECT COUNT(*) FROM message") ?? -1,
+                telemetry: Int.fetchOne(db, sql: "SELECT COUNT(*) FROM telemetry") ?? -1,
+                position: Int.fetchOne(db, sql: "SELECT COUNT(*) FROM position_fix") ?? -1
             )
         }
         #expect(counts.message == 1)

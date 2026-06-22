@@ -140,7 +140,7 @@ struct MigrationV3Tests {
         // Three messages on the same channel sharing one rx_time. With only an
         // rx_time order the transcript could flicker between loads; the id
         // tie-break makes it stable.
-        for index in 1...3 {
+        for index in 1 ... 3 {
             try await store.recordMessage(MessageRecord(
                 packet_id: Int64(index), from_num: Int64(index), to_num: 0xFFFF_FFFF,
                 channel: 8, channel_name: "MediumFast", body: "m\(index)", rx_time: 500

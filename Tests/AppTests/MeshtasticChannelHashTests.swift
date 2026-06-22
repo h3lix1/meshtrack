@@ -28,7 +28,7 @@ struct MeshtasticChannelHashTests {
         // Independent re-derivation of the algorithm pins the contract, including a
         // non-default PSK so the helper isn't only correct for the public channels.
         let name = "Secret"
-        let psk: [UInt8] = Array(0..<16)
+        let psk: [UInt8] = Array(0 ..< 16)
         let expected = UInt32(
             Array(name.utf8).reduce(UInt8(0)) { $0 ^ $1 }
                 ^ psk.reduce(UInt8(0)) { $0 ^ $1 }

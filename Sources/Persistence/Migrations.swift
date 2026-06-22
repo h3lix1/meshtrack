@@ -54,55 +54,6 @@ public enum MeshtrackMigrator {
         return migrator
     }
 
-    /// Collapse any pre-v5 duplicate extraction rows down to one per natural key
-    /// so the new unique indexes can be created without violating existing data.
-    /// Keeps the lowest `id` (earliest insert) per group; deletes the rest. A
-    /// fresh database has nothing to dedupe, so these run as cheap no-ops.
-    private static func dedupeExtractionTables(_ db: Database) throws {
-        // message: one row per (packet_id, from_num) — the same logical message.
-        try db.execute(sql: """
-        DELETE FROM \(Table.message) WHERE id NOT IN (
-            SELECT MIN(id) FROM \(Table.message) GROUP BY packet_id, from_num
-        )
-        """)
-        // telemetry: one row per (node_num, t, kind, key) — one sample.
-        try db.execute(sql: """
-        DELETE FROM \(Table.telemetry) WHERE id NOT IN (
-            SELECT MIN(id) FROM \(Table.telemetry) GROUP BY node_num, t, kind, key
-        )
-        """)
-        // position_fix: one row per (node_num, t) — one fix at an instant.
-        try db.execute(sql: """
-        DELETE FROM \(Table.positionFix) WHERE id NOT IN (
-            SELECT MIN(id) FROM \(Table.positionFix) GROUP BY node_num, t
-        )
-        """)
-    }
-
-    /// Unique indexes on the extraction tables' natural keys. With the store's
-    /// `INSERT OR IGNORE`, a re-delivered packet (e.g. via a different gateway
-    /// after a reconnect) is silently dropped instead of duplicating a row.
-    private static func addExtractionUniqueIndexes(_ db: Database) throws {
-        try db.create(
-            index: "idx_message_packet_from",
-            on: Table.message,
-            columns: ["packet_id", "from_num"],
-            options: [.unique]
-        )
-        try db.create(
-            index: "idx_telemetry_natural_key",
-            on: Table.telemetry,
-            columns: ["node_num", "t", "kind", "key"],
-            options: [.unique]
-        )
-        try db.create(
-            index: "idx_position_fix_natural_key",
-            on: Table.positionFix,
-            columns: ["node_num", "t"],
-            options: [.unique]
-        )
-    }
-
     /// `app_config` — key-value store for non-secret app configuration (Phase 8).
     /// `ConfigGateway` JSON-encodes `BrokerConfig`/`AppSettings` into rows under
     /// stable keys (`"broker"`, `"app_settings"`). Never holds secrets — the DB
@@ -318,5 +269,58 @@ public enum MeshtrackMigrator {
             t.column("config_json", .text)
             t.column("firmware_variant", .text)
         }
+    }
+}
+
+// MARK: - v5 idempotent-extraction helpers (Phase 8, Finding 2)
+
+extension MeshtrackMigrator {
+    /// Collapse any pre-v5 duplicate extraction rows down to one per natural key
+    /// so the new unique indexes can be created without violating existing data.
+    /// Keeps the lowest `id` (earliest insert) per group; deletes the rest. A
+    /// fresh database has nothing to dedupe, so these run as cheap no-ops.
+    static func dedupeExtractionTables(_ db: Database) throws {
+        // message: one row per (packet_id, from_num) — the same logical message.
+        try db.execute(sql: """
+        DELETE FROM \(Table.message) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.message) GROUP BY packet_id, from_num
+        )
+        """)
+        // telemetry: one row per (node_num, t, kind, key) — one sample.
+        try db.execute(sql: """
+        DELETE FROM \(Table.telemetry) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.telemetry) GROUP BY node_num, t, kind, key
+        )
+        """)
+        // position_fix: one row per (node_num, t) — one fix at an instant.
+        try db.execute(sql: """
+        DELETE FROM \(Table.positionFix) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.positionFix) GROUP BY node_num, t
+        )
+        """)
+    }
+
+    /// Unique indexes on the extraction tables' natural keys. With the store's
+    /// `INSERT OR IGNORE`, a re-delivered packet (e.g. via a different gateway
+    /// after a reconnect) is silently dropped instead of duplicating a row.
+    static func addExtractionUniqueIndexes(_ db: Database) throws {
+        try db.create(
+            index: "idx_message_packet_from",
+            on: Table.message,
+            columns: ["packet_id", "from_num"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_telemetry_natural_key",
+            on: Table.telemetry,
+            columns: ["node_num", "t", "kind", "key"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_position_fix_natural_key",
+            on: Table.positionFix,
+            columns: ["node_num", "t"],
+            options: [.unique]
+        )
     }
 }

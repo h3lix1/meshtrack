@@ -219,14 +219,15 @@ public struct IngestPipeline: Sendable {
         let roleName = Self.roleName(user.role)
         try await store.updateNode(
             nodeNum: node,
-            orInsert: { NodeRecord(node_num: node, first_seen_at: t, last_heard_at: t) }
-        ) { record in
-            if !shortName.isEmpty { record.short_name = shortName }
-            if !longName.isEmpty { record.long_name = longName }
-            if !id.isEmpty { record.hexid = id }
-            if let hwModelName { record.hw_model = hwModelName }
-            record.role = roleName
-        }
+            orInsert: { NodeRecord(node_num: node, first_seen_at: t, last_heard_at: t) },
+            merge: { record in
+                if !shortName.isEmpty { record.short_name = shortName }
+                if !longName.isEmpty { record.long_name = longName }
+                if !id.isEmpty { record.hexid = id }
+                if let hwModelName { record.hw_model = hwModelName }
+                record.role = roleName
+            }
+        )
         return true
     }
 

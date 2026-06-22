@@ -30,7 +30,8 @@ public enum AlertDefaultSnoozeStore {
     /// (or the stored value is unparseable).
     public static func load(from store: MeshStore) async throws -> Double {
         guard let raw = try await store.appConfigValue(forKey: configKey),
-              let seconds = Double(raw) else {
+              let seconds = Double(raw)
+        else {
             return fallbackSeconds
         }
         return seconds
