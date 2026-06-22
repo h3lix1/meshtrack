@@ -26,8 +26,10 @@ public struct TelemetryChartsView: View {
                 if viewModel.hasData {
                     section("Device", series: viewModel.deviceSeries)
                     section("Environment", series: viewModel.environmentSeries)
-                } else {
+                } else if viewModel.loaded {
                     emptyState
+                } else {
+                    loadingState
                 }
             }
             .padding(24)
@@ -153,14 +155,22 @@ public struct TelemetryChartsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Text("No telemetry in range")
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 26)).foregroundStyle(.secondary)
+            Text("No telemetry for this node yet")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.8))
-            Text("Widen the range or wait for the node to report.")
+            Text("Pick another node, widen the range, or wait for it to report.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+    }
+
+    private var loadingState: some View {
+        Text("Loading telemetry…")
+            .font(.system(size: 13)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 240)
     }
 }
 
