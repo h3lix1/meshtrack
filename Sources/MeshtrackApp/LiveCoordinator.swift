@@ -86,6 +86,14 @@ final class LiveCoordinator {
     /// channel entered in settings actually decrypt in the live app (Finding 8).
     private let keyStore: any KeyStore
 
+    /// The sync-readable gate the resolver consults for the default-PSK fallback, and
+    /// the channel manager that refreshes it from the registry + tombstone. `nil` when
+    /// a custom `keyStore` was injected (tests own their own gating). When present, a
+    /// removed default channel stops default-key decoding this session and on relaunch
+    /// (Finding 16).
+    private let defaultGate: DefaultChannelGate?
+    private let channelManager: KeychainChannelManager?
+
     /// Build a coordinator over a fresh in-memory store. The broker connection is
     /// resolved later via `applyBrokerConfig(_:)` / `start(settings:)`, so the
     /// coordinator exists before any broker is configured (first-run/onboarding).
@@ -103,8 +111,25 @@ final class LiveCoordinator {
     ) {
         self.refreshInterval = refreshInterval
         self.store = store
-        self.keyStore = keyStore
-            ?? ChannelKeyResolver(primary: KeychainKeyStore(), defaultKey: Self.defaultKey)
+        if let keyStore {
+            // A test injected its own resolver; it owns its default-key gating.
+            self.keyStore = keyStore
+            defaultGate = nil
+            channelManager = nil
+        } else {
+            // Production: gate the default-PSK fallback on the registry + tombstone so
+            // removing the default channel stops default-key decoding (Finding 16). The
+            // channel manager shares the same gate so an in-session removal takes effect
+            // immediately; the slow refresh loop + startup re-derive it from the store.
+            let gate = DefaultChannelGate()
+            defaultGate = gate
+            channelManager = KeychainChannelManager(store: store, defaultGate: gate)
+            self.keyStore = ChannelKeyResolver(
+                primary: KeychainKeyStore(),
+                defaultKey: Self.defaultKey,
+                defaultEnabled: { gate.isEnabled() }
+            )
+        }
         viewModel = NetworkViewModel(store: store)
     }
 
@@ -214,10 +239,13 @@ final class LiveCoordinator {
             }
         })
 
-        // Slow refresh: surface nodes as soon as they report a position.
-        tasks.append(Task { [refreshInterval] in
+        // Slow refresh: surface nodes as soon as they report a position, and re-derive
+        // the default-PSK gate from the registry + tombstone so a default-channel
+        // removal stops default-key decoding within a refresh cycle (Finding 16).
+        tasks.append(Task { [refreshInterval, channelManager] in
             while !Task.isCancelled {
                 try? await model.loadNodes()
+                await channelManager?.refreshDefaultGate()
                 try? await Task.sleep(for: refreshInterval)
             }
         })
