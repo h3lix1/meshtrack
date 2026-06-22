@@ -99,7 +99,15 @@ public final class TimelineViewModel {
 
     public func play() {
         isPlaying = true
-        if mode == .live { mode = .review } // hitting play from live drops into review
+        if mode == .live {
+            // Hitting play from live drops into review. The playhead is pinned at
+            // window.end, though, so the first tick(delta>0) would see it already at
+            // the end and snap straight back to live (a no-op bounce). Rewind to the
+            // window start so review playback actually runs forward from the edge.
+            mode = .review
+            playhead = window.start
+            refresh()
+        }
     }
 
     public func pause() {
