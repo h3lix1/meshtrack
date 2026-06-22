@@ -19,11 +19,16 @@ public extension AppModel {
     /// (`MeshAdminChannel` → `LiveAdminTransport`) instead of the same-DB
     /// `StoreBackedAdminChannel` echo. `nil` keeps the store-backed default (sample /
     /// snapshot / first-run, where there is no radio).
+    ///
+    /// `packetInspector` is the live, coordinator-fed packet inspector (Finding 17).
+    /// When provided, the `.packets` section renders real decoded traffic (instead of
+    /// `PacketInspectorSample`) and its `latencyMillis` feeds the map's latency overlay.
     @MainActor
     func registerLiveSections(
         store: MeshStore,
         clock: any Domain.Clock,
-        adminLink: (any AdminLink)? = nil
+        adminLink: (any AdminLink)? = nil,
+        packetInspector: PacketInspectorViewModel? = nil
     ) {
         let viz = VizSettings()
         // The production OTA channel factory over the live admin link (Finding 8). The
@@ -41,6 +46,9 @@ public extension AppModel {
                     nodes: nodes,
                     traces: traces,
                     settings: viz,
+                    // Live receive→publish latency per packet from the inspector feeds
+                    // the map's latency overlay (Finding 17).
+                    latencyMillis: packetInspector?.latencyMillis ?? [:],
                     availablePresets: presets,
                     store: store
                 ))
@@ -58,7 +66,11 @@ public extension AppModel {
             ))
         }
         register(.packets) {
-            AnyView(PacketInspectorSection(viewModel: PacketInspectorSample.viewModel()))
+            // Live decoded traffic when wired; sample data only when there's no
+            // coordinator (snapshot / first-run) (Finding 17).
+            AnyView(PacketInspectorSection(
+                viewModel: packetInspector ?? PacketInspectorSample.viewModel()
+            ))
         }
         register(.telemetry) {
             AnyView(PerNodeSectionView(store: store, title: "Telemetry") { nodeNum in

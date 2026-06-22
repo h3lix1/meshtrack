@@ -55,6 +55,10 @@ enum LiveConnectionStatus: Equatable {
 final class LiveCoordinator {
     /// The live network view model the shell renders (nodes + animated traces).
     let viewModel: NetworkViewModel
+    /// The live packet inspector, fed from the same decoded-packet tap as the network
+    /// view model (Finding 17). Backs the `.packets` section with real traffic instead
+    /// of sample data, and its `latencyMillis` feeds the map's latency overlay.
+    let packetInspector: PacketInspectorViewModel
     /// The connection state for the status indicator (endpoint only, never secrets).
     private(set) var status: LiveConnectionStatus = .offline
 
@@ -131,6 +135,7 @@ final class LiveCoordinator {
             )
         }
         viewModel = NetworkViewModel(store: store)
+        packetInspector = PacketInspectorViewModel(clock: SystemWallClock())
     }
 
     /// Resolve the active data source from the persisted selection (`DataSourceStore`)
@@ -222,6 +227,7 @@ final class LiveCoordinator {
         )
         let pipeline = IngestPipeline(store: store, decoder: decoder)
         let model = viewModel
+        let inspector = packetInspector
         // A @MainActor tap that promotes the status to `.connected`; capturing this
         // closure (rather than `self`) keeps the Sendable ingest closure clean.
         let onFirstPacket: @MainActor @Sendable () -> Void = { [weak self] in
@@ -229,12 +235,13 @@ final class LiveCoordinator {
         }
 
         // Ingest: decode + decrypt + persist, tapping each decoded packet into the
-        // live trace animation. `ingest` hops to the main actor (the VM is
-        // @MainActor); the tap is awaited per packet, so it stays in order. The
-        // first decoded packet flips the status to `.connected` (we have a stream).
+        // live trace animation AND the packet inspector (Finding 17). `ingest` hops to
+        // the main actor (the VMs are @MainActor); the tap is awaited per packet, so it
+        // stays in order. The first decoded packet flips the status to `.connected`.
         tasks.append(Task {
             _ = try? await pipeline.run(adapter) { packet in
                 await model.ingest(packet)
+                await inspector.ingest(packet)
                 await onFirstPacket()
             }
         })

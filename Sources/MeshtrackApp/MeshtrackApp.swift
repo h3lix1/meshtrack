@@ -361,21 +361,31 @@ struct ContentView: View {
 struct LiveRootView: View {
     let coordinator: LiveCoordinator
     @State private var model: AppModel
+    /// The ⌘K command palette over the live fleet (Finding 17). Store-backed so the
+    /// corpus reflects real nodes/packets/channels; selecting a result routes to the
+    /// matching section via `model.onNavigate`.
+    @State private var search: SearchViewModel
+    /// The live time-travel transport (Finding 17): loads the last 24h of real
+    /// observations, and its `controlState` drives the VCR overlay.
+    @State private var timeline: TimelineViewModel
 
     init(coordinator: LiveCoordinator) {
         self.coordinator = coordinator
         let model = AppModel(nodes: [], traces: [], live: true)
         // Wire every section to its live, store-backed view (the headline MapKit map,
-        // node directory, telemetry, analytics, alerts, messages, health) — and the
+        // node directory, telemetry, analytics, alerts, messages, health) — the
         // production OTA admin link so Fleet/Provision apply through the real
-        // MeshAdminChannel rather than a same-DB echo (Finding 8). `LiveAdminLink` is
-        // the single HIL seam (throws until an outbound radio link exists).
+        // MeshAdminChannel rather than a same-DB echo (Finding 8; `LiveAdminLink` is
+        // the single HIL seam) — and the live packet inspector (Finding 17).
         model.registerLiveSections(
             store: coordinator.store,
             clock: SystemWallClock(),
-            adminLink: LiveAdminLink()
+            adminLink: LiveAdminLink(),
+            packetInspector: coordinator.packetInspector
         )
         _model = State(initialValue: model)
+        _search = State(initialValue: SearchViewModel(store: coordinator.store))
+        _timeline = State(initialValue: TimelineViewModel(store: coordinator.store, clock: SystemWallClock()))
     }
 
     var body: some View {
@@ -387,7 +397,21 @@ struct LiveRootView: View {
             }
             ConnectionStatusBadge(status: coordinator.status)
                 .padding(16)
+            // The time-travel transport bar, anchored bottom-centre over the shell.
+            VCRControlView(
+                state: timeline.controlState,
+                actions: VCRControlActions(
+                    togglePlay: { timeline.togglePlay() },
+                    scrub: { timeline.scrub(toFraction: $0) },
+                    setSpeed: { timeline.setSpeed($0) },
+                    goLive: { timeline.goLive() }
+                )
+            )
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        // The ⌘K palette layers over every section; selecting routes via onNavigate.
+        .commandPalette(search)
         // Mirror the live view model into the AppModel registry. Reading the
         // @Observable nodes/traces here re-runs this body as packets arrive, and
         // re-seeding the model rebuilds its section providers over the new data.
@@ -396,6 +420,27 @@ struct LiveRootView: View {
         }
         .onChange(of: coordinator.viewModel.traces) { _, traces in
             model.traces = traces
+        }
+        // Refresh the palette corpus from the store each time it opens.
+        .onChange(of: search.isPresented) { _, presented in
+            if presented { Task { try? await search.reloadCorpus() } }
+        }
+        // Route a selected search result to its section, then clear the target.
+        .onChange(of: search.selectedTarget) { _, target in
+            guard let target else { return }
+            model.onNavigate?(Self.section(for: target))
+            search.consumeTarget()
+        }
+        // Load the timeline's 24h observation window once the shell appears.
+        .task { try? await timeline.load() }
+    }
+
+    /// Map a command-palette target to the section that surfaces it (Finding 17).
+    private static func section(for target: SearchTarget) -> AppSection {
+        switch target {
+        case .node: .nodes
+        case .packet: .packets
+        case .channel: .messages
         }
     }
 }
