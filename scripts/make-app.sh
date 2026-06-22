@@ -49,7 +49,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
 	<key>CFBundleVersion</key><string>$BUILD_VERSION</string>
-	<key>LSMinimumSystemVersion</key><string>26.0</string>
+	<key>LSMinimumSystemVersion</key><string>26.6</string>
 	<key>NSHighResolutionCapable</key><true/>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
