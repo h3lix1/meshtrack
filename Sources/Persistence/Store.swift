@@ -189,23 +189,26 @@ public struct MeshStore: Sendable {
         }
     }
 
-    /// Messages on a channel, oldest-first (the Channels view feed).
+    /// Messages on a channel, oldest-first (the Channels view feed). The `id`
+    /// tie-break makes ordering deterministic when several messages share an
+    /// `rx_time`, so the transcript does not flicker between loads (Finding 13).
     public func messages(channel: Int64, limit: Int = 200) async throws -> [MessageRecord] {
         try await writer.read { db in
             try MessageRecord
                 .filter(Column("channel") == channel)
-                .order(Column("rx_time").desc)
+                .order(Column("rx_time").desc, Column("id").desc)
                 .limit(limit)
                 .fetchAll(db)
                 .reversed()
         }
     }
 
-    /// The most-recent messages across all channels, newest-first.
+    /// The most-recent messages across all channels, newest-first. The `id`
+    /// tie-break keeps ordering stable for equal `rx_time` (Finding 13).
     public func recentMessages(limit: Int = 200) async throws -> [MessageRecord] {
         try await writer.read { db in
             try MessageRecord
-                .order(Column("rx_time").desc)
+                .order(Column("rx_time").desc, Column("id").desc)
                 .limit(limit)
                 .fetchAll(db)
         }
