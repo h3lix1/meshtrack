@@ -206,17 +206,27 @@ public struct IngestPipeline: Sendable {
         guard let user = try? User(serializedBytes: Data(packet.payload)) else { return false }
         // `markHeard` ran first, so the row exists; fall back to a fresh record if not.
         let t = packet.rxTime.nanosecondsSinceEpoch
-        var record = try await store.fetchNode(nodeNum: node)
-            ?? NodeRecord(node_num: node, first_seen_at: t, last_heard_at: t)
-
-        if !user.shortName.isEmpty { record.short_name = user.shortName }
-        if !user.longName.isEmpty { record.long_name = user.longName }
-        if !user.id.isEmpty { record.hexid = user.id }
-        if user.hwModel != .unset { record.hw_model = Self.hardwareModelName(user.hwModel) }
+        // Fetch-merge-upsert in a SINGLE transaction so a concurrent ownership /
+        // admin write landing between the read and the save is not clobbered by a
+        // stale full-row snapshot (Finding 9). The merge touches only the identity
+        // columns NODEINFO advertises — ownership flags, class, and liveness are
+        // left to whatever the freshly-read row holds.
+        let shortName = user.shortName
+        let longName = user.longName
+        let id = user.id
+        let hwModelName = user.hwModel != .unset ? Self.hardwareModelName(user.hwModel) : nil
         // Role always carries a value in NODEINFO (CLIENT is the firmware default).
-        record.role = Self.roleName(user.role)
-
-        try await store.upsertNode(record)
+        let roleName = Self.roleName(user.role)
+        try await store.updateNode(
+            nodeNum: node,
+            orInsert: { NodeRecord(node_num: node, first_seen_at: t, last_heard_at: t) }
+        ) { record in
+            if !shortName.isEmpty { record.short_name = shortName }
+            if !longName.isEmpty { record.long_name = longName }
+            if !id.isEmpty { record.hexid = id }
+            if let hwModelName { record.hw_model = hwModelName }
+            record.role = roleName
+        }
         return true
     }
 
