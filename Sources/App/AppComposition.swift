@@ -62,7 +62,14 @@ public extension AppModel {
             AnyView(NodeDirectoryView(
                 viewModel: NodeDirectoryViewModel(store: store),
                 onApply: { _ in self.onNavigate?(.fleet) },
-                onOpenAnalytics: { _ in self.onNavigate?(.analytics) }
+                onOpenAnalytics: { _ in self.onNavigate?(.analytics) },
+                // Favorite ☆ / Ignore actions send an imperative admin command over the
+                // real OTA link (Phase 10). No radio (sample / snapshot / first-run) →
+                // no factory → the command is a no-op, matching every other live action.
+                onCommand: { command in
+                    guard let otaFactory else { return }
+                    Task { try? await otaFactory.send(command) }
+                }
             ))
         }
         register(.packets) {

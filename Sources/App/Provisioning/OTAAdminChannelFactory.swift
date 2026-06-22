@@ -58,6 +58,18 @@ public struct OTAAdminChannelFactory: Sendable {
         MeshAdminChannel(transport: LiveAdminTransport(link: link), target: target)
     }
 
+    /// Send an imperative node command (favorite / unfavorite / ignore / unignore)
+    /// to its target node over OTA admin (Phase 10). Unlike a config apply this is a
+    /// single bare message with no begin/commit transaction and no read-back — so it
+    /// is a `MeshAdminChannel` operation, NOT part of the `AdminChannel` config-apply
+    /// protocol; we build the concrete channel here. Authority is the fleet-wide
+    /// default (these commands carry no per-node authority picker).
+    public func send(_ command: NodeAdminCommand) async throws {
+        let target = AdminTarget(nodeNum: Int64(command.nodeNum), authority: fleetAuthority)
+        try await MeshAdminChannel(transport: LiveAdminTransport(link: link), target: target)
+            .send(command)
+    }
+
     /// The resolver `FleetConfigViewModel` / `FleetRolloutViewModel` expect.
     /// Lead: pass this to `FleetConfigViewModel(store:channelFor:)` in `.fleet`.
     public func fleetChannelFor() -> @Sendable (Int64) -> any AdminChannel {
