@@ -8,6 +8,9 @@ import SwiftUI
 struct FilterBar: View {
     @Bindable var viewModel: PacketInspectorViewModel
 
+    /// The selectable window sizes shown in the bespoke segmented control (item 7).
+    private let windowOptions = PacketWindowPreference.options
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Filter…", text: $viewModel.filter.text)
@@ -20,6 +23,8 @@ struct FilterBar: View {
                 portChips
             }
 
+            windowSizeControl
+
             if viewModel.filter.isActive {
                 Button {
                     viewModel.filter = PacketFilter()
@@ -29,6 +34,28 @@ struct FilterBar: View {
                         .foregroundStyle(PacketInspectorTheme.accent)
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Bespoke segmented window-size picker (no stock Picker) — taps grow/shrink the
+    /// VM's live window cap, evicting on shrink while honouring the selection pin. The
+    /// active highlight reads the VM's `windowSize` (the source of truth), and each tap
+    /// pushes into the VM and persists to `UserDefaults`. We use no `@AppStorage` and
+    /// no view-lifecycle VM mutation — both crash the headless ImageRenderer render
+    /// pass; the one-time restore from persistence happens in the section's `onAppear`
+    /// (deferred off the render pass).
+    private var windowSizeControl: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("WINDOW")
+                .font(.system(size: 8, weight: .bold)).tracking(1).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(windowOptions, id: \.self) { size in
+                    chip(label: "\(size)", active: viewModel.windowSize == size) {
+                        viewModel.windowSize = size // live resize (tap action, render-safe)
+                        PacketWindowPreference.persist(size) // remember the choice
+                    }
+                }
             }
         }
     }

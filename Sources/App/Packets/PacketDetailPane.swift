@@ -25,6 +25,25 @@ struct PacketDetailPane: View {
     }
 
     var body: some View {
+        // The detail scrolls vertically (item 5): the per-reception table + hex dump
+        // grow as receptions accumulate, but the pane stays anchored at the TOP rather
+        // than auto-following the newest reception. `defaultScrollAnchor(.top)` pins the
+        // resting position to the top, and `.id(aggregate.packetID)` rebuilds the scroll
+        // on (re)selection so a freshly-picked packet's detail starts at the top.
+        // `cardStack` is a bespoke, intrinsically-sized subview (no trailing Spacer — it
+        // would expand unbounded in a vertical scroll view) anchored top-leading so the
+        // headless ImageRenderer renders the full stack. Mirrors CollisionMatrixView.
+        ScrollView(.vertical) {
+            cardStack
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .defaultScrollAnchor(.top)
+        .id(aggregate.packetID)
+    }
+
+    /// The detail's bespoke card stack, sized to its intrinsic height in the ScrollView.
+    private var cardStack: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             fieldGrid
@@ -33,10 +52,7 @@ struct PacketDetailPane: View {
             PacketReceptionsCard(receptions: aggregate.receptions, accent: PacketInspectorTheme.accent)
             hexDump
             distributionCard
-            Spacer(minLength: 0)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
@@ -72,14 +88,21 @@ struct PacketDetailPane: View {
             .background(fill, in: Capsule()).foregroundStyle(tint)
     }
 
+    /// An eager `Grid` (not `LazyVGrid`): lazy containers need a real scroll viewport
+    /// and crash the headless ImageRenderer when nested in a ScrollView. Two eager rows
+    /// of three give the same 3-column field layout, render-safe.
     private var fieldGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-            field("CHANNEL", "\(aggregate.channel)")
-            field("RECEPTIONS", "\(aggregate.receptionCount)")
-            field("DISTINCT GATEWAYS", "\(aggregate.distinctGatewayCount)")
-            field("DISTINCT PATHS", "\(aggregate.distinctPathCount)")
-            field("HOP RANGE", aggregate.hopRangeText ?? "—")
-            field("PORT #", "\(aggregate.port.portNumRawValue)")
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                field("CHANNEL", "\(aggregate.channel)")
+                field("RECEPTIONS", "\(aggregate.receptionCount)")
+                field("DISTINCT GATEWAYS", "\(aggregate.distinctGatewayCount)")
+            }
+            GridRow {
+                field("DISTINCT PATHS", "\(aggregate.distinctPathCount)")
+                field("HOP RANGE", aggregate.hopRangeText ?? "—")
+                field("PORT #", "\(aggregate.port.portNumRawValue)")
+            }
         }
     }
 
@@ -143,7 +166,9 @@ struct PacketDetailPane: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        // A solid translucent fill, not `.ultraThinMaterial`: materials nested in a
+        // ScrollView crash the headless ImageRenderer (and render poorly headless).
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
