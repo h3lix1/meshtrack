@@ -5,12 +5,17 @@ import Testing
 @Suite("MeshAdminChannel — the AdminChannel over the air (SPEC §2.7)")
 struct MeshAdminChannelTests {
     /// A fake `AdminTransport` standing in for the radio (the HIL effect). It
-    /// records every sent batch and decodes applied setConfig/setOwner messages
-    /// into the config it reports back — so an `AdminApplier` round-trip verifies.
+    /// records every sent batch and decodes applied setConfig/setOwner/setChannel
+    /// messages into the state it reports back — so an `AdminApplier` round-trip
+    /// verifies. Crucially it does NOT echo the written struct verbatim: each
+    /// applied message is serialized and re-parsed through the protobuf codec, so
+    /// a read-back exercises the same encode→decode the real firmware would, not a
+    /// trivial pass-through that would hide a wrong-field mapping.
     private actor FakeTransport: AdminTransport {
         private(set) var sentBatches: [[AdminMessage]] = []
         private var configByType: [AdminMessage.ConfigType: Config] = [:]
         private var owner: User?
+        private var channel: Channel?
         var failSend = false
 
         init(region: Config.LoRaConfig.RegionCode? = nil) {
@@ -31,11 +36,18 @@ struct MeshAdminChannelTests {
             if failSend { throw AdminTransportError.notConnected }
             sentBatches.append(messages)
             for message in messages {
-                switch message.payloadVariant {
+                // Round-trip the applied message through the wire codec so the
+                // node's "stored" copy is what a real radio would decode, never a
+                // verbatim echo of the struct we were handed.
+                let wire: [UInt8] = try message.serializedBytes()
+                let parsed = try AdminMessage(serializedBytes: wire)
+                switch parsed.payloadVariant {
                 case let .setConfig(config):
                     store(config)
                 case let .setOwner(user):
                     owner = user
+                case let .setChannel(channel):
+                    self.channel = channel
                 default:
                     break
                 }
@@ -45,10 +57,15 @@ struct MeshAdminChannelTests {
         func readback(
             configTypes: Set<AdminMessage.ConfigType>,
             owner wantsOwner: Bool,
+            channel wantsChannel: Bool,
             from _: AdminTarget
         ) async throws -> AdminReadback {
             let configs = configTypes.compactMap { configByType[$0] }
-            return AdminReadback(configs: configs, owner: wantsOwner ? owner : nil)
+            return AdminReadback(
+                configs: configs,
+                owner: wantsOwner ? owner : nil,
+                channel: wantsChannel ? channel : nil
+            )
         }
 
         var batchCount: Int {
@@ -96,6 +113,37 @@ struct MeshAdminChannelTests {
         let batch = try #require(await transport.sentBatches.first)
         #expect(batch.first?.beginEditSettings == true)
         #expect(batch.last?.commitEditSettings == true)
+    }
+
+    @Test
+    func `position precision round-trips through the channel codec and verifies`() async throws {
+        // A template that provisions position precision. The fake transport
+        // re-parses the applied setChannel from the wire, so this only verifies if
+        // precision is mapped to the field firmware actually reads back (the
+        // primary channel's module setting), not the device-config bitfield.
+        let template = NodeTemplate(
+            name: "Bay", region: "US", role: "ROUTER",
+            shortNameDSL: "{id[-4:]}", positionPrecisionBits: 16
+        )
+        let transport = FakeTransport(region: .us)
+        let channel = MeshAdminChannel(transport: transport, target: target)
+        let applier = AdminApplier(channel: channel)
+
+        let plan = try await applier.plan(template: template, context: context)
+        #expect(plan.changes.contains(ConfigChange(field: "position_precision", from: nil, to: "16")))
+        try await applier.apply(plan, template: template, context: context)
+
+        // Read-back of the primary channel reports the precision we set, so a
+        // fresh plan is a no-op (verification passed).
+        let snapshot = try await channel.currentConfig()
+        #expect(snapshot["position_precision"] == "16")
+        #expect(try await applier.plan(template: template, context: context).isNoOp)
+
+        // The apply carried a setChannel (not a position setConfig).
+        let batch = try #require(await transport.sentBatches.first)
+        let channels = batch.filter { if case .setChannel = $0.payloadVariant { true } else { false } }
+        #expect(channels.count == 1)
+        #expect(channels.first?.setChannel.settings.moduleSettings.positionPrecision == 16)
     }
 
     @Test
