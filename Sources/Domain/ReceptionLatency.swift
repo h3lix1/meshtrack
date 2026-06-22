@@ -36,3 +36,39 @@ public extension ReceptionLatency {
         return ReceptionLatency(rxTime: rxTime, ingestTime: ingestTime)
     }
 }
+
+// MARK: - Plausibility
+
+/// A node's `rx_time` is whole seconds from its *own* RTC. A node whose clock is
+/// skewed (commonly weeks behind, occasionally ahead) yields a `rxTime` far from
+/// our ingest clock, so `ingest_time − rx_time` is astronomical (~4e9 ms) or
+/// negative. Real gateway receive→MQTT-publish latency is sub-minute, so we treat
+/// a generous ±2-minute window as the plausible band: wide enough to keep genuine
+/// small skews and processing/queue delay visible, tight enough to reject the
+/// stale-RTC garbage that would otherwise poison the histogram and the map overlay.
+public extension ReceptionLatency {
+    /// The widest receive→publish latency we treat as real. Anything beyond this
+    /// (in either direction) is almost certainly node clock skew, not transport
+    /// latency. ±120 s — gateway publish is realistically well under a minute.
+    static let plausibleBoundSeconds: Double = 120
+
+    private static var plausibleBoundNanos: Int64 {
+        Int64(plausibleBoundSeconds) * 1_000_000_000
+    }
+
+    /// Whether this latency is small enough to be a real transport latency rather
+    /// than a symptom of the node's skewed RTC. Symmetric around zero so a node a
+    /// hair ahead of us still reads as a genuine (small, negative) skew.
+    var isPlausible: Bool {
+        abs(nanoseconds) <= Self.plausibleBoundNanos
+    }
+
+    /// Latency in milliseconds (rounded) *only when plausible*; `nil` when the
+    /// reception's `rx_time` is implausible (out of the sane band — stale RTC).
+    /// Callers render `nil` honestly ("clock skew" / "—") and exclude it from
+    /// stats and the map's latency overlay.
+    var plausibleMillis: Int? {
+        guard isPlausible else { return nil }
+        return Int((seconds * 1000).rounded())
+    }
+}

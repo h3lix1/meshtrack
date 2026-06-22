@@ -1,24 +1,36 @@
-// PacketDetailPane — the detail half of the packet inspector (G6): header, decoded
-// field grid, the byte-level hex dump, the receive→publish latency for this packet,
-// and a small latency-distribution histogram over the window. Bespoke layout +
-// monospaced hex dump (no stock controls) for headless snapshot fidelity.
+// PacketDetailPane — the detail half of the packet inspector (G6, item 10). Shows
+// one packet id's whole story across every reception: a header with the reception
+// count + hop range, the shared decoded field grid, the latency journey + distinct
+// paths it took, a per-reception table, the byte-level hex dump of the newest
+// reception, and a small latency-distribution histogram over the window.
+//
+// Bespoke layout + monospaced hex dump (no stock controls) for headless snapshot
+// fidelity. The per-reception / path / journey sub-views live in
+// PacketReceptionViews.swift to keep this file and type small.
 
 import Domain
 import SwiftUI
 
 struct PacketDetailPane: View {
-    let packet: InspectedPacket
+    let aggregate: AggregatedPacket
     let distribution: LatencyDistribution
 
+    /// The newest reception — backs the shared field grid + hex dump.
+    private var packet: InspectedPacket {
+        aggregate.representative
+    }
+
     private var color: Color {
-        PacketColor.color(for: packet.packetID)
+        PacketColor.color(for: aggregate.packetID)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             header
             fieldGrid
-            latencyRow
+            PacketLatencyJourneyCard(journey: aggregate.latencyJourney, accent: color)
+            PacketPathsCard(paths: aggregate.paths, accent: PacketInspectorTheme.accent)
+            PacketReceptionsCard(receptions: aggregate.receptions, accent: PacketInspectorTheme.accent)
             hexDump
             distributionCard
             Spacer(minLength: 0)
@@ -32,42 +44,43 @@ struct PacketDetailPane: View {
             RoundedRectangle(cornerRadius: 5).fill(color)
                 .frame(width: 10, height: 34).shadow(color: color, radius: 5)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Packet \(InspectedPacket.hexID(packet.packetID))")
+                Text("Packet \(InspectedPacket.hexID(aggregate.packetID))")
                     .font(.system(size: 18, weight: .bold))
-                Text("\(packet.fromHex) → \(packet.toHex) · \(packet.portName)")
+                Text("\(aggregate.fromHex) → \(aggregate.toHex) · \(aggregate.portName)")
                     .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
             }
             Spacer()
-            if packet.wasEncrypted {
-                Text("ENCRYPTED")
-                    .font(.system(size: 10, weight: .heavy))
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(.yellow.opacity(0.18), in: Capsule())
-                    .foregroundStyle(.yellow)
-            }
-            if let hops = packet.hops {
-                Text("\(hops) HOPS")
-                    .font(.system(size: 12, weight: .heavy))
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(color.opacity(0.2), in: Capsule()).foregroundStyle(color)
-            }
+            headerBadges
         }
+    }
+
+    @ViewBuilder
+    private var headerBadges: some View {
+        if aggregate.wasEncrypted {
+            badge("ENCRYPTED", tint: .yellow, fill: .yellow.opacity(0.18))
+        }
+        badge("×\(aggregate.receptionCount)", tint: color, fill: color.opacity(0.2))
+        if let hopRange = aggregate.hopRangeText {
+            badge("\(hopRange) HOPS", tint: color, fill: color.opacity(0.2))
+        }
+    }
+
+    private func badge(_ text: String, tint: Color, fill: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .heavy))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(fill, in: Capsule()).foregroundStyle(tint)
     }
 
     private var fieldGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-            field("CHANNEL", "\(packet.channel)")
-            field("HOP START / LIMIT", hopText)
-            field("RELAY BYTE", packet.relayByteText)
-            field("GATEWAY", packet.gatewayText)
-            field("PAYLOAD", "\(packet.payloadByteCount) B")
-            field("PORT #", "\(packet.port.portNumRawValue)")
+            field("CHANNEL", "\(aggregate.channel)")
+            field("RECEPTIONS", "\(aggregate.receptionCount)")
+            field("DISTINCT GATEWAYS", "\(aggregate.distinctGatewayCount)")
+            field("DISTINCT PATHS", "\(aggregate.distinctPathCount)")
+            field("HOP RANGE", aggregate.hopRangeText ?? "—")
+            field("PORT #", "\(aggregate.port.portNumRawValue)")
         }
-    }
-
-    private var hopText: String {
-        guard let start = packet.packet.hopStart, let limit = packet.packet.hopLimit else { return "—" }
-        return "\(start) / \(limit)"
     }
 
     private func field(_ label: String, _ value: String) -> some View {
@@ -81,41 +94,11 @@ struct PacketDetailPane: View {
         .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
     }
 
-    // MARK: Latency for this packet
-
-    @ViewBuilder
-    private var latencyRow: some View {
-        if let millis = packet.latencyMillis {
-            HStack(spacing: 10) {
-                Text("RECEIVE→PUBLISH")
-                    .font(.system(size: 10, weight: .bold)).tracking(0.5)
-                    .foregroundStyle(.secondary)
-                Text(millis < 0 ? "\(millis)ms (clock skew)" : "\(millis)ms")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(millis < 0 ? .orange : PacketInspectorTheme.accent)
-                Spacer()
-            }
-            .padding(12)
-            .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-        } else {
-            HStack {
-                Text("RECEIVE→PUBLISH")
-                    .font(.system(size: 10, weight: .bold)).tracking(0.5)
-                    .foregroundStyle(.secondary)
-                Text("unavailable (no ingest time)")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(12)
-            .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-        }
-    }
-
-    // MARK: Byte-level hex dump
+    // MARK: Byte-level hex dump (newest reception's payload)
 
     private var hexDump: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("PAYLOAD BYTES")
+            Text("PAYLOAD BYTES — latest reception")
                 .font(.system(size: 10, weight: .bold)).tracking(0.5).foregroundStyle(.secondary)
             if packet.isPayloadEmpty {
                 Text("(empty payload)").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -123,12 +106,9 @@ struct PacketDetailPane: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(packet.hexDump()) { row in
                         HStack(spacing: 14) {
-                            Text(row.offsetText)
-                                .foregroundStyle(.secondary)
-                            Text(row.hexText)
-                                .foregroundStyle(.white.opacity(0.9))
-                            Text(row.asciiText)
-                                .foregroundStyle(PacketInspectorTheme.accent.opacity(0.9))
+                            Text(row.offsetText).foregroundStyle(.secondary)
+                            Text(row.hexText).foregroundStyle(.white.opacity(0.9))
+                            Text(row.asciiText).foregroundStyle(PacketInspectorTheme.accent.opacity(0.9))
                         }
                         .font(.system(size: 11, design: .monospaced))
                     }
@@ -147,7 +127,8 @@ struct PacketDetailPane: View {
             Text("LATENCY DISTRIBUTION — window")
                 .font(.system(size: 10, weight: .bold)).tracking(0.5).foregroundStyle(.secondary)
             if distribution.isEmpty {
-                Text("No latency samples yet.").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("No plausible latency samples yet.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 18) {
                     stat("MIN", "\(distribution.minMillis)ms")

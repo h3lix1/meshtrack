@@ -44,18 +44,18 @@ struct PacketsInspectorViewModelTests {
     @Test
     func `explicit selection is honoured while visible`() {
         let vm = PacketInspectorViewModel(clock: InjectedClock())
-        vm.ingest(packet(packetID: 1)) // sequence 0
-        vm.ingest(packet(packetID: 2)) // sequence 1
-        vm.selectedID = 0
+        vm.ingest(packet(packetID: 1))
+        vm.ingest(packet(packetID: 2))
+        vm.selectedID = 1 // pin packet id 1
         #expect(vm.selected?.packetID == 1)
     }
 
     @Test
     func `selection falls back when filtered out`() {
         let vm = PacketInspectorViewModel(clock: InjectedClock())
-        vm.ingest(packet(packetID: 1, port: .position)) // sequence 0
-        vm.ingest(packet(packetID: 2, port: .telemetry)) // sequence 1
-        vm.selectedID = 0 // select the position packet
+        vm.ingest(packet(packetID: 1, port: .position))
+        vm.ingest(packet(packetID: 2, port: .telemetry))
+        vm.selectedID = 1 // select the position packet by id
         vm.filter = PacketFilter(port: .telemetry) // hides it
         #expect(vm.selected?.packetID == 2)
     }
@@ -81,11 +81,20 @@ struct PacketsInspectorViewModelTests {
     }
 
     @Test
-    func `duplicated packet id keeps distinct rows via sequence`() {
+    func `duplicated packet id keeps distinct receptions in the raw window`() {
         let vm = PacketInspectorViewModel(clock: InjectedClock())
         vm.ingest(packet(packetID: 0x77)) // relay reception 1
         vm.ingest(packet(packetID: 0x77)) // relay reception 2
         #expect(vm.packets.count == 2)
         #expect(Set(vm.packets.map(\.id)).count == 2) // unique sequences
+    }
+
+    @Test
+    func `duplicated packet id collapses to a single aggregated row`() {
+        let vm = PacketInspectorViewModel(clock: InjectedClock())
+        vm.ingest(packet(packetID: 0x77)) // relay reception 1
+        vm.ingest(packet(packetID: 0x77)) // relay reception 2
+        #expect(vm.visiblePackets.count == 1) // one row per id
+        #expect(vm.visiblePackets.first?.receptionCount == 2)
     }
 }

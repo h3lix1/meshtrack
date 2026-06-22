@@ -42,6 +42,27 @@ public struct PacketFilter: Sendable, Equatable {
         inspections.filter(matches)
     }
 
+    /// True when an aggregate satisfies every active criterion. Port/node/channel
+    /// are packet-wide (its representative carries them); the text criterion matches
+    /// if *any* reception's haystack contains it (so a relay-only field still hits).
+    public func matches(_ aggregate: AggregatedPacket) -> Bool {
+        let probe = aggregate.representative
+        if let port, port.portNumRawValue != probe.port.portNumRawValue { return false }
+        if let fromNode, fromNode != probe.from { return false }
+        if let channel, channel != probe.channel { return false }
+        let trimmed = text.trimmingCharacters(in: [" "]).lowercased()
+        if !trimmed.isEmpty {
+            let anyHit = aggregate.receptions.contains { $0.searchHaystack.contains(trimmed) }
+            if !anyHit { return false }
+        }
+        return true
+    }
+
+    /// Apply the filter to an aggregated list, preserving order.
+    public func apply(to aggregates: [AggregatedPacket]) -> [AggregatedPacket] {
+        aggregates.filter(matches)
+    }
+
     /// Whether any criterion is active (for UI "clear" affordances).
     public var isActive: Bool {
         port != nil || fromNode != nil || channel != nil

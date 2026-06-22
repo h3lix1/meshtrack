@@ -47,10 +47,13 @@ public struct PacketInspectorSection: View {
             FilterBar(viewModel: viewModel)
             ScrollViewReaderless {
                 VStack(spacing: 4) {
-                    ForEach(viewModel.visiblePackets) { packet in
-                        PacketRow(packet: packet, isSelected: packet.id == viewModel.selected?.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture { viewModel.selectedID = packet.id }
+                    ForEach(viewModel.visiblePackets) { aggregate in
+                        PacketRow(
+                            aggregate: aggregate,
+                            isSelected: aggregate.packetID == viewModel.selected?.packetID
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture { viewModel.selectedID = aggregate.packetID }
                     }
                     if viewModel.visiblePackets.isEmpty {
                         Text(viewModel.packets.isEmpty ? "Awaiting traffic…" : "No packets match the filter.")
@@ -68,8 +71,8 @@ public struct PacketInspectorSection: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let packet = viewModel.selected {
-            PacketDetailPane(packet: packet, distribution: viewModel.latencyDistribution)
+        if let aggregate = viewModel.selected {
+            PacketDetailPane(aggregate: aggregate, distribution: viewModel.latencyDistribution)
         } else {
             VStack(spacing: 8) {
                 Text("No packet selected")
@@ -92,30 +95,41 @@ private struct ScrollViewReaderless<Content: View>: View {
 // MARK: - Master row
 
 private struct PacketRow: View {
-    let packet: InspectedPacket
+    let aggregate: AggregatedPacket
     let isSelected: Bool
+
+    private var color: Color {
+        PacketColor.color(for: aggregate.packetID)
+    }
 
     var body: some View {
         HStack(spacing: 9) {
-            Circle().fill(PacketColor.color(for: packet.packetID))
+            Circle().fill(color)
                 .frame(width: 9, height: 9)
-                .shadow(color: PacketColor.color(for: packet.packetID), radius: 3)
+                .shadow(color: color, radius: 3)
             VStack(alignment: .leading, spacing: 1) {
-                Text(InspectedPacket.hexID(packet.packetID).replacingOccurrences(of: "!", with: "#"))
-                    .font(.system(size: 12, design: .monospaced)).foregroundStyle(.white)
-                Text(packet.portName)
+                HStack(spacing: 5) {
+                    Text(InspectedPacket.hexID(aggregate.packetID).replacingOccurrences(of: "!", with: "#"))
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.white)
+                    if aggregate.receptionCount > 1 {
+                        Text("×\(aggregate.receptionCount)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(color)
+                    }
+                }
+                Text(aggregate.portName)
                     .font(.system(size: 9)).foregroundStyle(.secondary)
             }
             Spacer()
-            if let millis = packet.latencyMillis {
+            if let millis = aggregate.lastHeardLatencyMillis {
                 Text("\(millis)ms")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.75))
             }
-            if let hops = packet.hops {
-                Text("\(hops)h")
+            if let hopRange = aggregate.hopRangeText {
+                Text("\(hopRange)h")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(PacketColor.color(for: packet.packetID))
+                    .foregroundStyle(color)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
