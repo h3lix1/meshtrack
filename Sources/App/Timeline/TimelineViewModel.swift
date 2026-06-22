@@ -36,6 +36,14 @@ public final class TimelineViewModel {
     /// Live (tracking now) vs review (scrubbed into the past).
     public private(set) var mode: PlaybackMode = .live
 
+    /// True when the playhead is scrubbed off "live" into the past (item 1). When this
+    /// flips true the map should feed from this VM's reconstructed `traces`/`nodes`
+    /// instead of the live coordinator's; when it flips back false the live feed takes
+    /// over again. The lead reads this in `LiveRootView` to switch the source.
+    public var isReviewing: Bool {
+        mode == .review
+    }
+
     // MARK: Dependencies
 
     private let store: MeshStore

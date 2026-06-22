@@ -21,6 +21,11 @@
         public var mode: TraceTimingMode
         /// Optional receive→publish latency (ms) per packet id, surfaced as edge tooltips.
         public var latencyMillis: [UInt32: Int]
+        /// The packet id focused in the legend — drives per-hop labels (item 3) and the
+        /// all-receivers overlay (item 6). nil = no focus.
+        public var focusedPacketID: UInt32?
+        /// Whether to ring every node that received the focused packet (item 6).
+        public var showAllReceivers: Bool
 
         public init(
             nodes: [NetworkNode],
@@ -29,7 +34,9 @@
             clock: Double,
             hopDuration: Double,
             mode: TraceTimingMode,
-            latencyMillis: [UInt32: Int] = [:]
+            latencyMillis: [UInt32: Int] = [:],
+            focusedPacketID: UInt32? = nil,
+            showAllReceivers: Bool = false
         ) {
             self.nodes = nodes
             self.traces = traces
@@ -38,6 +45,8 @@
             self.hopDuration = hopDuration
             self.mode = mode
             self.latencyMillis = latencyMillis
+            self.focusedPacketID = focusedPacketID
+            self.showAllReceivers = showAllReceivers
         }
 
         public var body: some View {
@@ -46,7 +55,10 @@
                 // re-render whenever the map's camera moves.
                 _ = state.regionRevision
                 guard let projection = state.projection else { return }
-                let renderer = TraceRenderer(clock: clock, hopDuration: hopDuration, mode: mode)
+                let renderer = TraceRenderer(
+                    clock: clock, hopDuration: hopDuration, mode: mode,
+                    focusedPacketID: focusedPacketID, showAllReceivers: showAllReceivers
+                )
                 renderer.drawTraces(traces, in: &context, projection: projection)
                 renderer.drawNodes(nodes, in: &context, projection: projection)
                 for trace in traces {

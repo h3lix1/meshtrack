@@ -55,35 +55,81 @@ public enum PacketTraceBuilder {
         let source = first.fromNode
         var edges: [TraceEdge] = []
         var seenGateways: Set<Int64> = []
+        // Every node that heard the packet, deduped, keeping the lowest reception hop.
+        var receivers: [Int64: TraceReceiver] = [:]
 
         for reception in receptions {
             guard let gateway = reception.gatewayNode, let gatewayPosition = positions[gateway],
                   seenGateways.insert(gateway).inserted else { continue }
-            edges += journey(
-                from: sourcePosition, to: gatewayPosition, relayNode: reception.relayNode,
-                excluding: [source, gateway], positions: positions
+            let hops = max(1, reception.hops)
+            let leg = journey(
+                reception, source: source, sourcePosition: sourcePosition,
+                gatewayPosition: gatewayPosition, positions: positions
             )
+            edges += leg.edges
+            record(&receivers, gateway: gateway, position: gatewayPosition, hop: hops)
+            if let relay = leg.relay, let relayPosition = positions[relay] {
+                // The relay heard the packet one hop before the gateway it fed.
+                record(
+                    &receivers,
+                    gateway: relay,
+                    position: relayPosition,
+                    hop: max(1, hops - 1),
+                    isGateway: false
+                )
+            }
         }
         guard !edges.isEmpty else { return nil }
         return PacketTrace(
             id: first.packetID, sourceNode: source, edges: edges,
-            hops: receptions.map(\.hops).max() ?? 0, startedAt: startedAt
+            hops: receptions.map(\.hops).max() ?? 0, startedAt: startedAt,
+            receivers: receivers.values.sorted { $0.nodeID < $1.nodeID }
         )
     }
 
+    /// Insert/merge a receiver, keeping the *lowest* hop seen for that node (a node may
+    /// appear via multiple gateways at different hop counts; the earliest reception wins).
+    private static func record(
+        _ receivers: inout [Int64: TraceReceiver],
+        gateway nodeID: Int64, position: GeoPoint, hop: Int, isGateway: Bool = true
+    ) {
+        if let existing = receivers[nodeID], existing.hop <= hop { return }
+        receivers[nodeID] = TraceReceiver(
+            nodeID: nodeID, position: position, hop: hop, isGateway: isGateway
+        )
+    }
+
+    /// One leg of the journey plus the relay node it routed through (nil when direct).
+    private struct Leg {
+        let edges: [TraceEdge]
+        let relay: Int64?
+    }
+
     private static func journey(
-        from start: GeoPoint, to gateway: GeoPoint, relayNode: UInt8,
-        excluding: Set<Int64>, positions: [Int64: GeoPoint]
-    ) -> [TraceEdge] {
-        let relay = relayNode == 0 ? nil
-            : guessRelay(relayByte: relayNode, excluding: excluding, positions: positions, near: gateway)
+        _ reception: PacketReception, source: Int64, sourcePosition start: GeoPoint,
+        gatewayPosition gateway: GeoPoint, positions: [Int64: GeoPoint]
+    ) -> Leg {
+        let gatewayHop = max(1, reception.hops)
+        var excluding: Set<Int64> = [source]
+        if let gatewayNode = reception.gatewayNode { excluding.insert(gatewayNode) }
+        let relay = reception.relayNode == 0 ? nil
+            : guessRelay(
+                relayByte: reception.relayNode, excluding: excluding, positions: positions, near: gateway
+            )
         guard let relay, let relayPosition = positions[relay] else {
-            return [TraceEdge(from: start, to: gateway, kind: .observed)]
+            return Leg(
+                edges: [TraceEdge(from: start, to: gateway, kind: .observed, hopIndex: gatewayHop)],
+                relay: nil
+            )
         }
-        return [
-            TraceEdge(from: start, to: relayPosition, kind: .guessed),
-            TraceEdge(from: relayPosition, to: gateway, kind: .observed)
-        ]
+        let relayHop = max(1, gatewayHop - 1)
+        return Leg(
+            edges: [
+                TraceEdge(from: start, to: relayPosition, kind: .guessed, hopIndex: relayHop),
+                TraceEdge(from: relayPosition, to: gateway, kind: .observed, hopIndex: gatewayHop)
+            ],
+            relay: relay
+        )
     }
 
     /// Guess the relayer: a node whose id ends in `relayByte`, nearest to `near`.

@@ -111,27 +111,44 @@ public enum SampleNetwork {
         nodes.first { $0.id == id }?.position ?? .init(latitude: 37.7, longitude: -122.3)
     }
 
+    private static func receiver(_ id: Int64, hop: Int, gateway: Bool = false) -> TraceReceiver {
+        TraceReceiver(nodeID: id, position: position(id), hop: hop, isGateway: gateway)
+    }
+
     public static let traces: [PacketTrace] = [
         // San Jose → Palo Alto (guessed relay) → Oakland → SF gateway, 3 hops.
         .init(id: 0x2A3B_4C5D, sourceNode: 0x5A1B_0303, edges: [
-            .init(from: position(0x5A1B_0303), to: position(0x9A10_0404), kind: .guessed),
-            .init(from: position(0x9A10_0404), to: position(0x0AC1_5511), kind: .observed),
-            .init(from: position(0x0AC1_5511), to: position(0xA1B2_C3D4), kind: .observed)
-        ], hops: 3, startedAt: 0.0),
+            .init(from: position(0x5A1B_0303), to: position(0x9A10_0404), kind: .guessed, hopIndex: 1),
+            .init(from: position(0x9A10_0404), to: position(0x0AC1_5511), kind: .observed, hopIndex: 2),
+            .init(from: position(0x0AC1_5511), to: position(0xA1B2_C3D4), kind: .observed, hopIndex: 3)
+        ], hops: 3, startedAt: 0.0, receivers: [
+            receiver(0x9A10_0404, hop: 1),
+            receiver(0x0AC1_5511, hop: 2),
+            receiver(0xA1B2_C3D4, hop: 3, gateway: true)
+        ]),
         // Fremont → Hayward (relay) → Oakland gateway, 2 hops.
         .init(id: 0x7788_99AA, sourceNode: 0xF1B8_0606, edges: [
-            .init(from: position(0xF1B8_0606), to: position(0x16CE_0707), kind: .guessed),
-            .init(from: position(0x16CE_0707), to: position(0x0AC1_5511), kind: .observed)
-        ], hops: 2, startedAt: 0.4),
+            .init(from: position(0xF1B8_0606), to: position(0x16CE_0707), kind: .guessed, hopIndex: 1),
+            .init(from: position(0x16CE_0707), to: position(0x0AC1_5511), kind: .observed, hopIndex: 2)
+        ], hops: 2, startedAt: 0.4, receivers: [
+            receiver(0x16CE_0707, hop: 1),
+            receiver(0x0AC1_5511, hop: 2, gateway: true)
+        ]),
         // Concord → Walnut Creek (relay) → Marin gateway, 2 hops.
         .init(id: 0xDEAD_BEEF, sourceNode: 0xEBA3_0D0D, edges: [
-            .init(from: position(0xEBA3_0D0D), to: position(0x49B5_0909), kind: .guessed),
-            .init(from: position(0x49B5_0909), to: position(0x3A21_0505), kind: .observed)
-        ], hops: 2, startedAt: 0.8),
+            .init(from: position(0xEBA3_0D0D), to: position(0x49B5_0909), kind: .guessed, hopIndex: 1),
+            .init(from: position(0x49B5_0909), to: position(0x3A21_0505), kind: .observed, hopIndex: 2)
+        ], hops: 2, startedAt: 0.8, receivers: [
+            receiver(0x49B5_0909, hop: 1),
+            receiver(0x3A21_0505, hop: 2, gateway: true)
+        ]),
         // Mountain View → San Mateo → Daly City gateway, 2 hops.
         .init(id: 0x1337_1337, sourceNode: 0xA038_0808, edges: [
-            .init(from: position(0xA038_0808), to: position(0x441D_0C0C), kind: .guessed),
-            .init(from: position(0x441D_0C0C), to: position(0xC0FF_0A0A), kind: .observed)
-        ], hops: 2, startedAt: 1.1)
+            .init(from: position(0xA038_0808), to: position(0x441D_0C0C), kind: .guessed, hopIndex: 1),
+            .init(from: position(0x441D_0C0C), to: position(0xC0FF_0A0A), kind: .observed, hopIndex: 2)
+        ], hops: 2, startedAt: 1.1, receivers: [
+            receiver(0x441D_0C0C, hop: 1),
+            receiver(0xC0FF_0A0A, hop: 2, gateway: true)
+        ])
     ]
 }

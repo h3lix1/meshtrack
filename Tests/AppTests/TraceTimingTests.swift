@@ -11,7 +11,7 @@ struct TraceTimingTests {
     func `sequential edge has not started before its delay`() {
         // Edge 1 is delayed by one hopDuration; at clock 0.5 (hopDuration 1) it's 0.
         let p = TraceTiming.edgeProgress(
-            clock: 0.5, startedAt: 0, edgeIndex: 1, hopDuration: 1, mode: .sequential
+            clock: 0.5, startedAt: 0, hopIndex: 2, hopDuration: 1, mode: .sequential
         )
         #expect(p == 0)
     }
@@ -19,10 +19,10 @@ struct TraceTimingTests {
     @Test
     func `sequential edge 0 draws linearly over hopDuration`() {
         let half = TraceTiming.edgeProgress(
-            clock: 0.5, startedAt: 0, edgeIndex: 0, hopDuration: 1, mode: .sequential
+            clock: 0.5, startedAt: 0, hopIndex: 1, hopDuration: 1, mode: .sequential
         )
         let full = TraceTiming.edgeProgress(
-            clock: 1.0, startedAt: 0, edgeIndex: 0, hopDuration: 1, mode: .sequential
+            clock: 1.0, startedAt: 0, hopIndex: 1, hopDuration: 1, mode: .sequential
         )
         #expect(abs(half - 0.5) < 1e-9)
         #expect(full == 1)
@@ -34,21 +34,21 @@ struct TraceTimingTests {
         let e0 = TraceTiming.edgeProgress(
             clock: 1.5,
             startedAt: 0,
-            edgeIndex: 0,
+            hopIndex: 1,
             hopDuration: 1,
             mode: .sequential
         )
         let e1 = TraceTiming.edgeProgress(
             clock: 1.5,
             startedAt: 0,
-            edgeIndex: 1,
+            hopIndex: 2,
             hopDuration: 1,
             mode: .sequential
         )
         let e2 = TraceTiming.edgeProgress(
             clock: 1.5,
             startedAt: 0,
-            edgeIndex: 2,
+            hopIndex: 3,
             hopDuration: 1,
             mode: .sequential
         )
@@ -66,7 +66,7 @@ struct TraceTimingTests {
         let clock = 0.4
         let progresses = (0 ..< 5).map {
             TraceTiming.edgeProgress(
-                clock: clock, startedAt: 0, edgeIndex: $0, hopDuration: 1, mode: .equaliseFinish
+                clock: clock, startedAt: 0, hopIndex: $0 + 1, hopDuration: 1, mode: .equaliseFinish
             )
         }
         for p in progresses {
@@ -78,7 +78,7 @@ struct TraceTimingTests {
     func `equalise-finish: a whole journey completes after one hopDuration`() {
         for edgeIndex in 0 ..< 4 {
             let p = TraceTiming.edgeProgress(
-                clock: 2.0, startedAt: 0, edgeIndex: edgeIndex, hopDuration: 2, mode: .equaliseFinish
+                clock: 2.0, startedAt: 0, hopIndex: edgeIndex + 1, hopDuration: 2, mode: .equaliseFinish
             )
             #expect(p == 1)
         }
@@ -117,14 +117,14 @@ struct TraceTimingTests {
         let over = TraceTiming.edgeProgress(
             clock: 100,
             startedAt: 0,
-            edgeIndex: 0,
+            hopIndex: 1,
             hopDuration: 1,
             mode: .sequential
         )
         let under = TraceTiming.edgeProgress(
             clock: -100,
             startedAt: 0,
-            edgeIndex: 0,
+            hopIndex: 1,
             hopDuration: 1,
             mode: .sequential
         )
@@ -134,7 +134,7 @@ struct TraceTimingTests {
         let zero = TraceTiming.edgeProgress(
             clock: 0,
             startedAt: 0,
-            edgeIndex: 0,
+            hopIndex: 1,
             hopDuration: 0,
             mode: .sequential
         )
