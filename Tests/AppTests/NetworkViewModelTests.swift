@@ -1,5 +1,6 @@
 @testable import App
 import Domain
+import Foundation
 import Persistence
 import Testing
 
@@ -55,6 +56,8 @@ struct NetworkViewModelTests {
             port: .telemetry, payload: [], rxTime: .epoch,
             hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
         ))
+        // The trace rebuild is coalesced; settle it before asserting (Phase 10).
+        await model.flushPendingTraces()
         #expect(model.traces.count == 1)
         #expect(model.traces.first?.id == 0xABCD)
     }
@@ -63,7 +66,8 @@ struct NetworkViewModelTests {
     func `ingesting records the source node's channel preset`() async throws {
         let model = try await NetworkViewModel(store: seededStore())
         try await model.loadNodes()
-        // LongFast's channel hash is 8.
+        // The preset stamp on the source node is SYNCHRONOUS (no flush needed); only the
+        // trace rebuild is coalesced.
         model.ingest(DecodedPacket(
             from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0xABCD,
             channel: ChannelPreset.longFast.channelHash,
@@ -97,6 +101,7 @@ struct NetworkViewModelTests {
             port: .telemetry, payload: [], rxTime: .epoch,
             hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
         ))
+        await model.flushPendingTraces()
 
         // The source node's LIVE preset is now MediumFast (latest transmission)…
         #expect(model.presetByNode[0x0000_0001] == .mediumFast)
@@ -111,5 +116,95 @@ struct NetworkViewModelTests {
         let onMedium = ChannelFilter.filterTraces(model.traces, nodes: model.nodes, selection: .mediumFast)
         #expect(onLong.map(\.id) == [0x1111])
         #expect(onMedium.map(\.id) == [0x2222])
+    }
+
+    // MARK: Coalesced rebuild (Phase 10)
+
+    private func packet(id: UInt32) -> DecodedPacket {
+        DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: id, channel: 0,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        )
+    }
+
+    @Test
+    func `a burst of packets coalesces to one rebuild but yields every trace`() async throws {
+        // Phase 10: ingest no longer rebuilds traces inline. A burst of packets inside the
+        // coalesce window must collapse to a single rebuild, yet once it settles the
+        // published traces must be EXACTLY what eager per-packet rebuilding produced —
+        // one trace per distinct packet id.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+
+        let ids: [UInt32] = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]
+        for id in ids {
+            model.ingest(packet(id: id))
+        }
+        await model.flushPendingTraces()
+
+        #expect(model.traces.map(\.id).sorted() == ids.sorted())
+    }
+
+    @Test
+    func `flushPendingTraces is idempotent and settles to the same traces`() async throws {
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        model.ingest(packet(id: 0xABCD))
+
+        await model.flushPendingTraces()
+        let first = model.traces.map(\.id)
+        await model.flushPendingTraces() // second flush with nothing pending — a no-op
+        #expect(model.traces.map(\.id) == first)
+        #expect(first == [0xABCD])
+    }
+
+    @Test
+    func `coalesced ingest matches eager rebuilds packet-for-packet`() async throws {
+        // Equivalence guard: feeding the same packets one-at-a-time (flushing between
+        // each, i.e. the old eager behaviour) and as a single burst (one coalesced flush)
+        // must produce identical published traces — order, ids, and edge counts.
+        let ids: [UInt32] = [0x01, 0x02, 0x03, 0x04, 0x05]
+
+        let eager = try await NetworkViewModel(store: seededStore())
+        try await eager.loadNodes()
+        for id in ids {
+            eager.ingest(packet(id: id))
+            await eager.flushPendingTraces()
+        }
+
+        let coalesced = try await NetworkViewModel(store: seededStore())
+        try await coalesced.loadNodes()
+        for id in ids {
+            coalesced.ingest(packet(id: id))
+        }
+        await coalesced.flushPendingTraces()
+
+        #expect(eager.traces.map(\.id) == coalesced.traces.map(\.id))
+        #expect(eager.traces.map(\.edges.count) == coalesced.traces.map(\.edges.count))
+    }
+
+    @Test
+    func `ingest microbenchmark stays within budget (catches gross regressions)`() async throws {
+        // Mirrors DecodePerfTests: a generous floor so a per-packet O(n) regression (the
+        // old `nodes.map` on every packet + inline full rebuild) trips the wire. We time
+        // the SYNCHRONOUS ingest cost — the expensive rebuild is coalesced out of it.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        let iterations = 20000
+
+        let elapsed = ContinuousClock().measure {
+            for i in 0 ..< iterations {
+                model.ingest(packet(id: UInt32(i)))
+            }
+        }
+        await model.flushPendingTraces()
+
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+        let perSecond = Double(iterations) / max(seconds, 1e-9)
+        #expect(
+            perSecond > 20000,
+            "ingest throughput \(Int(perSecond)) packets/sec is below the 20000 budget"
+        )
     }
 }
