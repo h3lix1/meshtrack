@@ -83,7 +83,7 @@ freezing shared files:
 
 ## Resolved project decisions (SPEC §10)
 - **Broker:** public `mqtt.meshtastic.org`; honor zero-hop uplink policy.
-- **Channels/PSKs:** in-app config, up to 20 MQTT / 7 local; Keychain-stored.
+- **Channels/PSKs:** in-app config, MQTT uncapped / 7 local (firmware limit); Keychain-stored (ADR 0009).
 - **Remote admin:** support BOTH PKI admin key and legacy admin channel.
 - **Deployment:** single-Mac; shared GRDB store (WAL) + XPC; no multi-machine.
 - **macOS floor:** 26.6 (latest).
