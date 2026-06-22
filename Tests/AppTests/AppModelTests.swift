@@ -32,6 +32,22 @@ struct AppModelTests {
     }
 
     @Test
+    func `onNavigate fires with the requested section (Finding 19)`() {
+        let model = AppModel()
+        var navigated: [AppSection] = []
+        model.onNavigate = { navigated.append($0) }
+        // Section views invoke onNavigate (e.g. node directory "Open analytics"/"Apply").
+        model.onNavigate?(.analytics)
+        model.onNavigate?(.fleet)
+        #expect(navigated == [.analytics, .fleet])
+    }
+
+    @Test
+    func `onNavigate is nil until the shell wires it`() {
+        #expect(AppModel().onNavigate == nil)
+    }
+
+    @Test
     func `the provisioning workflow is reachable from the sidebar with a default-mode provider`() {
         // The section must exist in the sidebar list (so the workflow is reachable)
         // and the default/sample registry must back it (so it renders without a live

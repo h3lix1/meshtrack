@@ -31,8 +31,15 @@ public extension AppModel {
             }
         #endif
 
-        register(.nodes) {
-            AnyView(NodeDirectoryView(viewModel: NodeDirectoryViewModel(store: store)))
+        register(.nodes) { [self] in
+            // Route the directory's actions to real sections (Finding 19): "Open
+            // analytics" jumps to Analytics, "Apply config" jumps to Fleet Config —
+            // no more no-op callbacks.
+            AnyView(NodeDirectoryView(
+                viewModel: NodeDirectoryViewModel(store: store),
+                onApply: { _ in self.onNavigate?(.fleet) },
+                onOpenAnalytics: { _ in self.onNavigate?(.analytics) }
+            ))
         }
         register(.packets) {
             AnyView(PacketInspectorSection(viewModel: PacketInspectorSample.viewModel()))
