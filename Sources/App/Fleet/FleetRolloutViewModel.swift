@@ -12,6 +12,7 @@
 // mutate state. The whole flow is unit-tested by injecting a `FleetApplier` built
 // over a fake `AdminChannel`.
 
+import Domain
 import Foundation
 import Observation
 import Provisioning
@@ -266,6 +267,6 @@ public final class FleetRolloutViewModel {
     }
 
     nonisolated static func hexID(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }

@@ -44,7 +44,7 @@ public final class CollisionMatrixViewModel {
     }
 
     nonisolated static func collisionNode(_ record: NodeRecord) -> CollisionNode {
-        let hex = "!" + String(format: "%08x", UInt32(truncatingIfNeeded: record.node_num))
+        let hex = NodeID.hex(UInt32(truncatingIfNeeded: record.node_num))
         return CollisionNode(
             nodeNum: record.node_num,
             name: record.short_name ?? record.long_name ?? hex

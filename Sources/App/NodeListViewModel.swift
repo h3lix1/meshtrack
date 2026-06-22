@@ -53,6 +53,6 @@ public final class NodeListViewModel {
     }
 
     nonisolated static func hexID(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }

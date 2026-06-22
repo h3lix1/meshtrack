@@ -9,6 +9,7 @@
 
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import Domain
 import SwiftUI
 
 /// Builds the share URL + QR image for a node.
@@ -59,6 +60,6 @@ public enum NodeShareQR {
 
     /// The `!aabbccdd` hex id for a node number.
     static func hexID(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }

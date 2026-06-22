@@ -208,6 +208,6 @@ public final class TimelineViewModel {
 
     nonisolated static func displayName(_ record: NodeRecord) -> String {
         record.short_name ?? record.long_name ?? record.hexid
-            ?? String(format: "!%08x", UInt32(truncatingIfNeeded: record.node_num))
+            ?? NodeID.hex(UInt32(truncatingIfNeeded: record.node_num))
     }
 }
