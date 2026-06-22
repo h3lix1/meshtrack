@@ -51,43 +51,56 @@
             self.store = store
         }
 
-        /// Nodes visible after the channel filter then the packet focus narrow it: the
-        /// channel filter runs first, the focus (if any) isolates a single packet's
-        /// trace + the nodes it touches.
-        private var visibleNodes: [NetworkNode] {
-            let channelled = channelFilter.nodes(nodes)
-            return PacketFocus.focusNodes(
-                channelled, traces: channelFilter.traces(traces, nodes: nodes),
-                selectedPacketID: selectedPacketID
+        /// The channel/focus-narrowed collections the body needs, derived ONCE from the
+        /// current inputs (nodes, traces, channel selection, packet focus). None of these
+        /// depend on the animation clock, so computing them here — and capturing the
+        /// results into the per-frame `TimelineView` closure — keeps the filtering off the
+        /// 60 Hz redraw path. The previous computed properties recomputed `channelFilter`
+        /// (an O(n) `Set` build + filter) two-to-three times PER FRAME.
+        private struct DerivedView {
+            let visibleNodes: [NetworkNode]
+            let visibleTraces: [PacketTrace]
+            /// Traces under the channel filter but BEFORE the packet focus — the legend
+            /// lists these so a focused view still offers every packet to switch/reset to.
+            let channelledTraces: [PacketTrace]
+        }
+
+        private var derived: DerivedView {
+            let channelledNodes = channelFilter.nodes(nodes)
+            let channelledTraces = channelFilter.traces(traces, nodes: nodes)
+            let visibleNodes = PacketFocus.focusNodes(
+                channelledNodes, traces: channelledTraces, selectedPacketID: selectedPacketID
+            )
+            return DerivedView(
+                visibleNodes: visibleNodes,
+                visibleTraces: PacketFocus.focusTraces(channelledTraces, selectedPacketID: selectedPacketID),
+                channelledTraces: channelledTraces
             )
         }
 
-        private var visibleTraces: [PacketTrace] {
-            PacketFocus.focusTraces(channelledTraces, selectedPacketID: selectedPacketID)
-        }
-
-        /// Traces under the channel filter but BEFORE the packet focus — the legend
-        /// lists these so a focused view still offers every packet to switch/reset to.
-        private var channelledTraces: [PacketTrace] {
-            channelFilter.traces(traces, nodes: nodes)
-        }
-
         public var body: some View {
-            ZStack(alignment: .topTrailing) {
+            // Derive the narrowed collections ONCE per state change. `body` re-runs only
+            // when an observed input changes (nodes/traces/filter/focus) — the per-frame
+            // clock lives inside the TimelineView closure below, which now just reads these
+            // precomputed values instead of re-filtering every frame.
+            let derived = derived
+            return ZStack(alignment: .topTrailing) {
                 // The MapKit substrate updates only when the node set changes — it stays
                 // OUTSIDE the TimelineView so it isn't re-created every animation frame
                 // (which spun updateNSView → state mutation → a view-graph beachball).
                 MeshMapView(
-                    nodes: visibleNodes,
+                    nodes: derived.visibleNodes,
                     state: mapState,
-                    onSelectNode: store == nil ? nil : { selectedNode = nodeByID($0) }
+                    onSelectNode: store == nil ? nil : { id in
+                        selectedNode = derived.visibleNodes.first { $0.id == id }
+                    }
                 )
 
                 // Only the animated trace overlay needs the per-frame clock.
                 TimelineView(.animation) { timeline in
                     TraceOverlayCanvas(
-                        nodes: visibleNodes,
-                        traces: visibleTraces,
+                        nodes: derived.visibleNodes,
+                        traces: derived.visibleTraces,
                         state: mapState,
                         clock: timeline.date.timeIntervalSinceReferenceDate,
                         hopDuration: settings.hopDuration,
@@ -101,7 +114,7 @@
                     ChannelFilterControl(filter: channelFilter, presets: availablePresets)
                     VizSettingsPanel(
                         settings: settings,
-                        traces: channelledTraces,
+                        traces: derived.channelledTraces,
                         relayCandidateCount: relayCandidateCount,
                         selectedPacketID: selectedPacketID,
                         onSelectPacket: {
@@ -116,11 +129,6 @@
                     NodeDetailPopover(node: node, store: store)
                 }
             }
-        }
-
-        /// Resolve a tapped node id back to its NetworkNode (from the visible set).
-        private func nodeByID(_ id: Int64) -> NetworkNode? {
-            visibleNodes.first { $0.id == id }
         }
     }
 

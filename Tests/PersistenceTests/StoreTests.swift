@@ -147,6 +147,43 @@ struct StoreTests {
     }
 
     @Test
+    func `latestPositionFixes returns the newest fix per node in one query`() async throws {
+        let store = try makeStore()
+        // Node 7: two fixes — the later `t` must win.
+        try await store.appendPositionFix(PositionFixRecord(node_num: 7, t: 10, lat: 1.0, lon: 1.0))
+        try await store.appendPositionFix(PositionFixRecord(node_num: 7, t: 20, lat: 2.0, lon: 2.0))
+        // Node 9: a single fix.
+        try await store.appendPositionFix(PositionFixRecord(node_num: 9, t: 5, lat: 3.0, lon: 3.0))
+
+        let latest = try await store.latestPositionFixes()
+        #expect(latest.count == 2)
+        #expect(latest[7]?.t == 20)
+        #expect(latest[7]?.lat == 2.0)
+        #expect(latest[9]?.t == 5)
+        // A node with no fix simply isn't present (the live view ignores it).
+        #expect(latest[42] == nil)
+    }
+
+    @Test
+    func `latestPositionFixes breaks t ties by the later-inserted fix`() async throws {
+        let store = try makeStore()
+        // Two fixes at the SAME instant: the batched query must keep the later-inserted
+        // one, matching loadNodes()'s old `max(by: { $0.t < $1.t })` tie-break.
+        try await store.appendPositionFix(PositionFixRecord(node_num: 7, t: 10, lat: 1.0, lon: 1.0))
+        try await store.appendPositionFix(PositionFixRecord(node_num: 7, t: 10, lat: 9.0, lon: 9.0))
+
+        let latest = try await store.latestPositionFixes()
+        #expect(latest[7]?.lat == 9.0)
+    }
+
+    @Test
+    func `latestPositionFixes is empty when no node has a fix`() async throws {
+        let store = try makeStore()
+        let latest = try await store.latestPositionFixes()
+        #expect(latest.isEmpty)
+    }
+
+    @Test
     func `on-disk database is opened in WAL mode`() async throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("meshtrack-test-\(UUID().uuidString).sqlite").path
