@@ -47,17 +47,23 @@ public struct VCRControlActions {
     public var scrub: (Double) -> Void
     public var setSpeed: (PlaybackSpeed) -> Void
     public var goLive: () -> Void
+    /// Advance playback by the given real-seconds delta since the last frame. The
+    /// view fires this once per frame while playing; the host forwards it to
+    /// `TimelineViewModel.tick(delta:)`, which scales by speed and stops at the end.
+    public var tick: (Double) -> Void
 
     public init(
         togglePlay: @escaping () -> Void = {},
         scrub: @escaping (Double) -> Void = { _ in },
         setSpeed: @escaping (PlaybackSpeed) -> Void = { _ in },
-        goLive: @escaping () -> Void = {}
+        goLive: @escaping () -> Void = {},
+        tick: @escaping (Double) -> Void = { _ in }
     ) {
         self.togglePlay = togglePlay
         self.scrub = scrub
         self.setSpeed = setSpeed
         self.goLive = goLive
+        self.tick = tick
     }
 }
 
@@ -89,6 +95,16 @@ public struct VCRControlView: View {
                 .strokeBorder(.white.opacity(0.08), lineWidth: 1)
         )
         .frame(minWidth: 560)
+        .background(playbackDriver)
+    }
+
+    /// While playing, a `TimelineView`-backed driver ticks the playhead each frame;
+    /// when paused it's absent, so SwiftUI tears down the frame schedule and ticking
+    /// stops. Kept out of the snapshot path (zero-size, only present mid-playback).
+    @ViewBuilder private var playbackDriver: some View {
+        if state.isPlaying {
+            PlaybackTickDriver(onTick: actions.tick)
+        }
     }
 
     // MARK: Play / pause
