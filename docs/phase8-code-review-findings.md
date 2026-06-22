@@ -20,7 +20,7 @@ regression next time.
 
 ## P1 - Live Behavior And Data Correctness
 
-### [ ] 1. Settings save does not trigger the claimed live reconnect
+### [x] 1. Settings save does not trigger the claimed live reconnect
 - **Where:** `Sources/MeshtrackApp/MeshtrackApp.swift:222`,
   `Sources/App/Settings/ConnectionSettingsView.swift:204`,
   `Sources/App/Settings/ConnectionSettingsViewModel.swift:183`
@@ -37,7 +37,7 @@ regression next time.
   saving a broker from onboarding starts `LiveCoordinator` without relaunch, and
   that changing the active source restarts the stream.
 
-### [ ] 2. `autoConnect` and refresh interval settings are ignored by runtime startup
+### [x] 2. `autoConnect` and refresh interval settings are ignored by runtime startup
 - **Where:** `Sources/Domain/AppConfig.swift:53`, `Sources/Domain/AppConfig.swift:65`,
   `Sources/App/Settings/GeneralSettingsView.swift:151`,
   `Sources/MeshtrackApp/MeshtrackApp.swift:251`, `Sources/MeshtrackApp/MeshtrackApp.swift:261`
@@ -51,7 +51,7 @@ regression next time.
   refresh interval into `LiveCoordinator`. Add tests for disabled auto-connect and
   custom refresh cadence.
 
-### [ ] 3. General and Alerts settings views can overwrite persisted values with defaults
+### [x] 3. General and Alerts settings views can overwrite persisted values with defaults
 - **Where:** `Sources/MeshtrackApp/MeshtrackApp.swift:167`,
   `Sources/MeshtrackApp/MeshtrackApp.swift:173`,
   `Sources/App/Settings/GeneralSettingsView.swift:20`,
@@ -67,7 +67,7 @@ regression next time.
   alert rules, open the production settings tab, and verify the rendered model is
   populated before Save.
 
-### [ ] 4. Live ingest records receive latency as zero
+### [x] 4. Live ingest records receive latency as zero
 - **Where:** `Sources/Ingest/PacketDecoder.swift:70`,
   `Sources/Ingest/IngestPipeline.swift:125`, `Sources/Ingest/IngestPipeline.swift:131`,
   `Sources/MeshProtos/mesh.pb.swift:2718`
@@ -81,7 +81,7 @@ regression next time.
   and keep `frame.receivedAt` for `ingest_time`. Add an ingest test with packet
   rx time at 100s and frame receipt at 105s asserting 5s latency.
 
-### [ ] 5. Permanent extraction unique indexes violate the sliding-window dedup contract
+### [x] 5. Permanent extraction unique indexes violate the sliding-window dedup contract
 - **Where:** `Sources/Persistence/Migrations.swift:282`,
   `Sources/Persistence/Migrations.swift:306`,
   `Sources/Persistence/Store.swift:184`, `Sources/Persistence/Store.swift:224`,
@@ -99,7 +99,7 @@ regression next time.
   Add tests that same `(packet_id, from_num)` inside 600s dedups across reconnect,
   but the same key after 601s records a new extraction.
 
-### [ ] 6. Ownership-sensitive alert defaults still treat unknown nodes as managed
+### [x] 6. Ownership-sensitive alert defaults still treat unknown nodes as managed
 - **Where:** `Sources/Domain/NodeManagement.swift:17`,
   `Sources/RuleEngine/RuleEvaluator.swift:67`,
   `Sources/Scenario/ScenarioModel.swift:113`,
@@ -115,7 +115,7 @@ regression next time.
   Add a scenario test where omitted `managed` and `silence_hours` produce no stale
   alert.
 
-### [ ] 7. Alert rules are configurable, but no live rule-generation loop exists
+### [x] 7. Alert rules are configurable, but no live rule-generation loop exists
 - **Where:** `Sources/RuleEngine/RuleEvaluator.swift:63`,
   `Sources/Scenario/LivenessScenarioEvaluator.swift:47`,
   `Sources/App/Alerts/AlertsConsoleViewModel.swift:104`,
@@ -131,7 +131,7 @@ regression next time.
   `AlertEngine`, then persist `AlertRecord`s. Add a live-composition test that
   seeded stale telemetry plus an enabled rule creates a console alert.
 
-### [ ] 8. Fleet/provision apply paths are store-backed, not over-the-air admin
+### [x] 8. Fleet/provision apply paths are store-backed, not over-the-air admin
 - **Where:** `Sources/App/AppComposition.swift:59`,
   `Sources/App/AppComposition.swift:62`,
   `Sources/App/Provisioning/ProvisioningWorkflowFactory.swift:29`,
@@ -146,7 +146,7 @@ regression next time.
   disable/label the current UI as local-record-only. Add a spy transport test that
   the production composition sends admin messages and verifies read-back.
 
-### [ ] 9. Rollout abort does not cooperatively stop later node applies
+### [x] 9. Rollout abort does not cooperatively stop later node applies
 - **Where:** `Sources/App/Fleet/FleetRolloutViewModel.swift:212`,
   `Sources/App/Fleet/FleetRolloutViewModel.swift:232`,
   `Sources/Provisioning/FleetApplier.swift:73`
@@ -161,7 +161,7 @@ regression next time.
   `phase == .rolling`. Add a test with a slow fake channel: abort during node 1
   and assert node 2 is never applied.
 
-### [ ] 10. Position-precision admin message can wipe the primary channel settings
+### [x] 10. Position-precision admin message can wipe the primary channel settings
 - **Where:** `Sources/Provisioning/AdminMessageMapping.swift:205`,
   `Sources/Provisioning/AdminMessageMapping.swift:211`,
   `Sources/Provisioning/AdminMessageMapping.swift:216`
@@ -180,7 +180,7 @@ regression next time.
 
 ## P2 - Settings, Alerts, And UI Composition
 
-### [ ] 11. Stale alert thresholds are edited as hours but evaluated as seconds
+### [x] 11. Stale alert thresholds are edited as hours but evaluated as seconds
 - **Where:** `Sources/App/Settings/AlertsConfigStore.swift:32`,
   `Sources/App/Settings/AlertsConfigStore.swift:41`,
   `Sources/MeshtrackApp/Integration.swift:75`,
@@ -194,7 +194,7 @@ regression next time.
   canonical seconds and convert only for display. Add a test that the 24h UI value
   evaluates as 86,400 seconds and round-trips back to 24h in the editor.
 
-### [ ] 12. Alert console ignores the persisted default snooze
+### [x] 12. Alert console ignores the persisted default snooze
 - **Where:** `Sources/MeshtrackApp/Integration.swift:87`,
   `Sources/App/AppComposition.swift:118`
 - **Bug:** Phase8 now persists the default snooze in `app_config`, but the live
@@ -205,7 +205,7 @@ regression next time.
   `AlertsConsoleViewModel`. Test that a saved 900-second default snoozes an alert
   to now plus 900 seconds.
 
-### [ ] 13. Alert cooldown is lost when persisted alerts are rehydrated
+### [x] 13. Alert cooldown is lost when persisted alerts are rehydrated
 - **Where:** `Sources/App/Alerts/AlertsConsoleViewModel.swift:223`,
   `Sources/App/Alerts/AlertsConsoleViewModel.swift:232`,
   `Sources/RuleEngine/AlertEngine.swift:112`,
@@ -218,7 +218,7 @@ regression next time.
   rule definition. Add a test where a resolved alert with a 1-hour cooldown remains
   suppressed after reload.
 
-### [ ] 14. MQTT channel capacity contradicts the project decision
+### [x] 14. MQTT channel capacity contradicts the project decision
 - **Where:** `SPEC.md:263`, `Sources/App/Settings/ChannelsSettingsViewModel.swift:25`,
   `Sources/App/Settings/ChannelsSettingsViewModel.swift:30`,
   `Tests/AppTests/ChannelsSettingsViewModelTests.swift:157`
@@ -231,7 +231,7 @@ regression next time.
   the 21st MQTT channel is rejected. If the product decision changed, update SPEC
   and add an ADR first.
 
-### [ ] 15. Normal custom-PSK channel flow stores the key under the wrong hash
+### [x] 15. Normal custom-PSK channel flow stores the key under the wrong hash
 - **Where:** `Sources/App/Settings/ChannelsSettingsViewModel.swift:254`,
   `Sources/App/Settings/ChannelsSettingsViewModel.swift:269`,
   `Sources/App/Settings/ChannelsSettingsViewModel.swift:302`,
@@ -246,7 +246,7 @@ regression next time.
   hash. Add a test for "add named custom channel, set PSK, decode packet with
   custom-derived hash".
 
-### [ ] 16. Removing the default channel does not stop default-key decoding
+### [x] 16. Removing the default channel does not stop default-key decoding
 - **Where:** `Sources/App/ChannelKeyResolver.swift:38`,
   `Sources/MeshtrackApp/Integration.swift:170`,
   `Sources/MeshtrackApp/Integration.swift:199`
@@ -260,7 +260,7 @@ regression next time.
   for deleted defaults. Test clear/delete in the same session and after
   reconstructing `KeychainChannelManager`.
 
-### [ ] 17. Packet inspector, analytics, VCR, and command palette are not live-wired
+### [x] 17. Packet inspector, analytics, VCR, and command palette are not live-wired
 - **Where:** `Sources/App/AppComposition.swift:37`,
   `Sources/App/AppComposition.swift:45`,
   `Sources/App/Analytics/NodeAnalyticsView.swift:31`,
@@ -279,7 +279,7 @@ regression next time.
   that live sections do not use sample models and that VCR/search controls are
   reachable from the root.
 
-### [ ] 18. Messages view loads once and channel names can stay stale
+### [x] 18. Messages view loads once and channel names can stay stale
 - **Where:** `Sources/App/Messages/ChannelsView.swift:27`,
   `Sources/App/Messages/ChannelsViewModel.swift:182`,
   `Sources/App/Messages/ChannelsViewModel.swift:186`,
@@ -294,7 +294,7 @@ regression next time.
   labels from the newest non-empty name. Test that a loaded `ChannelsViewModel`
   updates after `recordMessage` and prefers the newer channel name.
 
-### [ ] 19. Node directory detail actions are exposed but default to no-op callbacks
+### [x] 19. Node directory detail actions are exposed but default to no-op callbacks
 - **Where:** `Sources/App/AppComposition.swift:34`,
   `Sources/App/Nodes/NodeDirectoryView.swift:26`,
   `Sources/App/Nodes/NodeDirectoryDetailView.swift:107`,
@@ -307,7 +307,7 @@ regression next time.
   the buttons until callbacks are supplied. Add a composition test that each
   visible action has a non-default handler.
 
-### [ ] 20. Channel filter assigns old traces to the source node's latest channel
+### [x] 20. Channel filter assigns old traces to the source node's latest channel
 - **Where:** `Sources/App/NetworkViewModel.swift:78`,
   `Sources/App/Map/ChannelFilter.swift:42`,
   `Sources/App/Visualization/NetworkModels.swift:71`
@@ -324,7 +324,7 @@ regression next time.
 
 ## P3 - Process, Packaging, And Contract Drift
 
-### [ ] 21. Mutation floor is declared, but `make verify` accepts a skipped mutation gate
+### [x] 21. Mutation floor is declared, but `make verify` accepts a skipped mutation gate
 - **Where:** `scoreboard.json:6`, `scoreboard.json:11`, `Makefile:54`,
   `.github/workflows/verify.yml:31`
 - **Bug:** The scoreboard requires `mutation_min_score = 60`, but local metrics
@@ -337,7 +337,7 @@ regression next time.
   mutation target fail under `CI=true` when the tool/config is missing or score is
   below the scoreboard floor. Update the scoreboard metric after a real run.
 
-### [ ] 22. App package and generated bundle advertise macOS 26.0, not 26.6
+### [x] 22. App package and generated bundle advertise macOS 26.0, not 26.6
 - **Where:** `SPEC.md:270`, `Package.swift:13`, `scripts/make-app.sh:52`
 - **Bug:** The source-of-truth platform floor is macOS 26.6, but SwiftPM and the
   generated app bundle both declare 26.0.
@@ -347,7 +347,7 @@ regression next time.
   Add a lightweight script or test that validates package/platform and generated
   plist values against SPEC section 10.
 
-### [ ] 23. Data-source selection is UserDefaults-only despite the shared-store contract
+### [x] 23. Data-source selection is UserDefaults-only despite the shared-store contract
 - **Where:** `IMPLEMENTATION_PLAN.md:163`,
   `Sources/App/Settings/DataSourceConfig.swift:12`,
   `Sources/MeshtrackApp/MeshtrackApp.swift:65`
@@ -370,3 +370,26 @@ regression next time.
   uses `Dictionary(..., uniquingKeysWith: { $1 })`.
 - Message ordering by equal `rx_time` was not re-filed. Current store queries use
   an `id` tie-breaker.
+
+---
+
+## Resolution notes (phase 9)
+
+All 23 findings fixed on branch `phase9` (7 parallel wave-1 agents for the leaf
+logic + 1 composition agent for the live wiring + lead docs/integration). Two items
+are wired but retain a deliberate, documented seam:
+
+- **#8 (OTA admin).** Per decision, the full OTA path is wired into the live
+  composition: Fleet/Provision → `OTAAdminChannelFactory` → `MeshAdminChannel` →
+  `LiveAdminTransport` → `AdminLink` (no more same-DB echo; the protocol is
+  spy-tested). The single remaining seam is the concrete `LiveAdminLink.exchange`,
+  which throws `AdminTransportError.notConnected` because `Transport/MeshTransport`
+  is inbound-only — the outbound radio link is genuine hardware-in-the-loop work.
+- **#17 (live-wire sections).** Packet inspector, latency overlay, ⌘K palette, and
+  the VCR transport (over a live 24h `TimelineViewModel`) are wired to real data.
+  *Deferred:* review-mode scrubbing drives the timeline VM but the map still renders
+  live nodes — feeding a reconstructed replay frame into `MeshMapSection` needs a new
+  map data-source input that doesn't exist yet.
+
+- **#14 (MQTT cap).** Resolved as "keep uncapped" — SPEC §10.2/AGENTS updated and
+  ADR 0009 added; the code/tests already matched (uncapped MQTT, 7 local).
