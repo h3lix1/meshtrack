@@ -150,4 +150,20 @@ struct FleetConfigViewModelTests {
         // Nothing was persisted — the node config snapshot was never written.
         #expect(try await store.fetchNodeConfig(nodeNum: 1) == nil)
     }
+
+    @Test
+    func `store-backed apply coalesces duplicate config fields (last wins, no trap)`() async throws {
+        // Two changes share a field: apply must not trap on Dictionary(uniqueKeysWithValues:);
+        // it coalesces to the later value rather than crashing.
+        let store = try makeStore()
+        try await seed(store, node: 1, role: "CLIENT")
+
+        let channel = StoreBackedAdminChannel(store: store, nodeNum: 1)
+        try await channel.apply([
+            ConfigChange(field: "region", from: nil, to: "EU_868"),
+            ConfigChange(field: "region", from: nil, to: "US")
+        ])
+
+        #expect(try await store.fetchNodeConfig(nodeNum: 1)?.region == "US")
+    }
 }
