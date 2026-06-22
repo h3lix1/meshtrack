@@ -107,6 +107,12 @@ public struct Scenario: Sendable, Equatable {
     public var fixes: [FixStep]
     /// Hours of silence to simulate before evaluating liveness (SPEC §2.2 stale).
     public var silenceHours: Double?
+    /// Whether the node is *managed* (we administer it). Gates ownership-sensitive
+    /// rules — `stale` / `battery_below` / `voltage_below` — per ADR 0008: an
+    /// unmanaged node is observed read-only and never battery/silence-alerted.
+    /// Defaults to `true` so existing single-fleet scenarios keep firing; declare
+    /// `managed: false` to assert a stranger's node stays silent.
+    public var isManaged: Bool
     /// The exact alert sequence the scenario asserts (order-insensitive by type).
     public var expectedAlerts: [ExpectedAlert]
 
@@ -116,6 +122,7 @@ public struct Scenario: Sendable, Equatable {
         arm: ArmConfig? = nil,
         fixes: [FixStep] = [],
         silenceHours: Double? = nil,
+        isManaged: Bool = true,
         expectedAlerts: [ExpectedAlert] = []
     ) {
         self.node = node
@@ -123,6 +130,7 @@ public struct Scenario: Sendable, Equatable {
         self.arm = arm
         self.fixes = fixes
         self.silenceHours = silenceHours
+        self.isManaged = isManaged
         self.expectedAlerts = expectedAlerts
     }
 }
