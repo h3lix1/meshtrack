@@ -205,6 +205,55 @@ struct AlertsConsoleViewModelTests {
     }
 
     @Test
+    func `default-snooze action uses the injected default duration`() async throws {
+        let store = try await seededStore(alerts: [
+            AlertRecord(
+                node_num: 0x01,
+                type: "battery_below",
+                state: .firing,
+                fired_at: at(0).nanosecondsSinceEpoch
+            )
+        ])
+        // Constructed with a 900s default (not the 3600 hardcode).
+        let viewModel = AlertsConsoleViewModel(
+            store: store, clock: InjectedClock(Self.now), defaultSnoozeSeconds: 900
+        )
+        try await viewModel.load()
+        let item = try #require(viewModel.firing.first)
+        try await viewModel.snooze(item)
+        let snoozed = try #require(viewModel.firing.first)
+        // Snoozed to now+900, not now+3600.
+        #expect(snoozed.snoozeRemaining.map { abs($0 - 900) < 0.001 } == true)
+    }
+
+    @Test
+    func `cooldown survives rehydration so a resolved alert stays suppressed`() async throws {
+        // A resolved battery alert persisted with a 1-hour cooldown in payload_json
+        // (the shape the live evaluator / console action write).
+        let payload = AlertsConsoleViewModel.payload(
+            detail: "battery low", snoozedUntil: nil, cooldownSeconds: 3600
+        )
+        let store = try await seededStore(alerts: [
+            AlertRecord(
+                node_num: 0x01,
+                type: "battery_below",
+                state: .resolved,
+                fired_at: at(-50).nanosecondsSinceEpoch,
+                resolved_at: at(0).nanosecondsSinceEpoch,
+                payload_json: payload
+            )
+        ])
+        // Relaunch: a fresh view model 100s after the resolve reloads from the store.
+        let secondSession = AlertsConsoleViewModel(store: store, clock: InjectedClock(at(100)))
+        try await secondSession.load()
+        let reloaded = try #require(secondSession.resolved.first { $0.type == .batteryBelow })
+        // Cooldown survived: ~3500s still remaining, NOT nil (which a lost cooldown —
+        // the pre-fix `cooldownSeconds: 0` — would produce, letting it refire at once).
+        let remaining = try #require(reloaded.cooldownRemaining)
+        #expect(abs(remaining - 3500) < 1.0)
+    }
+
+    @Test
     func `suppressed surface lists unmanaged nodes with an explainer`() async throws {
         let viewModel = try await model(seededStore())
         try await viewModel.load()
