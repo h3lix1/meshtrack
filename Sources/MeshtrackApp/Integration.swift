@@ -57,8 +57,8 @@ func probeBrokerConnection(
 /// Adapts the GRDB `alert_rule` table to the App-layer `AlertRuleStore` port the
 /// Alerts settings screen programs to. Maps the screen's local rule types onto the
 /// persisted `(scope, scope_id, type, params_json, enabled)` columns (the threshold
-/// is the `params_json` payload). Default-snooze persistence is a follow-up (the port
-/// supplies a 3600s default).
+/// is the `params_json` payload). The operator's default-snooze setting persists in
+/// `app_config` via `AlertDefaultSnoozeStore`, so it survives relaunch (Finding 10).
 struct MeshStoreAlertRuleStore: App.AlertRuleStore {
     let store: MeshStore
 
@@ -80,6 +80,16 @@ struct MeshStoreAlertRuleStore: App.AlertRuleStore {
     func deleteRule(scope: App.AlertRuleScope, type: App.AlertRuleType) async throws {
         let (scopeColumn, scopeID) = Self.columns(for: scope)
         try await store.deleteAlertRule(scope: scopeColumn, scopeID: scopeID, type: type.rawValue)
+    }
+
+    // MARK: Default snooze (persisted in app_config, Finding 10)
+
+    func loadDefaultSnoozeSeconds() async throws -> Double {
+        try await AlertDefaultSnoozeStore.load(from: store)
+    }
+
+    func saveDefaultSnoozeSeconds(_ seconds: Double) async throws {
+        try await AlertDefaultSnoozeStore.save(seconds, to: store)
     }
 
     // MARK: Mapping

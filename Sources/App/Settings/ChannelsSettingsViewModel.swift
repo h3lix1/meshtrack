@@ -119,25 +119,18 @@ public enum ChannelsSettingsError: Error, Equatable, Sendable {
 public enum ChannelKeyMath {
     /// The well-known Meshtastic default channel key — PSK index `1`, written
     /// `"AQ=="` in base64 (a single `0x01` byte expands to these 16 bytes). Shared
-    /// by the public LongFast/MediumFast channels (SPEC §1, §10).
-    public static let defaultPSK: [UInt8] = [
-        0xD4, 0xF1, 0xBB, 0x3A, 0x20, 0x29, 0x07, 0x59,
-        0xF0, 0xBC, 0xFF, 0xAB, 0xCF, 0x4E, 0x69, 0x01
-    ]
+    /// by the public LongFast/MediumFast channels (SPEC §1, §10). Single source of
+    /// truth: `MeshtasticChannelHash.defaultPSK`.
+    public static var defaultPSK: [UInt8] { MeshtasticChannelHash.defaultPSK }
 
     /// The Meshtastic `MeshPacket.channel` hash: XOR of every byte of the channel
     /// name with every byte of the PSK, as a single byte widened to `UInt32`
     /// (matches the firmware's `generateHash`). The default channel ("" name with
     /// the index-1 key) hashes the same way the radios do, so traffic decodes.
+    /// Delegates to the shared `MeshtasticChannelHash` so the settings screen and
+    /// the map's preset resolver can never drift.
     public static func channelHash(name: String, psk: [UInt8]) -> UInt32 {
-        var hash: UInt8 = 0
-        for byte in name.utf8 {
-            hash ^= byte
-        }
-        for byte in psk {
-            hash ^= byte
-        }
-        return UInt32(hash)
+        MeshtasticChannelHash.channelHash(name: name, psk: psk)
     }
 
     /// Parse user-entered channel-hash text into the on-wire hash byte. Accepts
