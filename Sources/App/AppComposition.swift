@@ -91,6 +91,14 @@ public extension AppModel {
         register(.health) {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
+        registerProvisioningSections(store: store, otaFactory: otaFactory)
+    }
+
+    /// Fleet + Provision sections. Split out of `registerLiveSections` so each
+    /// function stays within the lint body-length cap. Both apply through the real
+    /// OTA channel when `otaFactory` is present, else the store-backed default.
+    @MainActor
+    private func registerProvisioningSections(store: MeshStore, otaFactory: OTAAdminChannelFactory?) {
         register(.fleet) {
             AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(
                 store: store,
