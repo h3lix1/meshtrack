@@ -8,6 +8,11 @@ struct RuleEvaluatorTests {
         Instant.epoch.adding(seconds: seconds)
     }
 
+    /// Ownership-sensitive rules (stale/battery/voltage) only evaluate for managed
+    /// nodes (ADR 0008), and `conditions` now requires the flag (no default), so
+    /// the rule-mechanics tests below pass a managed node explicitly.
+    private let managed = NodeManagement(isManaged: true)
+
     @Test
     func `effective rule resolves node → class → global precedence`() {
         let rules = RuleSet([
@@ -33,16 +38,18 @@ struct RuleEvaluatorTests {
     func `stale fires when silence exceeds the threshold, quiet within it`() {
         let rules = RuleSet([AlertRule(type: .stale, scope: .global, threshold: 3600)])
         let snapshot = NodeSnapshot(nodeNum: 7, nodeClass: .fixed, lastHeard: at(0), expectedInterval: 900)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(1000)).isEmpty)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(4000)).map(\.type) == [.stale])
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(1000), management: managed).isEmpty)
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(4000), management: managed)
+            .map(\.type) == [.stale])
     }
 
     @Test
     func `a stale threshold of 0 falls back to the node's expected interval`() {
         let rules = RuleSet([AlertRule(type: .stale, scope: .global, threshold: 0)])
         let snapshot = NodeSnapshot(nodeNum: 7, nodeClass: .mobile, lastHeard: at(0), expectedInterval: 600)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(500)).isEmpty)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(700)).map(\.type) == [.stale])
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(500), management: managed).isEmpty)
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(700), management: managed)
+            .map(\.type) == [.stale])
     }
 
     @Test
@@ -55,14 +62,14 @@ struct RuleEvaluatorTests {
             nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
             expectedInterval: 900, batteryPercent: 15, voltage: 3.1
         )
-        #expect(Set(RuleEvaluator.conditions(for: low, rules: rules, now: at(1)).map(\.type))
+        #expect(Set(RuleEvaluator.conditions(for: low, rules: rules, now: at(1), management: managed).map(\.type))
             == [.batteryBelow, .voltageBelow])
 
         let healthy = NodeSnapshot(
             nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
             expectedInterval: 900, batteryPercent: 80, voltage: 4.0
         )
-        #expect(RuleEvaluator.conditions(for: healthy, rules: rules, now: at(1)).isEmpty)
+        #expect(RuleEvaluator.conditions(for: healthy, rules: rules, now: at(1), management: managed).isEmpty)
     }
 
     @Test
@@ -71,7 +78,8 @@ struct RuleEvaluatorTests {
             nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
             expectedInterval: 900, batteryPercent: 1, voltage: 1
         )
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: RuleSet([]), now: at(99999)).isEmpty)
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: RuleSet([]), now: at(99999), management: managed)
+            .isEmpty)
     }
 
     // MARK: Ownership gating (ADR 0008 / SPEC §2.10)
@@ -110,9 +118,12 @@ struct RuleEvaluatorTests {
     }
 
     @Test
-    func `the default management evaluates ownership rules (single-fleet back-compat)`() {
-        // No `management:` argument → defaults to managed, so the gate is open.
-        let conditions = RuleEvaluator.conditions(for: lowBatterySnapshot, rules: ownershipRules, now: at(1))
+    func `an explicitly managed node evaluates ownership rules`() {
+        // `management:` is now required (no default), so callers must opt in to the
+        // managed gate explicitly — a managed node opens it and battery fires.
+        let conditions = RuleEvaluator.conditions(
+            for: lowBatterySnapshot, rules: ownershipRules, now: at(1), management: managed
+        )
         #expect(conditions.contains { $0.type == .batteryBelow })
     }
 

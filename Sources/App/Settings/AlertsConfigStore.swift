@@ -38,7 +38,7 @@ public enum AlertRuleType: String, Sendable, Equatable, Hashable, CaseIterable, 
         }
     }
 
-    /// A sensible default threshold for a fresh rule, in the type's natural unit
+    /// A sensible default threshold for a fresh rule, in the type's *editor* unit
     /// (% / volts / hours).
     public var defaultThreshold: Double {
         switch self {
@@ -46,6 +46,36 @@ public enum AlertRuleType: String, Sendable, Equatable, Hashable, CaseIterable, 
         case .voltageBelow: 3.3
         case .stale: 24
         }
+    }
+
+    // MARK: Editor ↔ canonical (persisted/evaluated) unit conversion
+    //
+    // Finding 11: the editor shows the `stale` threshold in HOURS, but the canonical
+    // value the engine evaluates (and that is persisted) is SECONDS — `RuleEvaluator`
+    // compares a node's silence in seconds directly to the threshold. A raw 24 would
+    // fire after 24 seconds, not 24 hours. So the `stale` threshold is converted at
+    // the storage boundary: hours→seconds on the way down, seconds→hours on the way
+    // back up. `battery_below` (%) and `voltage_below` (V) are unit-identical in both
+    // domains and pass through untouched.
+
+    /// Seconds-per-editor-unit for this type (`stale` is hours; the rest are 1:1).
+    private var secondsPerEditorUnit: Double {
+        switch self {
+        case .stale: 3600
+        case .batteryBelow, .voltageBelow: 1
+        }
+    }
+
+    /// Convert an editor-unit threshold (e.g. 24 hours for `stale`) into the
+    /// canonical seconds value the engine evaluates and the store persists.
+    public func canonicalThreshold(fromEditor editorValue: Double) -> Double {
+        editorValue * secondsPerEditorUnit
+    }
+
+    /// Convert a canonical (persisted seconds) threshold back into the editor unit
+    /// (e.g. 86 400 seconds → 24 hours for `stale`) for display in the editor.
+    public func editorThreshold(fromCanonical canonicalValue: Double) -> Double {
+        canonicalValue / secondsPerEditorUnit
     }
 }
 
@@ -85,7 +115,10 @@ public enum AlertRuleScope: Sendable, Equatable, Hashable, Codable {
 public struct AlertRuleRecord: Sendable, Equatable, Hashable, Codable, Identifiable {
     public var scope: AlertRuleScope
     public var type: AlertRuleType
-    /// Threshold in the type's natural unit (% / volts / hours).
+    /// Threshold in the type's *editor* unit (% / volts / **hours**). The canonical
+    /// persisted/evaluated value is SECONDS for `stale`; `HoursToSecondsAlertRuleStore`
+    /// converts at the storage boundary (Finding 11), so records flowing through the
+    /// editor view model carry hours and the database holds seconds.
     public var threshold: Double
     public var enabled: Bool
 
@@ -143,4 +176,59 @@ public extension AlertRuleStore {
     }
 
     func saveDefaultSnoozeSeconds(_: Double) async throws {}
+}
+
+/// A unit-normalising `AlertRuleStore` decorator (Finding 11).
+///
+/// The Alerts editor works in *editor* units (`stale` in HOURS), but the canonical
+/// value the rule engine evaluates and the database persists is SECONDS. This wraps
+/// any underlying store and converts the `stale` threshold at the boundary:
+/// **hours→seconds on `upsertRule`** (so what's persisted is canonical seconds — the
+/// production adapter writes it verbatim, no change needed there) and
+/// **seconds→hours on `allRules`** (so the editor displays hours). `battery_below`
+/// and `voltage_below` are unit-identical and pass through unchanged, as do the
+/// snooze accessors (already canonical seconds). The lead wires this between the
+/// editor view model and the production `AlertRuleStore` at composition.
+public struct HoursToSecondsAlertRuleStore: AlertRuleStore {
+    private let wrapped: any AlertRuleStore
+
+    public init(wrapping wrapped: any AlertRuleStore) {
+        self.wrapped = wrapped
+    }
+
+    public func allRules() async throws -> [AlertRuleRecord] {
+        try await wrapped.allRules().map(Self.toEditorUnits)
+    }
+
+    public func upsertRule(_ record: AlertRuleRecord) async throws {
+        try await wrapped.upsertRule(Self.toCanonicalUnits(record))
+    }
+
+    public func deleteRule(scope: AlertRuleScope, type: AlertRuleType) async throws {
+        try await wrapped.deleteRule(scope: scope, type: type)
+    }
+
+    public func loadDefaultSnoozeSeconds() async throws -> Double {
+        try await wrapped.loadDefaultSnoozeSeconds()
+    }
+
+    public func saveDefaultSnoozeSeconds(_ seconds: Double) async throws {
+        try await wrapped.saveDefaultSnoozeSeconds(seconds)
+    }
+
+    /// Editor → canonical: the threshold leaving the editor is in editor units;
+    /// persist it as canonical seconds.
+    private static func toCanonicalUnits(_ record: AlertRuleRecord) -> AlertRuleRecord {
+        var canonical = record
+        canonical.threshold = record.type.canonicalThreshold(fromEditor: record.threshold)
+        return canonical
+    }
+
+    /// Canonical → editor: the threshold read from the store is canonical seconds;
+    /// surface it in editor units for display.
+    private static func toEditorUnits(_ record: AlertRuleRecord) -> AlertRuleRecord {
+        var editor = record
+        editor.threshold = record.type.editorThreshold(fromCanonical: record.threshold)
+        return editor
+    }
 }
