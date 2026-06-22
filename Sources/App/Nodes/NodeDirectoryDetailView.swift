@@ -10,6 +10,7 @@
 // the headless ImageRenderer snapshot renders faithfully (memory: stock controls
 // render badly headless).
 
+import Provisioning
 import SwiftUI
 
 public struct NodeDirectoryDetailView: View {
@@ -23,46 +24,66 @@ public struct NodeDirectoryDetailView: View {
     /// `setOwnership`). `isMine` / `isManaged` are passed through unchanged when
     /// `nil`.
     public var onSetOwnership: (_ isMine: Bool?, _ isManaged: Bool?) -> Void
+    /// Run an imperative node command (favorite / unfavorite / ignore / unignore)
+    /// over the admin path. The host wires it to a `MeshAdminChannel.send(_:)`.
+    public var onCommand: (NodeAdminCommand) -> Void
 
-    @State private var name: String
-    @State private var region: String
-    @State private var role: String
-    @State private var armed: Bool
-
-    private let regions = ["US", "EU_868", "EU_433", "ANZ", "CN", "JP", "IN", "KR"]
-    private let roles = ["CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT", "REPEATER", "TRACKER"]
+    // Internal (not private) so the config-form + remote-action sections, split into
+    // `NodeDirectoryDetailView+Config.swift` to stay within the lint type-body cap,
+    // can read/mutate this same state.
+    @State var name: String
+    @State var armed: Bool
+    /// Which broad-config sections are expanded (collapsible-ish, snapshot-safe).
+    @State var expanded: Set<String>
+    /// Whether this node is currently a favourite (drives the ☆/★ action).
+    @State var isFavorite: Bool
+    @State var form: NodeConfigFormState
 
     public init(
         entry: NodeDirectoryEntry,
         region: String = "US",
         role: String = "CLIENT",
+        baseline: [String: String] = [:],
+        isFavorite: Bool = false,
         armedForPreview: Bool = false,
+        expandedSections: Set<String> = ["LoRa"],
         onApply: @escaping (NodeConfigEdit) -> Void = { _ in },
         onOpenAnalytics: @escaping (Int64) -> Void = { _ in },
-        onSetOwnership: @escaping (_ isMine: Bool?, _ isManaged: Bool?) -> Void = { _, _ in }
+        onSetOwnership: @escaping (_ isMine: Bool?, _ isManaged: Bool?) -> Void = { _, _ in },
+        onCommand: @escaping (NodeAdminCommand) -> Void = { _ in }
     ) {
         self.entry = entry
         self.onApply = onApply
         self.onOpenAnalytics = onOpenAnalytics
         self.onSetOwnership = onSetOwnership
+        self.onCommand = onCommand
         _name = State(initialValue: entry.name)
-        _region = State(initialValue: region)
-        _role = State(initialValue: role)
         _armed = State(initialValue: armedForPreview)
+        _expanded = State(initialValue: expandedSections)
+        _isFavorite = State(initialValue: isFavorite)
+        // Seed the form's baseline from the supplied snapshot, defaulting region/role
+        // so the legacy two-field edit keeps a sensible starting point.
+        var seed = baseline
+        seed["region"] = seed["region"] ?? region
+        seed["role"] = seed["role"] ?? role
+        _form = State(initialValue: NodeConfigFormState(baseline: seed))
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider().overlay(.white.opacity(0.1))
-            VStack(alignment: .leading, spacing: 20) {
-                identityRow
-                ownershipSection
-                configForm
-                armingSection
-                Spacer(minLength: 0)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    identityRow
+                    ownershipSection
+                    favoriteSection
+                    configForm
+                    armingSection
+                    Spacer(minLength: 0)
+                }
+                .padding(20)
             }
-            .padding(20)
         }
         .frame(width: 440, height: 760)
         .background(Color(red: 0.05, green: 0.06, blue: 0.14))
@@ -189,33 +210,6 @@ public struct NodeDirectoryDetailView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Config form
-
-    private var configForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("CONFIGURATION").font(.system(size: 10, weight: .bold)).tracking(1)
-                .foregroundStyle(.secondary)
-            labeled("Name") {
-                HStack {
-                    Text(name).font(.system(size: 13, design: .monospaced))
-                    Spacer()
-                    Image(systemName: "pencil").font(.caption).foregroundStyle(armed ? .cyan : .secondary)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(.white.opacity(armed ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 8))
-            }
-            labeled("Region") { DirectoryChipPicker(options: regions, selection: $region, enabled: armed) }
-            labeled("Role") { DirectoryChipPicker(options: roles, selection: $role, enabled: armed) }
-        }
-    }
-
-    private func labeled(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))
-            control()
-        }
-    }
-
     // MARK: Arming gate (mirrors NodeDetailView)
 
     private var armingSection: some View {
@@ -235,7 +229,7 @@ public struct NodeDirectoryDetailView: View {
             .buttonStyle(.plain)
 
             Button {
-                onApply(NodeConfigEdit(nodeNum: entry.nodeNum, name: name, region: region, role: role))
+                onApply(NodeConfigEdit(nodeNum: entry.nodeNum, name: name, fields: form.changedFields))
             } label: {
                 Text("Apply via verified rolling update")
                     .font(.system(size: 13, weight: .semibold)).frame(maxWidth: .infinity)
@@ -257,30 +251,5 @@ public struct NodeDirectoryDetailView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(armed ? .orange.opacity(0.5) : .clear, lineWidth: 1)
         )
-    }
-}
-
-/// Chip picker mirroring `NodeDetailView`'s, scoped to the directory file so the
-/// two streams never collide on a shared private type.
-private struct DirectoryChipPicker: View {
-    let options: [String]
-    @Binding var selection: String
-    let enabled: Bool
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 6)], alignment: .leading, spacing: 6) {
-            ForEach(options, id: \.self) { option in
-                let isSelected = option == selection
-                Text(option)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(isSelected ? Color.cyan.opacity(0.22) : .white.opacity(0.05), in: Capsule())
-                    .overlay(Capsule().stroke(isSelected ? Color.cyan : .clear, lineWidth: 1))
-                    .foregroundStyle(isSelected ? .cyan : .white.opacity(enabled ? 0.7 : 0.35))
-                    .onTapGesture { if enabled { selection = option } }
-            }
-        }
     }
 }

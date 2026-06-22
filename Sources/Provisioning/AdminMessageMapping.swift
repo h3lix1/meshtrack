@@ -1,45 +1,58 @@
 // AdminMessageMapping — the pure bridge between Meshtrack's string-keyed config
 // model (`ConfigChange`, the `[String: String]` snapshots templates render and
-// diff against) and the Meshtastic `AdminMessage` / `Config` / `User` protobufs
-// (SPEC §2.7).
+// diff against) and the Meshtastic `AdminMessage` / `Config` / `ModuleConfig` /
+// `User` protobufs (SPEC §2.7).
 //
 // This is the heart of the admin transport and it is deliberately PURE: no I/O,
-// no actors, no radio. It does two things, both fully testable:
+// no actors, no radio. It does three things, all fully testable:
 //
 //   • encode([ConfigChange]) -> [AdminMessage]  — the change→AdminMessage mapping
-//     an apply sends over the wire (one or more `setConfig` / `setOwner` /
-//     reboot messages, wrapped in a begin/commit edit transaction).
-//   • decode(config:owner:) -> [String: String] — flatten a node's read-back
-//     `Config` + `User` responses into the same string snapshot the diff uses,
-//     so verification compares like-for-like.
+//     an apply sends over the wire (one or more `setConfig` / `setModuleConfig` /
+//     `setOwner` / `setChannel` messages, wrapped in a begin/commit edit
+//     transaction).
+//   • decode(config:owner:module:channel:) -> [String: String] — flatten a node's
+//     read-back `Config` + `ModuleConfig` + `User` + `Channel` responses into the
+//     same string snapshot the diff uses, so verification compares like-for-like.
+//   • command(NodeAdminCommand) -> AdminMessage — the imperative, non-config admin
+//     commands (favorite / unfavorite / ignore / unignore a node) that target a
+//     node-num rather than a config field.
 //
 // The send/receive of these messages is the effect boundary (`AdminTransport`),
 // validated on hardware (HIL); the construction here is not.
+//
+// ── The field registry ──────────────────────────────────────────────────────
+// Rather than 200 ad-hoc switch cases, every provisionable field is one entry in
+// `AdminConfigField.registry`: its string key, the `ConfigSlot` it lives in (which
+// `setConfig`/`setModuleConfig`/owner/channel message carries it and which
+// get-request reads it back), an `encode` that mutates the slot's protobuf, and a
+// `decode` that reads the value back out as a string. Adding the rest of the proto
+// surface is purely additive — append a registry entry; the apply/read-back/verify
+// pipeline is generic over the registry and never changes.
 
 import Foundation
 import MeshProtos
 
-/// A field Meshtrack knows how to provision over admin messages, with the
-/// firmware enum/string parsing that maps our `[String: String]` model to the
-/// protobufs. Adding a field means adding a case here (and its codec) — nothing
-/// else in the pipeline changes.
-public enum AdminConfigField: String, Sendable, CaseIterable {
-    /// LoRa region (always set — legal, SPEC §2.9). Maps to `Config.LoRaConfig.region`.
-    case region
-    /// Device role. Maps to `Config.DeviceConfig.role`.
-    case role
-    /// Owner short name (≤ 4 bytes). Maps to `User.shortName` via `setOwner`.
-    case shortName = "short_name"
-    /// Owner long name (≤ 39 bytes). Maps to `User.longName` via `setOwner`.
-    case longName = "long_name"
-    /// Position broadcast precision (bits). Maps to the primary channel's
-    /// `ChannelSettings.ModuleSettings.positionPrecision` via `setChannel` —
-    /// precision is a per-channel module setting, NOT a device-config bitfield.
-    case positionPrecision = "position_precision"
+/// Where a provisionable field lives in the firmware config model — both the
+/// `setX` message that carries it on apply and the `getX` request that reads it
+/// back on verify. The pipeline groups one message per distinct slot touched.
+public enum ConfigSlot: Hashable, Sendable {
+    /// A field of a `Config` sub-message (device/position/power/network/display/
+    /// lora/bluetooth/security). Carried by `setConfig`, read via `getConfigRequest`.
+    case config(AdminMessage.ConfigType)
+    /// A field of a `ModuleConfig` sub-message (mqtt/serial/telemetry/…). Carried
+    /// by `setModuleConfig`, read via `getModuleConfigRequest`.
+    case module(AdminMessage.ModuleConfigType)
+    /// An owner (`User`) field — short/long name. Carried by `setOwner`, read via
+    /// `getOwnerRequest`.
+    case owner
+    /// A per-channel module setting on the PRIMARY channel (position precision).
+    /// Carried by `setChannel` (a read-modify-write REPLACE), read via
+    /// `getChannelRequest`.
+    case channel
 }
 
 /// A typed failure constructing or interpreting an admin message — surfaced
-/// instead of force-unwrapping an unparseable region/role or a malformed value.
+/// instead of force-unwrapping an unparseable enum or a malformed value.
 public enum AdminMappingError: Error, Equatable, Sendable {
     /// A change targeted a field the admin transport does not know how to apply.
     case unsupportedField(String)
@@ -47,8 +60,12 @@ public enum AdminMappingError: Error, Equatable, Sendable {
     case unknownRegion(String)
     /// A role string did not match any firmware `DeviceConfig.Role`.
     case unknownRole(String)
+    /// An enum-valued field (e.g. modem preset, gps mode) did not parse.
+    case unknownEnum(field: String, value: String)
     /// A numeric field (e.g. position precision) was not a valid integer.
     case invalidNumber(field: String, value: String)
+    /// A boolean field was not "true"/"false" (or 1/0).
+    case invalidBool(field: String, value: String)
 }
 
 public enum AdminMessageMapping {
@@ -59,7 +76,8 @@ public enum AdminMessageMapping {
     /// (and any reboot) until everything is staged.
     ///
     /// Order is stable and deterministic: begin → owner (if any) → config (one
-    /// per config-type touched) → channel (position precision, if any) → commit.
+    /// per config-type touched, sorted) → module config (one per module-type
+    /// touched, sorted) → channel (position precision, if any) → commit.
     ///
     /// `currentPrimaryChannel` is the node's existing primary `Channel`, read back
     /// before the apply. Position precision is a per-channel module setting, and the
@@ -68,19 +86,21 @@ public enum AdminMessageMapping {
     /// PSK, role and uplink/downlink flags. Pass the read-back channel here so the
     /// emitted `setChannel` carries those forward and only `positionPrecision` moves.
     /// When `nil` (no precision change, or no channel could be read) the channel is
-    /// built fresh — acceptable only because precision is the sole field we touch and
-    /// a missing read-back means there is nothing to preserve.
+    /// built fresh — acceptable only because precision is the sole channel field we
+    /// touch and a missing read-back means there is nothing to preserve.
     public static func messages(
         for changes: [ConfigChange],
-        currentPrimaryChannel: Channel? = nil
+        currentPrimaryChannel: Channel? = nil,
+        currentModuleConfigs: [ModuleConfig] = []
     ) throws -> [AdminMessage] {
         guard !changes.isEmpty else { return [] }
         let parsed = try changes.map(parse)
 
         var body: [AdminMessage] = []
-        if let owner = ownerMessage(for: parsed) { body.append(owner) }
-        body.append(contentsOf: configMessages(for: parsed))
-        if let channel = channelMessage(for: parsed, current: currentPrimaryChannel) {
+        if let owner = try ownerMessage(for: parsed) { body.append(owner) }
+        try body.append(contentsOf: configMessages(for: parsed))
+        try body.append(contentsOf: moduleConfigMessages(for: parsed, current: currentModuleConfigs))
+        if let channel = try channelMessage(for: parsed, current: currentPrimaryChannel) {
             body.append(channel)
         }
 
@@ -89,53 +109,63 @@ public enum AdminMessageMapping {
         return [edit(begin: true)] + body + [edit(begin: false)]
     }
 
+    // MARK: Command → AdminMessage (the imperative, non-config path)
+
+    /// Build the single admin message for an imperative node command (favorite /
+    /// unfavorite / ignore / unignore). These are NOT config diffs — they target a
+    /// node-num directly and are not wrapped in a begin/commit transaction (the
+    /// firmware applies them immediately). See `NodeAdminCommand`.
+    public static func message(for command: NodeAdminCommand) -> AdminMessage {
+        var message = AdminMessage()
+        switch command {
+        case let .favorite(nodeNum): message.setFavoriteNode = nodeNum
+        case let .unfavorite(nodeNum): message.removeFavoriteNode = nodeNum
+        case let .ignore(nodeNum): message.setIgnoredNode = nodeNum
+        case let .unignore(nodeNum): message.removeIgnoredNode = nodeNum
+        }
+        return message
+    }
+
     // MARK: Config response → snapshot (the read-back / verify path)
 
-    /// Flatten a node's read-back `Config`, `User` and (primary) `Channel` into the
-    /// string snapshot the diff compares against. Only the fields Meshtrack
-    /// provisions are reported; absent sub-configs contribute nothing (so a partial
-    /// read-back never fabricates a "current" value).
-    public static func snapshot(config: Config?, owner: User?, channel: Channel? = nil) -> [String: String] {
+    /// Flatten a node's read-back `Config`, `ModuleConfig`, `User` and (primary)
+    /// `Channel` into the string snapshot the diff compares against. Only the fields
+    /// Meshtrack provisions are reported; absent sub-configs contribute nothing (so a
+    /// partial read-back never fabricates a "current" value).
+    public static func snapshot(
+        config: Config? = nil,
+        owner: User? = nil,
+        module: ModuleConfig? = nil,
+        channel: Channel? = nil
+    ) -> [String: String] {
         var snapshot: [String: String] = [:]
-        if let config {
-            switch config.payloadVariant {
-            case let .lora(lora):
-                snapshot[AdminConfigField.region.rawValue] = regionString(lora.region)
-            case let .device(device):
-                snapshot[AdminConfigField.role.rawValue] = roleString(device.role)
-            default:
-                break
-            }
-        }
-        if let owner {
-            if !owner.shortName.isEmpty {
-                snapshot[AdminConfigField.shortName.rawValue] = owner.shortName
-            }
-            if !owner.longName.isEmpty {
-                snapshot[AdminConfigField.longName.rawValue] = owner.longName
-            }
-        }
-        if let channel, channel.hasSettings, channel.settings.hasModuleSettings {
-            snapshot[AdminConfigField.positionPrecision.rawValue] =
-                String(channel.settings.moduleSettings.positionPrecision)
-        }
+        if let config { decodeConfig(config, into: &snapshot) }
+        if let module { decodeModule(module, into: &snapshot) }
+        if let owner { decodeOwner(owner, into: &snapshot) }
+        if let channel { decodeChannel(channel, into: &snapshot) }
         return snapshot
     }
 
-    /// Which firmware config-types a set of changes touches — the `getConfig`
-    /// requests a read-back must issue to verify (region → lora, role → device).
-    /// Owner fields are read via `getOwnerRequest` and position precision via
-    /// `getChannelRequest`; both are reported separately (see `touchesOwner` /
-    /// `touchesChannel`), not as `getConfig` types.
+    // MARK: Read-back planning (which get-requests a verify must issue)
+
+    /// Which firmware `Config`-types a set of changes touches — the `getConfigRequest`
+    /// requests a read-back must issue to verify (region → lora, role → device, …).
     public static func configTypes(for changes: [ConfigChange]) throws -> Set<AdminMessage.ConfigType> {
         var types: Set<AdminMessage.ConfigType> = []
         for change in changes {
-            switch try field(for: change.field) {
-            case .region: types.insert(.loraConfig)
-            case .role: types.insert(.deviceConfig)
-            case .positionPrecision: break // per-channel, read via getChannelRequest
-            case .shortName, .longName: break // owner, not a getConfig type
-            }
+            if case let .config(type) = try field(for: change.field).spec.slot { types.insert(type) }
+        }
+        return types
+    }
+
+    /// Which firmware `ModuleConfig`-types a set of changes touches — the
+    /// `getModuleConfigRequest` requests a read-back must issue to verify.
+    public static func moduleConfigTypes(
+        for changes: [ConfigChange]
+    ) throws -> Set<AdminMessage.ModuleConfigType> {
+        var types: Set<AdminMessage.ModuleConfigType> = []
+        for change in changes {
+            if case let .module(type) = try field(for: change.field).spec.slot { types.insert(type) }
         }
         return types
     }
@@ -143,16 +173,27 @@ public enum AdminMessageMapping {
     /// Whether the changes include any owner field (short/long name), i.e. whether
     /// a read-back must also issue a `getOwnerRequest`.
     public static func touchesOwner(_ changes: [ConfigChange]) -> Bool {
-        changes.contains { field(forOptional: $0.field) == .shortName ||
-            field(forOptional: $0.field) == .longName
-        }
+        changes.contains { slot(forOptional: $0.field) == .owner }
     }
 
     /// Whether the changes touch a per-channel setting (position precision), i.e.
     /// whether a read-back must also issue a `getChannelRequest` for the primary
     /// channel to verify.
     public static func touchesChannel(_ changes: [ConfigChange]) -> Bool {
-        changes.contains { field(forOptional: $0.field) == .positionPrecision }
+        changes.contains { slot(forOptional: $0.field) == .channel }
+    }
+
+    // MARK: validate (the confirm-time guard)
+
+    /// Validate that every change is a supported, parseable field BEFORE any apply.
+    /// Throws the first problem (unknown enum, non-numeric int, bad bool); used by
+    /// the adapter as the confirm-time guard so a bad template can't be sent.
+    public static func validate(_ changes: [ConfigChange]) throws {
+        for change in changes {
+            // Parsing a change through its codec is exactly the validation: a bad
+            // value throws here, before any message is built or sent.
+            _ = try parse(change)
+        }
     }
 
     // MARK: - Internals
@@ -163,7 +204,10 @@ public enum AdminMessageMapping {
     }
 
     private static func parse(_ change: ConfigChange) throws -> ParsedChange {
-        try ParsedChange(field: field(for: change.field), value: change.to)
+        let field = try field(for: change.field)
+        // Run the codec's value-parse as the validation step (throws on bad input).
+        try field.spec.validate(change.to)
+        return ParsedChange(field: field, value: change.to)
     }
 
     private static func field(for raw: String) throws -> AdminConfigField {
@@ -173,71 +217,118 @@ public enum AdminMessageMapping {
         return field
     }
 
-    private static func field(forOptional raw: String) -> AdminConfigField? {
-        AdminConfigField(rawValue: raw)
+    private static func slot(forOptional raw: String) -> ConfigSlot? {
+        AdminConfigField(rawValue: raw)?.spec.slot
     }
 
-    /// The `setOwner` message for any short/long-name changes (nil if none).
-    private static func ownerMessage(for changes: [ParsedChange]) -> AdminMessage? {
-        let short = changes.first { $0.field == .shortName }?.value
-        let long = changes.first { $0.field == .longName }?.value
-        guard short != nil || long != nil else { return nil }
+    // MARK: setOwner
+
+    /// The `setOwner` message for any owner-field changes (nil if none). All owner
+    /// fields are folded into one `User`.
+    private static func ownerMessage(for changes: [ParsedChange]) throws -> AdminMessage? {
+        let ownerChanges = changes.filter { $0.field.spec.slot == .owner }
+        guard !ownerChanges.isEmpty else { return nil }
         var owner = User()
-        if let short { owner.shortName = short }
-        if let long { owner.longName = long }
+        for change in ownerChanges {
+            try change.field.spec.encodeOwner(change.value, &owner)
+        }
         var message = AdminMessage()
         message.setOwner = owner
         return message
     }
 
-    /// One `setConfig` message per config-type touched (lora / device), each
-    /// carrying only the fields that changed. Position precision is per-channel
-    /// (see `channelMessage`), not a device config.
-    private static func configMessages(for changes: [ParsedChange]) -> [AdminMessage] {
-        var messages: [AdminMessage] = []
-        if let region = changes.first(where: { $0.field == .region }) {
-            var lora = Config.LoRaConfig()
-            lora.region = regionCode(region.value)
-            messages.append(setConfig(.lora(lora)))
+    // MARK: setConfig (one per ConfigType touched)
+
+    /// One `setConfig` message per `Config`-type touched, each carrying only the
+    /// fields that changed for that type. Emitted in a stable, sorted order.
+    private static func configMessages(for changes: [ParsedChange]) throws -> [AdminMessage] {
+        var byType: [AdminMessage.ConfigType: [ParsedChange]] = [:]
+        for change in changes {
+            if case let .config(type) = change.field.spec.slot {
+                byType[type, default: []].append(change)
+            }
         }
-        if let role = changes.first(where: { $0.field == .role }) {
-            var device = Config.DeviceConfig()
-            device.role = roleCode(role.value)
-            messages.append(setConfig(.device(device)))
+        return try byType.sorted { $0.key.rawValue < $1.key.rawValue }.map { type, typeChanges in
+            // Seed the right (empty) sub-message so encoders mutate it in place.
+            var config = Config()
+            config.payloadVariant = Self.emptyConfigVariant(type)
+            for change in typeChanges {
+                try change.field.spec.encodeConfig(change.value, &config)
+            }
+            var message = AdminMessage()
+            message.setConfig = config
+            return message
         }
-        return messages
     }
+
+    // MARK: setModuleConfig (one per ModuleConfigType touched)
+
+    /// One `setModuleConfig` message per `ModuleConfig`-type touched, each carrying
+    /// only the fields that changed for that type. Emitted in a stable, sorted order.
+    ///
+    /// `setModuleConfig` REPLACES the whole module sub-message on the node (like
+    /// `setChannel`), so this is a read-modify-write: it starts from the matching
+    /// read-back module in `current` (preserving every field we don't touch) and
+    /// overwrites only the changed fields. Without a read-back it falls back to an
+    /// empty sub-message (nothing to preserve).
+    private static func moduleConfigMessages(
+        for changes: [ParsedChange],
+        current: [ModuleConfig]
+    ) throws -> [AdminMessage] {
+        var byType: [AdminMessage.ModuleConfigType: [ParsedChange]] = [:]
+        for change in changes {
+            if case let .module(type) = change.field.spec.slot {
+                byType[type, default: []].append(change)
+            }
+        }
+        return try byType.sorted { $0.key.rawValue < $1.key.rawValue }.map { type, typeChanges in
+            // Start from the read-back module of this type (read-modify-write) or, when
+            // none was read, an empty sub-message of the right variant.
+            var module = ModuleConfig()
+            module.payloadVariant = current.first { moduleType(of: $0) == type }?.payloadVariant
+                ?? Self.emptyModuleVariant(type)
+            for change in typeChanges {
+                try change.field.spec.encodeModule(change.value, &module)
+            }
+            var message = AdminMessage()
+            message.setModuleConfig = module
+            return message
+        }
+    }
+
+    /// The `ModuleConfigType` matching a `ModuleConfig`'s payload variant (nil for
+    /// variants Meshtrack doesn't provision). Derived from the registry — a module
+    /// field whose `matchesModule` accepts `module` carries that module's type — so
+    /// there is no hand-maintained 16-way switch to drift out of sync. Used to pair a
+    /// read-back module with its type for the read-modify-write above.
+    private static func moduleType(of module: ModuleConfig) -> AdminMessage.ModuleConfigType? {
+        for spec in AdminConfigField.registry where spec.matchesModule(module) {
+            if case let .module(type) = spec.slot { return type }
+        }
+        return nil
+    }
+
+    // MARK: setChannel (position precision, read-modify-write)
 
     /// The index of the primary channel — where position precision is provisioned.
     private static let primaryChannelIndex: Int32 = 0
 
-    /// The `setChannel` message carrying position precision as the primary
-    /// channel's `ModuleSettings.positionPrecision` (nil if precision unchanged).
-    /// This is the firmware field precision actually lives in — NOT the
-    /// device-config `position.positionFlags` boolean bitfield.
-    ///
-    /// Read-modify-write: `setChannel` REPLACES the whole channel on the node, so we
-    /// start from the read-back `current` channel (name, PSK, role, uplink/downlink
-    /// flags, every other module setting) and overwrite ONLY `positionPrecision`.
-    /// Without a read-back we fall back to a fresh channel — there is nothing to
-    /// preserve, and precision is the only field this message ever sets.
+    /// The `setChannel` message carrying any per-channel field (position precision)
+    /// as a read-modify-write over the read-back `current` channel (nil if none).
+    /// `setChannel` REPLACES the whole channel, so we start from `current` (name,
+    /// PSK, role, uplink/downlink flags, every other module setting) and overwrite
+    /// only the changed channel field(s).
     private static func channelMessage(
         for changes: [ParsedChange],
         current: Channel?
-    ) -> AdminMessage? {
-        guard let precision = changes.first(where: { $0.field == .positionPrecision }) else {
-            return nil
-        }
-        // Preserve everything the node already has; mutate only the precision.
+    ) throws -> AdminMessage? {
+        let channelChanges = changes.filter { $0.field.spec.slot == .channel }
+        guard !channelChanges.isEmpty else { return nil }
         var channel = current ?? freshPrimaryChannel()
-        // A read-back channel always has settings, but guard so a partial one can't
-        // drop the existing fields by writing an empty ChannelSettings.
-        var settings = channel.hasSettings ? channel.settings : ChannelSettings()
-        var moduleSettings = settings.hasModuleSettings ? settings.moduleSettings : ModuleSettings()
-        moduleSettings.positionPrecision = UInt32(precision.value) ?? 0
-        settings.moduleSettings = moduleSettings
-        channel.settings = settings
-        // Pin the addressing even when read-back omitted it (it targets the primary).
+        for change in channelChanges {
+            try change.field.spec.encodeChannel(change.value, &channel)
+        }
+        // Pin the addressing even when the read-back omitted it (targets the primary).
         channel.index = primaryChannelIndex
         channel.role = .primary
         var message = AdminMessage()
@@ -253,88 +344,44 @@ public enum AdminMessageMapping {
         return channel
     }
 
-    private static func setConfig(_ variant: Config.OneOf_PayloadVariant) -> AdminMessage {
-        var config = Config()
-        config.payloadVariant = variant
-        var message = AdminMessage()
-        message.setConfig = config
-        return message
-    }
-
     private static func edit(begin: Bool) -> AdminMessage {
         var message = AdminMessage()
         if begin { message.beginEditSettings = true } else { message.commitEditSettings = true }
         return message
     }
 
-    // MARK: Region / role string <-> enum
+    // MARK: Decode dispatch (read-back)
 
-    /// Parse a region string (`"US"`, `"EU_868"`, …) to a firmware `RegionCode`,
-    /// falling back to `.unset` for an unknown region (never a force-unwrap; the
-    /// pre-apply validation in `validate` is the place to reject bad input).
-    static func regionCode(_ raw: String) -> Config.LoRaConfig.RegionCode {
-        regionByName[normalize(raw)] ?? .unset
-    }
-
-    static func roleCode(_ raw: String) -> Config.DeviceConfig.Role {
-        roleByName[normalize(raw)] ?? .client
-    }
-
-    static func regionString(_ code: Config.LoRaConfig.RegionCode) -> String {
-        nameByRegion[code] ?? "UNSET"
-    }
-
-    static func roleString(_ role: Config.DeviceConfig.Role) -> String {
-        nameByRole[role] ?? "CLIENT"
-    }
-
-    /// Validate that every change is a supported, parseable field BEFORE any apply.
-    /// Throws the first problem (unknown region/role, non-numeric precision); used
-    /// by the adapter as the confirm-time guard so a bad template can't be sent.
-    public static func validate(_ changes: [ConfigChange]) throws {
-        for change in changes {
-            let field = try field(for: change.field)
-            switch field {
-            case .region:
-                guard Self.regionByName[normalize(change.to)] != nil else {
-                    throw AdminMappingError.unknownRegion(change.to)
-                }
-            case .role:
-                guard Self.roleByName[normalize(change.to)] != nil else {
-                    throw AdminMappingError.unknownRole(change.to)
-                }
-            case .positionPrecision:
-                guard UInt32(change.to) != nil else {
-                    throw AdminMappingError.invalidNumber(field: change.field, value: change.to)
-                }
-            case .shortName, .longName:
-                break // byte-limit validation already happened at render time
+    private static func decodeConfig(_ config: Config, into snapshot: inout [String: String]) {
+        for spec in AdminConfigField.registry where spec.matchesConfig(config) {
+            if let value = spec.decodeConfig(config) {
+                snapshot[spec.field.rawValue] = value
             }
         }
     }
 
-    private static func normalize(_ raw: String) -> String {
-        raw.uppercased().replacingOccurrences(of: "-", with: "_")
+    private static func decodeModule(_ module: ModuleConfig, into snapshot: inout [String: String]) {
+        for spec in AdminConfigField.registry where spec.matchesModule(module) {
+            if let value = spec.decodeModule(module) {
+                snapshot[spec.field.rawValue] = value
+            }
+        }
     }
 
-    private static let regionByName: [String: Config.LoRaConfig.RegionCode] = [
-        "UNSET": .unset, "US": .us, "EU_433": .eu433, "EU_868": .eu868, "CN": .cn,
-        "JP": .jp, "ANZ": .anz, "KR": .kr, "TW": .tw, "RU": .ru, "IN": .in,
-        "NZ_865": .nz865, "TH": .th, "LORA_24": .lora24, "UA_433": .ua433,
-        "UA_868": .ua868, "MY_433": .my433, "MY_919": .my919, "SG_923": .sg923
-    ]
+    private static func decodeOwner(_ owner: User, into snapshot: inout [String: String]) {
+        for spec in AdminConfigField.registry where spec.slot == .owner {
+            if let value = spec.decodeOwner(owner) {
+                snapshot[spec.field.rawValue] = value
+            }
+        }
+    }
 
-    private static let nameByRegion: [Config.LoRaConfig.RegionCode: String] =
-        Dictionary(uniqueKeysWithValues: regionByName.map { ($1, $0) })
-
-    private static let roleByName: [String: Config.DeviceConfig.Role] = [
-        "CLIENT": .client, "CLIENT_MUTE": .clientMute, "ROUTER": .router,
-        "ROUTER_CLIENT": .routerClient, "REPEATER": .repeater, "TRACKER": .tracker,
-        "SENSOR": .sensor, "TAK": .tak, "CLIENT_HIDDEN": .clientHidden,
-        "LOST_AND_FOUND": .lostAndFound, "TAK_TRACKER": .takTracker,
-        "ROUTER_LATE": .routerLate, "CLIENT_BASE": .clientBase
-    ]
-
-    private static let nameByRole: [Config.DeviceConfig.Role: String] =
-        Dictionary(uniqueKeysWithValues: roleByName.map { ($1, $0) })
+    private static func decodeChannel(_ channel: Channel, into snapshot: inout [String: String]) {
+        guard channel.hasSettings, channel.settings.hasModuleSettings else { return }
+        for spec in AdminConfigField.registry where spec.slot == .channel {
+            if let value = spec.decodeChannel(channel) {
+                snapshot[spec.field.rawValue] = value
+            }
+        }
+    }
 }

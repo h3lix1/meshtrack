@@ -28,28 +28,44 @@ public struct MeshAdminChannel: AdminChannel {
     /// Position precision is NOT a config-type — it is read from the primary
     /// channel (see `currentConfig`'s `channel: true`).
     private let baselineConfigTypes: Set<AdminMessage.ConfigType>
+    /// The module-config-types `currentConfig()` reads. Module fields (MQTT,
+    /// telemetry, …) live in `ModuleConfig`, read via `getModuleConfigRequest`. The
+    /// baseline is empty (modules are opt-in); a richer caller can widen it so a
+    /// template that provisions module fields read-back verifies.
+    private let baselineModuleConfigTypes: Set<AdminMessage.ModuleConfigType>
 
     public init(
         transport: any AdminTransport,
         target: AdminTarget,
-        baselineConfigTypes: Set<AdminMessage.ConfigType> = [.loraConfig, .deviceConfig]
+        baselineConfigTypes: Set<AdminMessage.ConfigType> = [.loraConfig, .deviceConfig],
+        baselineModuleConfigTypes: Set<AdminMessage.ModuleConfigType> = []
     ) {
         self.transport = transport
         self.target = target
         self.baselineConfigTypes = baselineConfigTypes
+        self.baselineModuleConfigTypes = baselineModuleConfigTypes
     }
 
     /// Read the node's current provisionable config into the string snapshot the
-    /// diff compares against. Requests the baseline config-types, the owner, and
-    /// the primary channel (which carries position precision).
+    /// diff compares against. Requests the baseline config + module-config types,
+    /// the owner, and the primary channel (which carries position precision).
     public func currentConfig() async throws -> [String: String] {
         let readback = try await transport.readback(
             configTypes: baselineConfigTypes,
+            moduleConfigTypes: baselineModuleConfigTypes,
             owner: true,
             channel: true,
             from: target
         )
         return Self.snapshot(from: readback)
+    }
+
+    /// Send a single imperative node command (favorite / unfavorite / ignore /
+    /// unignore) over the transport. Unlike a config apply these are not wrapped in a
+    /// begin/commit transaction and have no read-back verification — the firmware
+    /// applies them immediately and they are idempotent. Throws on a transport fault.
+    public func send(_ command: NodeAdminCommand) async throws {
+        try await transport.send([AdminMessageMapping.message(for: command)], to: target)
     }
 
     /// Apply confirmed changes: build the begin→set…→commit admin messages and
@@ -64,35 +80,54 @@ public struct MeshAdminChannel: AdminChannel {
     /// downlink flags and only moves `positionPrecision`.
     public func apply(_ changes: [ConfigChange]) async throws {
         guard !changes.isEmpty else { return }
-        let current = try await currentPrimaryChannelIfNeeded(for: changes)
-        let messages = try AdminMessageMapping.messages(for: changes, currentPrimaryChannel: current)
+        let (channel, modules) = try await currentSlotsIfNeeded(for: changes)
+        let messages = try AdminMessageMapping.messages(
+            for: changes,
+            currentPrimaryChannel: channel,
+            currentModuleConfigs: modules
+        )
         guard !messages.isEmpty else { return }
         try await transport.send(messages, to: target)
     }
 
-    /// Read back the node's current primary `Channel` when (and only when) a change
-    /// touches a per-channel setting (position precision) — so the precision apply is
-    /// a read-modify-write that preserves the rest of the channel. Returns `nil` when
-    /// no precision change is present (no channel read needed).
-    private func currentPrimaryChannelIfNeeded(for changes: [ConfigChange]) async throws -> Channel? {
-        guard AdminMessageMapping.touchesChannel(changes) else { return nil }
+    /// Read back the node's current primary `Channel` and/or touched `ModuleConfig`s
+    /// — but ONLY when a change touches one — so the apply is a read-modify-write
+    /// that preserves the fields it doesn't mutate (`setChannel` / `setModuleConfig`
+    /// both REPLACE the whole sub-message). Returns `(nil, [])` when neither is
+    /// touched (no extra read needed).
+    private func currentSlotsIfNeeded(
+        for changes: [ConfigChange]
+    ) async throws -> (channel: Channel?, modules: [ModuleConfig]) {
+        let wantsChannel = AdminMessageMapping.touchesChannel(changes)
+        let moduleTypes = (try? AdminMessageMapping.moduleConfigTypes(for: changes)) ?? []
+        guard wantsChannel || !moduleTypes.isEmpty else { return (nil, []) }
         let readback = try await transport.readback(
-            configTypes: [], owner: false, channel: true, from: target
+            configTypes: [],
+            moduleConfigTypes: moduleTypes,
+            owner: false,
+            channel: wantsChannel,
+            from: target
         )
-        return readback.channel
+        return (readback.channel, readback.modules)
     }
 
     /// Flatten a multi-config read-back into the diff snapshot, merging each
-    /// config-type's contribution plus the owner and the primary channel.
+    /// config-type's and module-config-type's contribution plus the owner and the
+    /// primary channel.
     static func snapshot(from readback: AdminReadback) -> [String: String] {
         var snapshot: [String: String] = [:]
         for config in readback.configs {
-            for (key, value) in AdminMessageMapping.snapshot(config: config, owner: nil) {
+            for (key, value) in AdminMessageMapping.snapshot(config: config) {
+                snapshot[key] = value
+            }
+        }
+        for module in readback.modules {
+            for (key, value) in AdminMessageMapping.snapshot(module: module) {
                 snapshot[key] = value
             }
         }
         for (key, value) in AdminMessageMapping.snapshot(
-            config: nil, owner: readback.owner, channel: readback.channel
+            owner: readback.owner, channel: readback.channel
         ) {
             snapshot[key] = value
         }

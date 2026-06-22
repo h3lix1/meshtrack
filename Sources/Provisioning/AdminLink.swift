@@ -56,10 +56,12 @@ public struct LiveAdminTransport: AdminTransport {
     }
 
     /// Read a node's config back by issuing a get-request per requested config-type
-    /// (and the owner / primary channel if asked) and collecting the responses.
-    /// Drives verification — the responses flatten to the diff snapshot.
+    /// and module-config-type (and the owner / primary channel if asked) and
+    /// collecting the responses. Drives verification — the responses flatten to the
+    /// diff snapshot.
     public func readback(
         configTypes: Set<AdminMessage.ConfigType>,
+        moduleConfigTypes: Set<AdminMessage.ModuleConfigType>,
         owner: Bool,
         channel: Bool,
         from target: AdminTarget
@@ -71,9 +73,15 @@ public struct LiveAdminTransport: AdminTransport {
                 configs.append(config)
             }
         }
+        var modules: [ModuleConfig] = []
+        for type in moduleConfigTypes.sorted(by: { $0.rawValue < $1.rawValue }) {
+            if let module = try await getModuleConfig(type, from: target) {
+                modules.append(module)
+            }
+        }
         let user = owner ? try await getOwner(from: target) : nil
         let primary = channel ? try await getPrimaryChannel(from: target) : nil
-        return AdminReadback(configs: configs, owner: user, channel: primary)
+        return AdminReadback(configs: configs, modules: modules, owner: user, channel: primary)
     }
 
     // MARK: Read-request helpers
@@ -87,6 +95,17 @@ public struct LiveAdminTransport: AdminTransport {
         let reply = try await link.exchange(request, with: target)
         guard case let .getConfigResponse(config)? = reply?.payloadVariant else { return nil }
         return config
+    }
+
+    private func getModuleConfig(
+        _ type: AdminMessage.ModuleConfigType,
+        from target: AdminTarget
+    ) async throws -> ModuleConfig? {
+        var request = AdminMessage()
+        request.getModuleConfigRequest = type
+        let reply = try await link.exchange(request, with: target)
+        guard case let .getModuleConfigResponse(module)? = reply?.payloadVariant else { return nil }
+        return module
     }
 
     private func getOwner(from target: AdminTarget) async throws -> User? {
