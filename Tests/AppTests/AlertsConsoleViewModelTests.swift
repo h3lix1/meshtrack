@@ -9,35 +9,6 @@ import Testing
 struct AlertsConsoleViewModelTests {
     private static let now = Instant(nanosecondsSinceEpoch: 1_700_000_000_000_000_000)
 
-    private func at(_ seconds: Double) -> Instant {
-        Self.now.adding(seconds: seconds)
-    }
-
-    /// A store with two managed + one unmanaged node, plus seeded alert rows.
-    private func seededStore(alerts: [AlertRecord] = []) async throws -> MeshStore {
-        let store = try MeshStore(DatabaseConnection.inMemory())
-        try await store.upsertNode(NodeRecord(
-            node_num: 0x01, hexid: "!00000001", short_name: "BASE",
-            node_class: .fixed, first_seen_at: 0, last_heard_at: 0, is_managed: true
-        ))
-        try await store.upsertNode(NodeRecord(
-            node_num: 0x02, hexid: "!00000002", short_name: "RPTR",
-            node_class: .gateway, first_seen_at: 0, last_heard_at: 0, is_managed: true
-        ))
-        try await store.upsertNode(NodeRecord(
-            node_num: 0x03, hexid: "!00000003", short_name: "STRGR",
-            node_class: .mobile, first_seen_at: 0, last_heard_at: 0, is_mine: false, is_managed: false
-        ))
-        for alert in alerts {
-            try await store.saveAlert(alert)
-        }
-        return store
-    }
-
-    private func model(_ store: MeshStore) -> AlertsConsoleViewModel {
-        AlertsConsoleViewModel(store: store, clock: InjectedClock(Self.now))
-    }
-
     @Test
     func `load groups alerts by state and labels nodes`() async throws {
         let store = try await seededStore(alerts: [
@@ -307,5 +278,39 @@ struct AlertsConsoleViewModelTests {
             .map { abs($0 - 600) < 0.001 } == true)
         #expect(AlertsConsoleViewModel.snoozeRemaining(snoozedUntil: at(600), now: at(700)) == nil)
         #expect(AlertsConsoleViewModel.snoozeRemaining(snoozedUntil: nil, now: Self.now) == nil)
+    }
+}
+
+// MARK: - Helpers
+
+@MainActor
+extension AlertsConsoleViewModelTests {
+    func at(_ seconds: Double) -> Instant {
+        Self.now.adding(seconds: seconds)
+    }
+
+    /// A store with two managed + one unmanaged node, plus seeded alert rows.
+    func seededStore(alerts: [AlertRecord] = []) async throws -> MeshStore {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        try await store.upsertNode(NodeRecord(
+            node_num: 0x01, hexid: "!00000001", short_name: "BASE",
+            node_class: .fixed, first_seen_at: 0, last_heard_at: 0, is_managed: true
+        ))
+        try await store.upsertNode(NodeRecord(
+            node_num: 0x02, hexid: "!00000002", short_name: "RPTR",
+            node_class: .gateway, first_seen_at: 0, last_heard_at: 0, is_managed: true
+        ))
+        try await store.upsertNode(NodeRecord(
+            node_num: 0x03, hexid: "!00000003", short_name: "STRGR",
+            node_class: .mobile, first_seen_at: 0, last_heard_at: 0, is_mine: false, is_managed: false
+        ))
+        for alert in alerts {
+            try await store.saveAlert(alert)
+        }
+        return store
+    }
+
+    func model(_ store: MeshStore) -> AlertsConsoleViewModel {
+        AlertsConsoleViewModel(store: store, clock: InjectedClock(Self.now))
     }
 }
