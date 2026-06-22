@@ -39,6 +39,9 @@ public struct AlertsConfigView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(GeneralSettingsView.canvas)
         .foregroundStyle(.white)
+        // Load persisted rules + default snooze before the operator can edit/Save, so
+        // opening the tab never overwrites stored values with model defaults (Finding 3).
+        .task { await viewModel.load() }
     }
 
     private var header: some View {

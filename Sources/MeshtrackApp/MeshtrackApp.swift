@@ -171,8 +171,11 @@ struct MeshtrackApp: App {
             )))
         }
         model.register(.alerts) {
+            // Wrap the persisted store in the hours→seconds decorator so the editor's
+            // stale-threshold HOURS become canonical SECONDS on save (and back on load),
+            // matching what the rule engine evaluates (Finding 11).
             AnyView(AlertsConfigView(viewModel: AlertsConfigViewModel(
-                rules: MeshStoreAlertRuleStore(store: store)
+                rules: HoursToSecondsAlertRuleStore(wrapping: MeshStoreAlertRuleStore(store: store))
             )))
         }
         model.register(.about) { AnyView(AboutSettingsTab()) }

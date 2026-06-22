@@ -36,6 +36,9 @@ public struct GeneralSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Self.canvas)
         .foregroundStyle(.white)
+        // Load persisted settings before the operator can edit/Save, so opening the
+        // tab never shows (and a Save never persists) default model state (Finding 3).
+        .task { await viewModel.load() }
     }
 
     static let canvas = Color(red: 0.03, green: 0.04, blue: 0.10)
