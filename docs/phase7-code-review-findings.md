@@ -13,7 +13,7 @@ in-memory fakes mask divergence from real behavior.
 
 ## 🔴 High
 
-### [ ] 1. Ownership-based alert suppression is inert in the running app
+### [x] 1. Ownership-based alert suppression is inert in the running app
 - **Where:** `Sources/RuleEngine/RuleEvaluator.swift:67`; caller `Sources/Scenario/LivenessScenarioEvaluator.swift:30`
 - **Bug:** The new `management` gate (ADR 0008 — "never raise battery/silence
   alerts for strangers' nodes") defaults to `NodeManagement(isManaged: true)`, and
@@ -27,7 +27,7 @@ in-memory fakes mask divergence from real behavior.
   into `RuleEvaluator.conditions(…, management:)`. Add a test that an unmanaged node
   with a low battery produces no condition through the *production* path.
 
-### [ ] 2. Extraction "count-once" doesn't survive a reconnect → duplicate messages & double-counted telemetry
+### [x] 2. Extraction "count-once" doesn't survive a reconnect → duplicate messages & double-counted telemetry
 - **Where:** `Sources/Ingest/IngestPipeline.swift:53` (per-run `DedupWindow`);
   schema `Sources/Persistence/Migrations.swift:78` (message), `:194` (telemetry),
   `:175` (position_fix); gateway-scoped observation index `:162`
@@ -49,7 +49,7 @@ in-memory fakes mask divergence from real behavior.
 
 ## 🟠 Medium
 
-### [ ] 3. `position_precision` is mis-encoded into the `positionFlags` bitfield
+### [x] 3. `position_precision` is mis-encoded into the `positionFlags` bitfield
 - **Where:** `Sources/Provisioning/AdminMessageMapping.swift:182` (encode), `:91` (read-back)
 - **Bug:** `position.positionFlags = UInt32(precision.value) ?? 0` writes the
   operator's precision *bit count* as the entire `positionFlags` value, and
@@ -63,7 +63,7 @@ in-memory fakes mask divergence from real behavior.
   `position_precision`, or the precision sub-field of `positionFlags`), and make the
   fake transport stop echoing verbatim so the test exercises the real codec.
 
-### [ ] 4. Analytics histogram traps on a non-finite SNR/RSSI
+### [x] 4. Analytics histogram traps on a non-finite SNR/RSSI
 - **Where:** `Sources/App/Analytics/NodeAnalyticsAggregations.swift:83`
 - **Bug:** `Int((value - low) / width)` — `Int(NaN)`/`Int(.infinity)` is a runtime
   trap, and NaN defeats the `index < 0` / `index >= binCount` clamps (both compare
@@ -74,7 +74,7 @@ in-memory fakes mask divergence from real behavior.
 - **Fix:** Filter `value.isFinite` at the top of `distribution(of:)` (or in the
   `compactMap` feeders). Add a NaN-sample test.
 
-### [ ] 5. `StoreBackedAdminChannel.apply` skips the validation its sibling runs
+### [x] 5. `StoreBackedAdminChannel.apply` skips the validation its sibling runs
 - **Where:** `Sources/App/Fleet/StoreBackedAdminChannel.swift:43` vs `Sources/Provisioning/MeshAdminChannel.swift:56`
 - **Bug:** The GUI-wired admin channel persists changes without
   `AdminMessageMapping.validate(_:)`; `MeshAdminChannel.apply` validates first.
@@ -83,21 +83,21 @@ in-memory fakes mask divergence from real behavior.
 - **Fix (altitude):** Move `validate` into the shared `AdminApplier` orchestration so
   every `AdminChannel` adapter inherits it, rather than duplicating it in one sibling.
 
-### [ ] 6. `Dictionary(uniqueKeysWithValues:)` traps on a duplicate config field
+### [x] 6. `Dictionary(uniqueKeysWithValues:)` traps on a duplicate config field
 - **Where:** `Sources/App/Fleet/StoreBackedAdminChannel.swift:45`
 - **Bug/Failure:** Two `ConfigChange` entries with the same `field` → fatal trap
   mid-apply.
 - **Fix:** `Dictionary(changes.map { ($0.field, $0.to) }, uniquingKeysWith: { $1 })`
   (last-wins), unless field-uniqueness is guaranteed upstream (then assert it).
 
-### [ ] 7. `Dictionary(uniqueKeysWithValues:)` traps on a duplicate node id
+### [x] 7. `Dictionary(uniqueKeysWithValues:)` traps on a duplicate node id
 - **Where:** `Sources/App/Fleet/FleetConfigViewModel.swift:267`
 - **Bug/Failure:** `buildRollout()` keys `names` by `nodeNum`; a duplicate `nodeNum`
   in `candidates` (a discovered node also present as a stored row) crashes the app on
   rollout preview/start.
 - **Fix:** De-dup candidates by `nodeNum`, or use `uniquingKeysWith:`.
 
-### [ ] 8. Live decryption ignores per-channel custom PSKs
+### [x] 8. Live decryption ignores per-channel custom PSKs
 - **Where:** `Sources/MeshtrackApp/LiveCoordinator.swift:201` (`DefaultChannelKeyStore`)
 - **Bug:** `key(forChannelHash:)` returns the hardcoded default PSK for *every*
   channel hash; ingest never consults the per-channel keys held by
@@ -108,7 +108,7 @@ in-memory fakes mask divergence from real behavior.
   PSKs are resolved by hash. (Comments mark this "future work" — at minimum gate the
   UI or surface the limitation.)
 
-### [ ] 9. `extractNodeInfo` read-modify-write is not atomic
+### [x] 9. `extractNodeInfo` read-modify-write is not atomic
 - **Where:** `Sources/Ingest/IngestPipeline.swift:209`
 - **Bug:** `fetchNode` (read txn) then `upsertNode`/`node.save` (write txn) are two
   separate transactions. The comment promises ownership flags are never clobbered,
@@ -118,7 +118,7 @@ in-memory fakes mask divergence from real behavior.
   NODEINFO ingest for the same node.
 - **Fix:** Perform the fetch-merge-upsert inside a single `writer.write` transaction.
 
-### [ ] 10. Default-snooze setting is silently dropped in production
+### [x] 10. Default-snooze setting is silently dropped in production
 - **Where:** `Sources/MeshtrackApp/Integration.swift:62` (`MeshStoreAlertRuleStore`)
 - **Bug:** Doesn't implement `save/loadDefaultSnoozeSeconds`, so it falls through to
   the port's no-op/3600s default; the fake (`AlertRuleStoreFake.swift:41`) *does*
@@ -131,7 +131,7 @@ in-memory fakes mask divergence from real behavior.
 
 ## 🟡 Low
 
-### [ ] 11. "Play" from live is a no-op bounce
+### [x] 11. "Play" from live is a no-op bounce
 - **Where:** `Sources/App/Timeline/TimelineViewModel.swift:100` (with `:137`, `:149`)
 - **Bug/Failure:** `play()` from live sets `mode = .review` but leaves `playhead`
   pinned at `window.end`; the first `tick(delta>0)` sees `advanced >= window.end` and
@@ -140,7 +140,7 @@ in-memory fakes mask divergence from real behavior.
 - **Fix:** On play-from-live, seek the playhead back (e.g. to `window.start` or a
   small offset) before entering review, or don't switch to review at the end.
 
-### [ ] 12. Mixed clocked/clockless trace window saturates instantly
+### [x] 12. Mixed clocked/clockless trace window saturates instantly
 - **Where:** `Sources/App/Visualization/LivePacketTraceCollector.swift:74`
 - **Bug/Failure:** `arrivalClockByPacket[packetID] ?? Double(index) * stagger` mixes
   reference-date clocks (~7.9e8) with the legacy per-index stagger (~0.4). A single
@@ -150,7 +150,7 @@ in-memory fakes mask divergence from real behavior.
 - **Fix:** Don't mix the two regimes in one window — either always stamp an
   arrival clock in live mode, or fall back uniformly when any packet lacks one.
 
-### [ ] 13. Message ordering is unstable on equal `rx_time`
+### [x] 13. Message ordering is unstable on equal `rx_time`
 - **Where:** `Sources/Persistence/Store.swift:171` (`messages`), `:179` (`recentMessages`)
 - **Bug/Failure:** Orders by `rx_time` only with no tie-break; messages sharing a
   coarse `rx_time` come back in arbitrary order → transcript flickers between loads.
@@ -170,7 +170,7 @@ in-memory fakes mask divergence from real behavior.
 - **Fix:** Promote one `NodeID.hex(_:)` / `NodeID.shortHex(_:)` helper to `Domain`
   and call it everywhere.
 
-### [ ] 15. Two copies of the Meshtastic channel-hash + default PSK
+### [x] 15. Two copies of the Meshtastic channel-hash + default PSK
 - **Where:** `Sources/App/Settings/ChannelsSettingsViewModel.swift:132`
   (`ChannelKeyMath`) vs `Sources/App/Map/ChannelPreset.swift`
 - **Cost:** Two copies of the firmware XOR-fold hash and the identical 16-byte PSK
@@ -190,3 +190,17 @@ in-memory fakes mask divergence from real behavior.
   unset from `CLIENT`; the asymmetry is by-design and the code comment acknowledges it.
 - **`Package.swift` edit vs AGENTS.md "don't edit Package.swift"** — that rule is
   scoped to parallel worktree agents; integration-branch target wiring is expected.
+
+---
+
+## Follow-ups discovered while fixing (phase 8, not in original review)
+- **No live alert-generation loop (surfaced fixing #1).** `RuleEvaluator.conditions`
+  is only ever called by `LivenessScenarioEvaluator` (the scenario/acceptance
+  harness) — nothing in `MeshtrackApp`/`meshtrackd` runs telemetry through it, and
+  `AlertsConsoleViewModel.reconcile` only folds *already-persisted* `alert` rows.
+  So the running app never derives liveness/battery/voltage alerts from live
+  telemetry at all. #1's fix correctly makes the management gate honored *and*
+  builds the production `StoreNodeManagementLookup` adapter, but the gate has no
+  live loop to attach to until one exists. Wiring a real ingest→RuleEvaluator→
+  AlertEngine→store loop (and injecting `StoreNodeManagementLookup` there) is a
+  larger phase-9 task, out of scope for this worklist.
