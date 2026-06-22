@@ -219,6 +219,9 @@ struct ContentView: View {
     /// `nil` until the first config resolution completes (avoids flashing
     /// onboarding before we know whether a broker is saved).
     @State private var resolved = false
+    /// Whether a connectable source is saved but we stayed offline at launch (because
+    /// `autoConnect` is off). Drives the onboarding "Connect now" affordance (Finding 2).
+    @State private var hasConnectableSource = false
 
     var body: some View {
         content
@@ -233,7 +236,10 @@ struct ContentView: View {
         } else if resolved {
             OnboardingView(
                 onSetUpConnection: openConnectionSettings,
-                onExploreSample: { root.exploringSample = true }
+                onExploreSample: { root.exploringSample = true },
+                // Offer an explicit connect only when a connectable source is saved
+                // but auto-connect kept us offline at launch (Finding 2).
+                onConnectNow: hasConnectableSource ? { Task { await connectNow() } } : nil
             )
         } else {
             // Brief, neutral splash while we read the saved config.
@@ -244,8 +250,12 @@ struct ContentView: View {
 
     /// Resolve the saved data source (MQTT broker or a locally-attached node) and
     /// (re)start the live coordinator. Builds the coordinator lazily on first
-    /// connectable source. Idempotent and reconnect-safe: `applyConfig` restarts only
-    /// when the resolved source changes.
+    /// connectable source, using the operator's configured refresh cadence. Idempotent
+    /// and reconnect-safe: `applyConfig` restarts only when the resolved source changes.
+    ///
+    /// Honors `AppSettings.autoConnect` (Finding 2): with auto-connect off the app
+    /// stays offline at launch even with a connectable source saved — the operator
+    /// connects explicitly via the Connect affordance (which calls `connectNow()`).
     @MainActor private func resolveAndApply() async {
         defer { resolved = true }
         await seedFromEnvIfNeeded()
@@ -257,13 +267,43 @@ struct ContentView: View {
             brokerConfig: brokerConfig,
             password: { credentials.password(host: $0, username: $1) }
         ) != nil
+        hasConnectableSource = connectable
         guard connectable else {
             coordinator?.stop()
             return
         }
-        let live = coordinator ?? LiveCoordinator(store: store)
+        // Build the coordinator with the operator's configured refresh cadence so the
+        // slow "surface newly-positioned nodes" loop matches AppSettings (Finding 2).
+        let settings = await (try? gateway.loadAppSettings()) ?? .default
+        let live = coordinator ?? LiveCoordinator(
+            store: store,
+            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+        )
         coordinator = live
-        await live.applyConfig(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
+        let allowAutoStart = LiveStartupPolicy.shouldConnectOnLaunch(
+            settings: settings,
+            hasConnectableSource: connectable
+        )
+        await live.applyConfig(
+            gateway: gateway,
+            credentials: credentials,
+            dataSourceStore: dataSources,
+            allowAutoStart: allowAutoStart
+        )
+    }
+
+    /// Explicit operator-initiated connect (the Connect affordance / onboarding /
+    /// status bar), overriding `autoConnect == false`. Builds the coordinator if
+    /// needed (using the configured refresh cadence) and forces a connect.
+    @MainActor private func connectNow() async {
+        let settings = await (try? gateway.loadAppSettings()) ?? .default
+        let live = coordinator ?? LiveCoordinator(
+            store: store,
+            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+        )
+        coordinator = live
+        await live.connect(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
+        resolved = true
     }
 
     /// One-time bootstrap: if nothing is saved yet but the legacy `MESHTRACK_MQTT_*`
