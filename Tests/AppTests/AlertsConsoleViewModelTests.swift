@@ -227,6 +227,30 @@ struct AlertsConsoleViewModelTests {
     }
 
     @Test
+    func `default-snooze assigned after init is honoured (Finding 12 wiring)`() async throws {
+        // Mirrors AppComposition.AlertsSectionView: the composition root loads the
+        // persisted default-snooze from app_config and assigns it after the console is
+        // constructed, then the parameterless Snooze must use that assigned value.
+        let store = try await seededStore(alerts: [
+            AlertRecord(
+                node_num: 0x01,
+                type: "battery_below",
+                state: .firing,
+                fired_at: at(0).nanosecondsSinceEpoch
+            )
+        ])
+        try await AlertDefaultSnoozeStore.save(1800, to: store)
+        let viewModel = AlertsConsoleViewModel(store: store, clock: InjectedClock(Self.now))
+        // Assign the persisted value (the new mutable seam, Finding 12).
+        viewModel.defaultSnoozeSeconds = try await AlertDefaultSnoozeStore.load(from: store)
+        try await viewModel.load()
+        let item = try #require(viewModel.firing.first)
+        try await viewModel.snooze(item)
+        let snoozed = try #require(viewModel.firing.first)
+        #expect(snoozed.snoozeRemaining.map { abs($0 - 1800) < 0.001 } == true)
+    }
+
+    @Test
     func `cooldown survives rehydration so a resolved alert stays suppressed`() async throws {
         // A resolved battery alert persisted with a 1-hour cooldown in payload_json
         // (the shape the live evaluator / console action write).
