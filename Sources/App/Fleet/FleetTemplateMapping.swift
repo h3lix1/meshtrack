@@ -8,11 +8,17 @@ import Persistence
 import Provisioning
 
 extension FleetConfigViewModel {
+    /// The non-column template state, persisted as the record's `config_json`. The
+    /// broad `fields` (every LoRa/Device/Position/… knob keyed by
+    /// `AdminConfigField.rawValue`) ride here alongside the legacy DSL/channel/precision
+    /// extras. `fields` defaults empty on decode so pre-Phase-10 rows (no broad config)
+    /// load unchanged.
     private struct TemplatePayload: Codable {
         var shortNameDSL: String?
         var longNameDSL: String?
         var channels: [String]
         var positionPrecisionBits: Int?
+        var fields: [String: String]?
     }
 
     static func template(from record: TemplateRecord) -> NodeTemplate {
@@ -27,7 +33,8 @@ extension FleetConfigViewModel {
             longNameDSL: payload?.longNameDSL,
             channels: payload?.channels ?? [],
             positionPrecisionBits: payload?.positionPrecisionBits,
-            firmwareVariant: record.firmware_variant
+            firmwareVariant: record.firmware_variant,
+            fields: payload?.fields ?? [:]
         )
     }
 
@@ -36,7 +43,8 @@ extension FleetConfigViewModel {
             shortNameDSL: template.shortNameDSL,
             longNameDSL: template.longNameDSL,
             channels: template.channels,
-            positionPrecisionBits: template.positionPrecisionBits
+            positionPrecisionBits: template.positionPrecisionBits,
+            fields: template.fields.isEmpty ? nil : template.fields
         )
         let json = (try? JSONEncoder().encode(payload)).flatMap { String(bytes: $0, encoding: .utf8) }
         return TemplateRecord(
@@ -51,14 +59,21 @@ extension FleetConfigViewModel {
     }
 
     static func draft(from template: NodeTemplate) -> TemplateDraft {
-        TemplateDraft(
+        // Fold the typed named surface (region/role/precision) back into the draft's
+        // broad `fields` so the editor drives them through the same shared form; the
+        // remaining broad fields carry across verbatim.
+        var fields = template.fields
+        fields["region"] = template.region
+        if let role = template.role { fields["role"] = role }
+        if let precision = template.positionPrecisionBits {
+            fields["position_precision"] = String(precision)
+        }
+        return TemplateDraft(
             name: template.name,
-            region: template.region,
-            role: template.role ?? "",
             shortNameDSL: template.shortNameDSL ?? "",
             longNameDSL: template.longNameDSL ?? "",
             channels: template.channels.joined(separator: ", "),
-            positionPrecision: template.positionPrecisionBits.map(String.init) ?? ""
+            fields: fields
         )
     }
 }
