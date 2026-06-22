@@ -1,0 +1,28 @@
+# Muter mutation-testing config for the Meshtrack SwiftPM package.
+#
+# Muter mutates first-party source, reruns `swift test`, and reports a mutation
+# score (% of injected mutants the suite caught). The floor lives in
+# scoreboard.json (gates.mutation_min_score); `make mutation` enforces it under
+# CI and skips gracefully when muter is absent locally.
+#
+# Test runner: drive the SwiftPM suite directly (no scheme/destination).
+executable: /usr/bin/env
+arguments:
+  - swift
+  - test
+
+# `exclude` is substring matching, not glob/regex. We mutate the first-party
+# `Sources/` modules and keep mutants out of:
+#   - generated/vendored protobufs (Sources/MeshProtos) — not our logic
+#   - the vendored .proto definitions and vendor tree
+#   - all test code (mutating tests is meaningless)
+#   - SwiftPM build artifacts and package manifest
+exclude:
+  - Sources/MeshProtos
+  - vendor
+  - Tests
+  - Package.swift
+  - .build
+
+# Give the suite room to run under the injected mutants (seconds).
+testSuiteTimeout: 600
