@@ -166,4 +166,29 @@ struct FleetConfigViewModelTests {
 
         #expect(try await store.fetchNodeConfig(nodeNum: 1)?.region == "US")
     }
+
+    @Test
+    func `duplicate nodeNum candidates de-dup to one sane rollout member (no trap)`() throws {
+        // A node present both as a discovered node and a stored row appears twice in
+        // candidates. De-dup keeps the first per nodeNum so keying the rollout's names
+        // by nodeNum never traps and only one row is built per node.
+        func candidate(_ num: Int64, name: String) -> FleetConfigViewModel.MemberCandidate {
+            FleetConfigViewModel.MemberCandidate(
+                nodeNum: num, name: name, hexid: FleetConfigViewModel.hexID(num),
+                shortName: name, longName: nil, role: "CLIENT", isMine: true, isManaged: true
+            )
+        }
+
+        let deduped = FleetConfigViewModel.dedupByNodeNum([
+            candidate(1, name: "first"),
+            candidate(1, name: "second"), // same nodeNum — the trapping duplicate
+            candidate(2, name: "other")
+        ])
+
+        #expect(deduped.map(\.nodeNum) == [1, 2])
+        #expect(deduped.first { $0.nodeNum == 1 }?.name == "first") // first wins
+        // Keying by nodeNum is now safe — this would have trapped on the duplicate.
+        let names = Dictionary(uniqueKeysWithValues: deduped.map { ($0.nodeNum, $0.name) })
+        #expect(names == [1: "first", 2: "other"])
+    }
 }
