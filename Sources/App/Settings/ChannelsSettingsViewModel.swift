@@ -198,6 +198,10 @@ public final class ChannelsSettingsViewModel {
     /// channel, so a subsequent `load()` over an empty registry never re-seeds —
     /// in particular after the operator deletes the default channel this session.
     @ObservationIgnored private var didSeedDefault = false
+    /// Hashes the operator pinned to an explicit observed wire value (via `hashText`)
+    /// this session. Those are ground truth from the wire, so setting a custom PSK
+    /// must NOT re-derive/move them (Finding 15) — only name-derived channels migrate.
+    @ObservationIgnored private var pinnedHashes: Set<UInt32> = []
 
     /// The channel seeded on first run so the app decodes public traffic out of the
     /// box: the public **MediumFast** channel keyed with the well-known `"AQ=="`
@@ -277,11 +281,14 @@ public final class ChannelsSettingsViewModel {
             return
         }
         let hash: UInt32
+        let isExplicit: Bool
         if hashText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+            isExplicit = false
         } else {
             do {
                 hash = try ChannelKeyMath.parseChannelHash(hashText)
+                isExplicit = true
             } catch let error as ChannelsSettingsError {
                 lastError = error
                 return
@@ -295,10 +302,25 @@ public final class ChannelsSettingsViewModel {
             return
         }
         await perform { try await keys.addChannel(name: trimmed, hash: hash, kind: kind) }
+        // Remember operator-pinned hashes so a later custom PSK does not re-derive
+        // them off the wire value they were observed at.
+        if isExplicit, lastError == nil {
+            pinnedHashes.insert(hash)
+        }
     }
 
     /// Set or rotate the PSK for `hash` from user-entered text. Accepts base64 or
     /// the `"AQ=="` default-key shortcut. The plaintext never returns to the UI.
+    ///
+    /// The on-wire Meshtastic channel hash is derived from BOTH the channel name AND
+    /// the PSK (`xorHash(name) ^ xorHash(psk)`), so a channel created by name alone
+    /// is registered under the *default*-PSK hash. Storing a custom PSK there would
+    /// leave the key filed under a hash the radios never put on the wire — live
+    /// decode would miss it (Finding 15). So when a channel was auto-derived under
+    /// the default PSK, applying a *different* PSK re-keys it under the correct,
+    /// custom-PSK-derived hash. Channels the operator pinned to an explicit observed
+    /// hash are left where they are: that hash is ground truth from the wire, and the
+    /// name⊕psk fold cannot be assumed to reproduce it.
     public func setKey(forChannelHash hash: UInt32, pskText: String) async {
         let psk: [UInt8]
         do {
@@ -310,7 +332,42 @@ public final class ChannelsSettingsViewModel {
             lastError = .invalidKey
             return
         }
-        await store(ChannelKey(psk: psk), forChannelHash: hash)
+        await store(ChannelKey(psk: psk), forChannelHash: rekeyedHash(forChannelHash: hash, psk: psk))
+    }
+
+    /// The hash a channel should live under once `psk` is applied to it.
+    ///
+    /// For a name-derived channel the correct on-wire hash is `channelHash(name,
+    /// psk)`: a channel created by name alone sits under the *default*-PSK hash, but
+    /// the radios derive the hash from the channel's *actual* PSK, so applying a
+    /// custom PSK migrates the channel to the recomputed hash (registered under the
+    /// new hash, the stale row removed) so the subsequent `setKey` files the PSK
+    /// where live traffic will look for it. This also re-derives correctly on every
+    /// rotation. Returns `hash` unchanged for the default PSK (the recomputed hash
+    /// matches) and for operator-pinned explicit hashes, which are ground truth from
+    /// the wire and must not move.
+    private func rekeyedHash(forChannelHash hash: UInt32, psk: [UInt8]) async -> UInt32 {
+        // Operator-pinned explicit hashes are the observed wire value — never re-derive.
+        guard !pinnedHashes.contains(hash) else { return hash }
+        guard let entry = entry(forChannelHash: hash) else { return hash }
+        let customDerived = ChannelKeyMath.channelHash(name: entry.name, psk: psk)
+        guard customDerived != hash else { return hash }
+        // The new hash must be free; if it collides with an existing channel, keep
+        // the key under the current hash rather than clobbering an unrelated row.
+        guard !channelExists(hash: customDerived) else { return hash }
+        do {
+            try await keys.addChannel(name: entry.name, hash: customDerived, kind: entry.kind)
+            try await keys.removeChannel(hash: hash)
+            await reload()
+            return customDerived
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+            return hash
+        }
+    }
+
+    private func entry(forChannelHash hash: UInt32) -> ChannelEntry? {
+        mqttChannels.first { $0.hash == hash } ?? localChannels.first { $0.hash == hash }
     }
 
     /// Apply the well-known default PSK to `hash` (the "use default PSK" toggle /
