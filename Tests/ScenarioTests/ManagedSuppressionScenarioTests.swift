@@ -33,16 +33,48 @@ struct ManagedSuppressionScenarioTests {
     """
 
     @Test
-    func `parser reads the managed flag and defaults it to true`() throws {
+    func `parser reads the managed flag and defaults it to false (unmanaged)`() throws {
         let suite = try ScenarioParser().parse(yaml: Self.silentYAML)
         #expect(suite.scenarios.first?.isManaged == false)
 
+        // ADR 0008: omitting `managed` defaults to UNMANAGED, matching Domain's
+        // `.unowned` default — an unclassified node never fires a false alert.
         let defaulted = try ScenarioParser().parse(yaml: """
         - node: A1
           silence_hours: 1
           expect_alerts: []
         """)
-        #expect(defaulted.scenarios.first?.isManaged == true)
+        #expect(defaulted.scenarios.first?.isManaged == false)
+    }
+
+    @Test
+    func `a node omitting BOTH managed and silence_hours produces NO stale alert`() throws {
+        // The Finding-6 regression: an unclassified node (no `managed`, no
+        // `silence_hours`) must default to unmanaged and stay silent — never a
+        // stale/battery/voltage alert for an unknown stranger node (ADR 0008).
+        let yaml = """
+        - node: BEEF
+          expect_alerts: []
+        """
+        let suite = try ScenarioParser().parse(yaml: yaml)
+        #expect(suite.scenarios.first?.isManaged == false)
+        let result = ScenarioRunner(evaluator: LivenessScenarioEvaluator()).run(suite: suite)
+        #expect(result.passed, "unclassified node must stay silent; report:\n\(result.report)")
+    }
+
+    @Test
+    func `even a long-silent node fires NO stale when managed is omitted`() throws {
+        // Belt-and-braces: the node IS silent long enough to be stale, but with
+        // `managed` omitted it defaults to unmanaged, so no stale alert fires.
+        let yaml = """
+        - node: BEEF
+          silence_hours: 48
+          expect_alerts: []
+        """
+        let suite = try ScenarioParser().parse(yaml: yaml)
+        #expect(suite.scenarios.first?.isManaged == false)
+        let result = ScenarioRunner(evaluator: LivenessScenarioEvaluator()).run(suite: suite)
+        #expect(result.passed, "omitted managed defaults to unmanaged → silent; report:\n\(result.report)")
     }
 
     @Test
