@@ -47,16 +47,24 @@ public struct AdminTarget: Sendable, Equatable {
     }
 }
 
-/// A node's read-back: the `Config` for each requested config-type, the owner
-/// `User`, and the primary `Channel` (which carries position precision).
+/// A node's read-back: the `Config` for each requested config-type, the
+/// `ModuleConfig` for each requested module-type, the owner `User`, and the
+/// primary `Channel` (which carries position precision).
 /// `AdminMessageMapping.snapshot` flattens these to the diff snapshot.
 public struct AdminReadback: Sendable, Equatable {
     public let configs: [Config]
+    public let modules: [ModuleConfig]
     public let owner: User?
     public let channel: Channel?
 
-    public init(configs: [Config] = [], owner: User? = nil, channel: Channel? = nil) {
+    public init(
+        configs: [Config] = [],
+        modules: [ModuleConfig] = [],
+        owner: User? = nil,
+        channel: Channel? = nil
+    ) {
         self.configs = configs
+        self.modules = modules
         self.owner = owner
         self.channel = channel
     }
@@ -83,14 +91,36 @@ public protocol AdminTransport: Sendable {
     /// returns when the node has acknowledged the batch.
     func send(_ messages: [AdminMessage], to target: AdminTarget) async throws
 
-    /// Read back a node's config: request each config-type (and the owner and/or
-    /// the primary channel if asked), and return what the node reports. Drives
-    /// verification. The channel carries position precision (a per-channel module
-    /// setting), so a precision change asks for it via `channel: true`.
+    /// Read back a node's config: request each config-type and module-config-type
+    /// (and the owner and/or the primary channel if asked), and return what the node
+    /// reports. Drives verification. The channel carries position precision (a
+    /// per-channel module setting), so a precision change asks for it via
+    /// `channel: true`. Module config fields (MQTT, telemetry, …) are read via
+    /// `moduleConfigTypes`.
+    func readback(
+        configTypes: Set<AdminMessage.ConfigType>,
+        moduleConfigTypes: Set<AdminMessage.ModuleConfigType>,
+        owner: Bool,
+        channel: Bool,
+        from target: AdminTarget
+    ) async throws -> AdminReadback
+}
+
+public extension AdminTransport {
+    /// Back-compat overload: read back with no module-config types (the original
+    /// config-only surface). New callers pass `moduleConfigTypes` explicitly.
     func readback(
         configTypes: Set<AdminMessage.ConfigType>,
         owner: Bool,
         channel: Bool,
         from target: AdminTarget
-    ) async throws -> AdminReadback
+    ) async throws -> AdminReadback {
+        try await readback(
+            configTypes: configTypes,
+            moduleConfigTypes: [],
+            owner: owner,
+            channel: channel,
+            from: target
+        )
+    }
 }

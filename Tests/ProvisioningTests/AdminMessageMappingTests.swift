@@ -127,9 +127,9 @@ struct AdminMessageMappingTests {
 
     @Test
     func `an unsupported field is rejected, not silently dropped`() throws {
-        #expect(throws: AdminMappingError.unsupportedField("mqtt_enabled")) {
+        #expect(throws: AdminMappingError.unsupportedField("definitely_not_a_field")) {
             try AdminMessageMapping.messages(for: [
-                ConfigChange(field: "mqtt_enabled", from: nil, to: "true")
+                ConfigChange(field: "definitely_not_a_field", from: nil, to: "true")
             ])
         }
     }
