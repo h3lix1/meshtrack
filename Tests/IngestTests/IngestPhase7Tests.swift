@@ -113,6 +113,72 @@ struct IngestPhase7Tests {
         #expect(ingest == at(10).nanosecondsSinceEpoch)
     }
 
+    /// A telemetry frame whose firmware `MeshPacket.rxTime` (radio-receipt, whole
+    /// seconds since 1970) differs from our frame-receipt instant — so the stored
+    /// `rx_time` vs `ingest_time` gap is the real reception→ingest latency, not 0.
+    private func telemetryFrame(
+        from: UInt32, packetID: UInt32, rxTimeSeconds: UInt32, at instant: Instant
+    ) -> InboundFrame {
+        var data = DataMessage()
+        data.portnum = .telemetryApp
+        data.payload = telemetryPayload(battery: 80, voltage: 4.0)
+        var packet = MeshPacket()
+        packet.from = from
+        packet.id = packetID
+        packet.channel = 8
+        packet.rxTime = rxTimeSeconds
+        packet.decoded = data
+        var env = ServiceEnvelope()
+        env.packet = packet
+        env.gatewayID = "!gw1"
+        return InboundFrame(
+            transport: .mqtt, topic: "msh/US/2/e/MediumFast/!gw1",
+            payload: try! [UInt8](env.serializedData()), receivedAt: instant, gatewayID: "!gw1"
+        )
+    }
+
+    @Test
+    func `rx_time comes from MeshPacket rxTime so latency is real, not zero (Finding 4)`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // Firmware stamped rx_time = 100s; we received the frame 5s later, at 105s.
+        _ = try await pipeline(store).run(StubTransport(queued: [telemetryFrame(
+            from: 7, packetID: 1, rxTimeSeconds: 100, at: at(105)
+        )]))
+        let times = try await store.writer.read { db -> (rx: Int64, ingest: Int64) in
+            let rx = try Int64.fetchOne(db, sql: "SELECT rx_time FROM observation WHERE node_num = 7") ?? -1
+            let ingest = try Int64
+                .fetchOne(db, sql: "SELECT ingest_time FROM observation WHERE node_num = 7") ?? -1
+            return (rx, ingest)
+        }
+        // rx_time = the firmware's 100s, ingest_time = our 105s frame receipt …
+        #expect(times.rx == at(100).nanosecondsSinceEpoch)
+        #expect(times.ingest == at(105).nanosecondsSinceEpoch)
+        // … so latency (ingest − rx) is a genuine 5 seconds, not ~0.
+        let latency = ReceptionLatency(
+            rxTime: Instant(nanosecondsSinceEpoch: times.rx),
+            ingestTime: Instant(nanosecondsSinceEpoch: times.ingest)
+        )
+        #expect(latency.seconds == 5)
+    }
+
+    @Test
+    func `rx_time falls back to frame receipt when MeshPacket rxTime is omitted (Finding 4)`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // rxTime omitted (0) — fall back to frame receipt; latency collapses to 0.
+        _ = try await pipeline(store).run(StubTransport(queued: [telemetryFrame(
+            from: 7, packetID: 1, rxTimeSeconds: 0, at: at(42)
+        )]))
+        let times = try await store.writer.read { db -> (rx: Int64, ingest: Int64) in
+            let rx = try Int64.fetchOne(db, sql: "SELECT rx_time FROM observation WHERE node_num = 7") ?? -1
+            let ingest = try Int64
+                .fetchOne(db, sql: "SELECT ingest_time FROM observation WHERE node_num = 7") ?? -1
+            return (rx, ingest)
+        }
+        #expect(times.rx == at(42).nanosecondsSinceEpoch)
+        #expect(times.ingest == at(42).nanosecondsSinceEpoch)
+    }
+
     @Test
     func `a text message decodes into the message store, counted once per dedup key`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())

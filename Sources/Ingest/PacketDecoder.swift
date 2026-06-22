@@ -67,7 +67,7 @@ public struct PacketDecoder: Sendable {
             channel: packet.channel,
             port: MeshPort(portNumRawValue: Int(data.portnum.rawValue)),
             payload: [UInt8](data.payload),
-            rxTime: receivedAt,
+            rxTime: Self.receiveTime(packet, fallback: receivedAt),
             rxRssi: packet.rxRssi != 0 ? Int(packet.rxRssi) : nil,
             rxSnr: packet.rxSnr != 0 ? Double(packet.rxSnr) : nil,
             hopStart: packet.hopStart != 0 ? UInt8(truncatingIfNeeded: packet.hopStart) : nil,
@@ -83,5 +83,17 @@ public struct PacketDecoder: Sendable {
     static func parseGatewayID(_ raw: String) -> UInt32? {
         guard raw.hasPrefix("!") else { return nil }
         return UInt32(raw.dropFirst(), radix: 16)
+    }
+
+    /// The instant a packet was *received by the radio*, used as `rx_time` so the
+    /// reception→ingest latency (`ingest_time − rx_time`, SPEC §2.11) is real and
+    /// not ~0. The firmware stamps `MeshPacket.rxTime` (whole seconds since 1970)
+    /// when it hands the packet to the phone/MQTT; we prefer it. It is sometimes
+    /// omitted (sent as 0) — never carried over the radio link, only added on the
+    /// way to the phone — so when absent we fall back to our own frame-receipt
+    /// time, which collapses latency to 0 for that packet (documented, not a bug).
+    static func receiveTime(_ packet: MeshPacket, fallback: Instant) -> Instant {
+        guard packet.rxTime != 0 else { return fallback }
+        return Instant(nanosecondsSinceEpoch: Int64(packet.rxTime) * 1_000_000_000)
     }
 }
