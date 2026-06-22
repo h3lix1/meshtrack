@@ -42,9 +42,9 @@ struct MigrationV6Tests {
         let store = try MeshStore(DatabaseConnection.inMemory())
         #expect(try await store.admitExtraction(packetID: 1, fromNum: 1, at: at(0), windowSeconds: 600))
         // Seen again at 500s (within window) → rejected, but slides last-seen to 500.
-        #expect(!(try await store.admitExtraction(packetID: 1, fromNum: 1, at: at(500), windowSeconds: 600)))
+        #expect(try await !(store.admitExtraction(packetID: 1, fromNum: 1, at: at(500), windowSeconds: 600)))
         // 900s is 400s after the slid 500 — still within the window → rejected.
-        #expect(!(try await store.admitExtraction(packetID: 1, fromNum: 1, at: at(900), windowSeconds: 600)))
+        #expect(try await !(store.admitExtraction(packetID: 1, fromNum: 1, at: at(900), windowSeconds: 600)))
     }
 
     @Test
@@ -63,7 +63,7 @@ struct MigrationV6Tests {
         // Seed an old key at t=0.
         #expect(try await store.admitExtraction(packetID: 1, fromNum: 1, at: at(0), windowSeconds: 600))
         // A far-future admission prunes everything older than the window.
-        #expect(try await store.admitExtraction(packetID: 2, fromNum: 1, at: at(10_000), windowSeconds: 600))
+        #expect(try await store.admitExtraction(packetID: 2, fromNum: 1, at: at(10000), windowSeconds: 600))
         let ledgerSize = try await store.writer.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM dedup_seen") ?? -1
         }

@@ -38,7 +38,8 @@ struct RuleEvaluatorTests {
     func `stale fires when silence exceeds the threshold, quiet within it`() {
         let rules = RuleSet([AlertRule(type: .stale, scope: .global, threshold: 3600)])
         let snapshot = NodeSnapshot(nodeNum: 7, nodeClass: .fixed, lastHeard: at(0), expectedInterval: 900)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(1000), management: managed).isEmpty)
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(1000), management: managed)
+            .isEmpty)
         #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(4000), management: managed)
             .map(\.type) == [.stale])
     }
@@ -47,7 +48,8 @@ struct RuleEvaluatorTests {
     func `a stale threshold of 0 falls back to the node's expected interval`() {
         let rules = RuleSet([AlertRule(type: .stale, scope: .global, threshold: 0)])
         let snapshot = NodeSnapshot(nodeNum: 7, nodeClass: .mobile, lastHeard: at(0), expectedInterval: 600)
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(500), management: managed).isEmpty)
+        #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(500), management: managed)
+            .isEmpty)
         #expect(RuleEvaluator.conditions(for: snapshot, rules: rules, now: at(700), management: managed)
             .map(\.type) == [.stale])
     }
@@ -62,7 +64,8 @@ struct RuleEvaluatorTests {
             nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
             expectedInterval: 900, batteryPercent: 15, voltage: 3.1
         )
-        #expect(Set(RuleEvaluator.conditions(for: low, rules: rules, now: at(1), management: managed).map(\.type))
+        #expect(Set(RuleEvaluator.conditions(for: low, rules: rules, now: at(1), management: managed)
+                .map(\.type))
             == [.batteryBelow, .voltageBelow])
 
         let healthy = NodeSnapshot(
@@ -78,8 +81,13 @@ struct RuleEvaluatorTests {
             nodeNum: 7, nodeClass: .fixed, lastHeard: at(0),
             expectedInterval: 900, batteryPercent: 1, voltage: 1
         )
-        #expect(RuleEvaluator.conditions(for: snapshot, rules: RuleSet([]), now: at(99999), management: managed)
-            .isEmpty)
+        #expect(RuleEvaluator.conditions(
+            for: snapshot,
+            rules: RuleSet([]),
+            now: at(99999),
+            management: managed
+        )
+        .isEmpty)
     }
 
     // MARK: Ownership gating (ADR 0008 / SPEC §2.10)

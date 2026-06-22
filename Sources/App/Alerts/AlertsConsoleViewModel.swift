@@ -21,51 +21,6 @@ import Observation
 import Persistence
 import RuleEngine
 
-/// One alert formatted for the console. Carries the live engine `Alert` plus the
-/// derived, time-relative facts the view renders (cooldown / snooze remaining).
-public struct AlertConsoleItem: Sendable, Equatable, Identifiable {
-    public var id: String {
-        "\(type.rawValue)#\(nodeNum)"
-    }
-
-    public let type: AlertType
-    public let nodeNum: Int64
-    public let nodeName: String
-    public let detail: String
-    public let state: AlertState
-    public let firedAt: Instant
-    /// Seconds until a *resolved* alert is eligible to re-fire (cooldown), or nil
-    /// when not resolved / no cooldown pending.
-    public let cooldownRemaining: Double?
-    /// Seconds until an active snooze expires, or nil when not snoozed.
-    public let snoozeRemaining: Double?
-
-    /// Higher = more urgent. Drives the default sort and the row tint.
-    public var severity: Int {
-        AlertSeverity.rank(type)
-    }
-
-    public init(
-        type: AlertType,
-        nodeNum: Int64,
-        nodeName: String,
-        detail: String,
-        state: AlertState,
-        firedAt: Instant,
-        cooldownRemaining: Double? = nil,
-        snoozeRemaining: Double? = nil
-    ) {
-        self.type = type
-        self.nodeNum = nodeNum
-        self.nodeName = nodeName
-        self.detail = detail
-        self.state = state
-        self.firedAt = firedAt
-        self.cooldownRemaining = cooldownRemaining
-        self.snoozeRemaining = snoozeRemaining
-    }
-}
-
 @Observable
 @MainActor
 public final class AlertsConsoleViewModel {
@@ -340,7 +295,7 @@ public final class AlertsConsoleViewModel {
 
     // MARK: Helpers
 
-    nonisolated private static func condition(_ alert: Alert) -> AlertCondition {
+    private nonisolated static func condition(_ alert: Alert) -> AlertCondition {
         AlertCondition(
             type: alert.type, nodeNum: alert.nodeNum, detail: alert.detail,
             cooldownSeconds: alert.cooldownSeconds
@@ -371,31 +326,25 @@ public final class AlertsConsoleViewModel {
         return json
     }
 
-    nonisolated private static func detail(from payload: String?) -> String {
+    private nonisolated static func detail(from payload: String?) -> String {
         decode(payload)?["detail"] ?? ""
     }
 
-    nonisolated private static func snoozedUntil(from payload: String?) -> Instant? {
+    private nonisolated static func snoozedUntil(from payload: String?) -> Instant? {
         guard let raw = decode(payload)?["snoozed_until"], let nanos = Int64(raw) else { return nil }
         return Instant(nanosecondsSinceEpoch: nanos)
     }
 
     /// The persisted cooldown (seconds); `0` when absent (older rows / no cooldown).
-    nonisolated private static func cooldownSeconds(from payload: String?) -> Double {
+    private nonisolated static func cooldownSeconds(from payload: String?) -> Double {
         guard let raw = decode(payload)?["cooldown_seconds"], let value = Double(raw) else { return 0 }
         return value
     }
 
-    nonisolated private static func decode(_ payload: String?) -> [String: String]? {
+    private nonisolated static func decode(_ payload: String?) -> [String: String]? {
         guard let payload, let data = payload.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String]
         else { return nil }
         return object
-    }
-}
-
-private extension AlertConsoleItem {
-    var engineKey: AlertKey {
-        AlertKey(type: type, nodeNum: UInt32(truncatingIfNeeded: nodeNum))
     }
 }

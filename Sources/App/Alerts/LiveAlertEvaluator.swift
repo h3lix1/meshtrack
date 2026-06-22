@@ -86,7 +86,7 @@ public struct LiveAlertEvaluator: Sendable {
     public func evaluate() async throws -> [Alert] {
         let now = clock.now()
         let nodeSnapshots = try await snapshots.snapshots()
-        let ruleSet = Self.ruleSet(from: try await rules.allRules())
+        let ruleSet = try await Self.ruleSet(from: rules.allRules())
 
         // Build the conditions that currently hold across every node. Ownership is
         // resolved per node so RuleEvaluator gates stranger nodes (ADR 0008).
@@ -103,7 +103,7 @@ public struct LiveAlertEvaluator: Sendable {
         // Rehydrate the engine from the persisted rows so an existing alert's
         // lifecycle + cooldown survive this pass (no spurious re-fire), then
         // reconcile the live conditions against them.
-        var engine = AlertsConsoleViewModel.rehydrate(try await sink.allAlerts())
+        var engine = try await AlertsConsoleViewModel.rehydrate(sink.allAlerts())
         engine.reconcile(conditions, now: now)
 
         // Persist every tracked alert back to the store.

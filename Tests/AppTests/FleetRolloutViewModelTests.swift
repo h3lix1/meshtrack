@@ -94,8 +94,13 @@ struct FleetRolloutViewModelTests {
     /// abort during node 1 means node 2's apply is NEVER reached.
     private actor ApplyRecorder {
         private var appliedNodes: Set<Int64> = []
-        func record(_ nodeNum: Int64) { appliedNodes.insert(nodeNum) }
-        func applied(node nodeNum: Int64) -> Bool { appliedNodes.contains(nodeNum) }
+        func record(_ nodeNum: Int64) {
+            appliedNodes.insert(nodeNum)
+        }
+
+        func applied(node nodeNum: Int64) -> Bool {
+            appliedNodes.contains(nodeNum)
+        }
     }
 
     /// A gated channel that records its apply against a shared recorder before
@@ -114,7 +119,9 @@ struct FleetRolloutViewModelTests {
             self.config = config
         }
 
-        func currentConfig() -> [String: String] { config }
+        func currentConfig() -> [String: String] {
+            config
+        }
 
         func apply(_ changes: [ConfigChange]) async {
             await recorder.record(nodeNum)
@@ -122,7 +129,9 @@ struct FleetRolloutViewModelTests {
             enteredWaiter?.resume()
             enteredWaiter = nil
             await withCheckedContinuation { gate = $0 }
-            for change in changes { config[change.field] = change.to }
+            for change in changes {
+                config[change.field] = change.to
+            }
         }
 
         func waitUntilEntered() async {
@@ -137,16 +146,6 @@ struct FleetRolloutViewModelTests {
     }
 
     private let template = NodeTemplate(name: "fleet-std", region: "US", role: "CLIENT")
-
-    private func member(_ num: Int64) -> FleetMember {
-        FleetMember(nodeNum: num, context: NamingContext(id: "!\(String(num, radix: 16))"))
-    }
-
-    private func channels(
-        _ map: [Int64: any AdminChannel]
-    ) -> @Sendable (Int64) -> any AdminChannel {
-        { map[$0] ?? GoodChannel([:]) }
-    }
 
     // MARK: Preview (dry-run)
 
@@ -327,7 +326,7 @@ struct FleetRolloutViewModelTests {
         await settle()
 
         #expect(await applies.applied(node: 1)) // node 1 was mid-apply when aborted
-        #expect(!(await applies.applied(node: 2))) // node 2's apply was NEVER reached
+        #expect(await !(applies.applied(node: 2))) // node 2's apply was NEVER reached
         #expect(vm.phase == .aborted) // a stale callback can't flip us back to rolling
         // No row mutated after the abort: the in-flight node reverted to pending,
         // node 2 untouched. Neither was driven to .verified by a post-abort callback.
@@ -335,11 +334,24 @@ struct FleetRolloutViewModelTests {
         #expect(vm.rows[1].status == .pending)
         #expect(vm.verifiedCount == 0)
     }
+}
 
-    // MARK: Helpers
+// MARK: - Helpers
+
+@MainActor
+extension FleetRolloutViewModelTests {
+    func member(_ num: Int64) -> FleetMember {
+        FleetMember(nodeNum: num, context: NamingContext(id: "!\(String(num, radix: 16))"))
+    }
+
+    func channels(
+        _ map: [Int64: any AdminChannel]
+    ) -> @Sendable (Int64) -> any AdminChannel {
+        { map[$0] ?? GoodChannel([:]) }
+    }
 
     /// Spin the main actor until the rollout reaches a terminal phase.
-    private func waitUntilSettled(_ vm: FleetRolloutViewModel) async {
+    func waitUntilSettled(_ vm: FleetRolloutViewModel) async {
         for _ in 0 ..< 1000 where vm.phase == .rolling {
             await Task.yield()
         }
@@ -347,7 +359,9 @@ struct FleetRolloutViewModelTests {
 
     /// Yield the main actor enough times for a cancelled engine task to (fail to)
     /// advance — gives a regression the chance to incorrectly apply the next node.
-    private func settle() async {
-        for _ in 0 ..< 1000 { await Task.yield() }
+    func settle() async {
+        for _ in 0 ..< 1000 {
+            await Task.yield()
+        }
     }
 }

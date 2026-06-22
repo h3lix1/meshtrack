@@ -76,7 +76,8 @@ struct NetworkViewModelTests {
     }
 
     @Test
-    func `a trace keeps its original channel after the source retransmits elsewhere (Finding 20)`() async throws {
+    func `a trace keeps its original channel after the source retransmits elsewhere (Finding 20)`(
+    ) async throws {
         // Finding 20: traces must filter on the channel they ARRIVED on, not the source
         // node's *current* preset. Two packets from node 1 — first on LongFast, then on
         // MediumFast — so the node's live preset flips to MediumFast. The first trace must

@@ -50,8 +50,13 @@ struct OTAAdminChannelFactoryTests {
             }
         }
 
-        var didSend: Bool { !sent.isEmpty }
-        func targetsSeen() -> [AdminTarget] { sentTargets }
+        var didSend: Bool {
+            !sent.isEmpty
+        }
+
+        func targetsSeen() -> [AdminTarget] {
+            sentTargets
+        }
     }
 
     private let template = NodeTemplate(name: "t", region: "US", role: "CLIENT")
