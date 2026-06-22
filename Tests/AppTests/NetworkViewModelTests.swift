@@ -74,4 +74,41 @@ struct NetworkViewModelTests {
         #expect(model.nodes.first { $0.id == 0x0000_0001 }?.preset == .longFast)
         #expect(model.availablePresets == [.longFast])
     }
+
+    @Test
+    func `a trace keeps its original channel after the source retransmits elsewhere (Finding 20)`() async throws {
+        // Finding 20: traces must filter on the channel they ARRIVED on, not the source
+        // node's *current* preset. Two packets from node 1 — first on LongFast, then on
+        // MediumFast — so the node's live preset flips to MediumFast. The first trace must
+        // still belong to the LongFast filter, not move to MediumFast with the node.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0x1111,
+            channel: ChannelPreset.longFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0x2222,
+            channel: ChannelPreset.mediumFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+
+        // The source node's LIVE preset is now MediumFast (latest transmission)…
+        #expect(model.presetByNode[0x0000_0001] == .mediumFast)
+        // …but each trace carries its OWN immutable arrival channel.
+        let longTrace = model.traces.first { $0.id == 0x1111 }
+        let mediumTrace = model.traces.first { $0.id == 0x2222 }
+        #expect(longTrace?.preset == .longFast)
+        #expect(mediumTrace?.preset == .mediumFast)
+
+        // Filtering proves the old trace did NOT migrate to the node's new channel.
+        let onLong = ChannelFilter.filterTraces(model.traces, nodes: model.nodes, selection: .longFast)
+        let onMedium = ChannelFilter.filterTraces(model.traces, nodes: model.nodes, selection: .mediumFast)
+        #expect(onLong.map(\.id) == [0x1111])
+        #expect(onMedium.map(\.id) == [0x2222])
+    }
 }

@@ -76,17 +76,36 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
     public let hops: Int
     /// When this trace started animating, seconds on the animation clock.
     public let startedAt: Double
+    /// The channel preset this packet ACTUALLY arrived on, captured immutably at ingest
+    /// time (Finding 20). Filtering by channel reads this — not the source node's *live*
+    /// preset, which is overwritten when that node later transmits on another channel —
+    /// so a historical trace stays under its original channel filter forever. nil when
+    /// the channel is unknown/unresolved (older/replay paths that don't stamp it).
+    public let preset: ChannelPreset?
 
-    public init(id: UInt32, sourceNode: Int64, edges: [TraceEdge], hops: Int, startedAt: Double) {
+    public init(
+        id: UInt32, sourceNode: Int64, edges: [TraceEdge], hops: Int, startedAt: Double,
+        preset: ChannelPreset? = nil
+    ) {
         self.id = id
         self.sourceNode = sourceNode
         self.edges = edges
         self.hops = hops
         self.startedAt = startedAt
+        self.preset = preset
     }
 
     public var color: Color {
         PacketColor.color(for: id)
+    }
+
+    /// A copy with the channel preset replaced — fields are immutable, so the view model
+    /// uses this to stamp a freshly-built trace with the channel it arrived on (Finding 20).
+    public func withPreset(_ preset: ChannelPreset?) -> PacketTrace {
+        PacketTrace(
+            id: id, sourceNode: sourceNode, edges: edges,
+            hops: hops, startedAt: startedAt, preset: preset
+        )
     }
 }
 

@@ -23,8 +23,8 @@ public final class ChannelFilter {
         Self.filterNodes(nodes, selection: selection)
     }
 
-    /// Traces visible under the current selection: those whose source node is on the
-    /// selected channel. All traces when nil.
+    /// Traces visible under the current selection: those that ARRIVED on the selected
+    /// channel (the trace's own immutable preset, captured at ingest). All traces when nil.
     public func traces(_ traces: [PacketTrace], nodes: [NetworkNode]) -> [PacketTrace] {
         Self.filterTraces(traces, nodes: nodes, selection: selection)
     }
@@ -45,9 +45,18 @@ public final class ChannelFilter {
         selection: ChannelPreset?
     ) -> [PacketTrace] {
         guard let selection else { return traces }
+        // A trace's OWN preset (stamped at ingest, Finding 20) is authoritative: it
+        // records the channel the packet actually arrived on and never moves when the
+        // source node later transmits elsewhere. Only when a trace carries no stamped
+        // preset (older/replay paths) do we fall back to the source node's live preset.
         let onChannel = Set(
             nodes.filter { $0.preset == selection }.map(\.id)
         )
-        return traces.filter { onChannel.contains($0.sourceNode) }
+        return traces.filter { trace in
+            if let tracePreset = trace.preset {
+                return tracePreset == selection
+            }
+            return onChannel.contains(trace.sourceNode)
+        }
     }
 }

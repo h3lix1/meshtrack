@@ -18,6 +18,12 @@ public final class NetworkViewModel {
     /// The channel preset each node's live packets last arrived on, by node id (Task 4).
     public private(set) var presetByNode: [Int64: ChannelPreset] = [:]
 
+    /// The channel preset each WINDOWED packet arrived on, by packet id, captured
+    /// immutably at ingest (Finding 20). Unlike `presetByNode` this is never rewritten
+    /// when the source node later transmits elsewhere, so each trace keeps the channel it
+    /// actually arrived on. Pruned to the live trace window so it can't grow unbounded.
+    private var presetByPacket: [UInt32: ChannelPreset] = [:]
+
     private var positions: [Int64: GeoPoint] = [:]
     private var collector: LivePacketTraceCollector
     private let store: MeshStore
@@ -55,7 +61,7 @@ public final class NetworkViewModel {
         }
         nodes = built
         positions = positionMap
-        traces = collector.traces(positions: positions)
+        traces = rebuiltTraces()
     }
 
     /// Feed one decoded packet into the live trace animation.
@@ -70,19 +76,32 @@ public final class NetworkViewModel {
     public func ingest(_ packet: DecodedPacket) {
         collector.ingest(packet, arrivalClock: Self.animationClockNow())
         recordChannel(packet)
-        traces = collector.traces(positions: positions)
+        traces = rebuiltTraces()
     }
 
-    /// Resolve a packet's channel hash to a preset and stamp it on the source node,
-    /// refreshing that node's `preset` in place (no full reload).
+    /// Resolve a packet's channel hash to a preset and stamp it both on the source node
+    /// (live preset, for node colouring) and IMMUTABLY against the packet id (for trace
+    /// filtering, Finding 20). The packet-id stamp is first-sight-wins so re-receptions of
+    /// the same packet never move the trace; the node stamp tracks the latest channel.
     private func recordChannel(_ packet: DecodedPacket) {
         guard let preset = ChannelPreset.preset(forHash: packet.channel) else { return }
+        if presetByPacket[packet.packetID] == nil { presetByPacket[packet.packetID] = preset }
         let nodeID = Int64(packet.from)
         guard presetByNode[nodeID] != preset else { return }
         presetByNode[nodeID] = preset
         nodes = nodes.map { node in
             node.id == nodeID ? node.withPreset(preset) : node
         }
+    }
+
+    /// Rebuild the live traces from the collector and stamp each with the channel it
+    /// arrived on (Finding 20). Prunes `presetByPacket` to the live window so the map can
+    /// never grow unbounded as packets are evicted.
+    private func rebuiltTraces() -> [PacketTrace] {
+        let built = collector.traces(positions: positions)
+        let live = Set(built.map(\.id))
+        presetByPacket = presetByPacket.filter { live.contains($0.key) }
+        return built.map { $0.withPreset(presetByPacket[$0.id]) }
     }
 
     /// The current value of the overlay's animation clock: seconds since the reference
