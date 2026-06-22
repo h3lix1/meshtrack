@@ -42,7 +42,9 @@ public struct StoreBackedAdminChannel: AdminChannel {
 
     public func apply(_ changes: [ConfigChange]) async throws {
         guard !changes.isEmpty else { return }
-        let updates = Dictionary(uniqueKeysWithValues: changes.map { ($0.field, $0.to) })
+        // Last-wins: a plan should carry one change per field, but never trap if a
+        // duplicate field slips through — coalesce to the later value instead.
+        let updates = Dictionary(changes.map { ($0.field, $0.to) }, uniquingKeysWith: { $1 })
         try await applyNodeFields(updates)
         try await applyNodeConfig(updates)
     }
