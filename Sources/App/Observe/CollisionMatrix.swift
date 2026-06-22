@@ -132,21 +132,21 @@ public enum EarshotRange: Sendable, Equatable {
     }
 }
 
-/// One earshot verdict for an ordered pair of colliding nodes (`a` before `b` by
-/// `nodeNum`, matching bucket order).
+/// One earshot verdict for an ordered pair of colliding nodes (`nodeA` before
+/// `nodeB` by `nodeNum`, matching bucket order).
 public struct EarshotPair: Sendable, Equatable, Identifiable {
-    public let a: CollisionNode
-    public let b: CollisionNode
+    public let nodeA: CollisionNode
+    public let nodeB: CollisionNode
     public let range: EarshotRange
 
     /// Stable id: the two node numbers, smaller first.
     public var id: String {
-        "\(a.nodeNum)-\(b.nodeNum)"
+        "\(nodeA.nodeNum)-\(nodeB.nodeNum)"
     }
 
-    public init(a: CollisionNode, b: CollisionNode, range: EarshotRange) {
-        self.a = a
-        self.b = b
+    public init(nodeA: CollisionNode, nodeB: CollisionNode, range: EarshotRange) {
+        self.nodeA = nodeA
+        self.nodeB = nodeB
         self.range = range
     }
 }
@@ -163,12 +163,12 @@ public enum Earshot {
 
     /// Classify a single pair given their (optional) last-known positions.
     public static func classify(
-        a: GeoPoint?,
-        b: GeoPoint?,
+        from: GeoPoint?,
+        to: GeoPoint?,
         maxRangeMeters: Double = defaultMaxRangeMeters
     ) -> EarshotRange {
-        guard let a, let b else { return .unknown }
-        let meters = Haversine.distanceMeters(from: a, to: b)
+        guard let from, let to else { return .unknown }
+        let meters = Haversine.distanceMeters(from: from, to: to)
         return meters <= maxRangeMeters ? .inRange(meters: meters) : .outOfRange(meters: meters)
     }
 
@@ -184,16 +184,16 @@ public enum Earshot {
         guard bucket.nodes.count > 1 else { return [] }
         var result: [EarshotPair] = []
         let nodes = bucket.nodes
-        for i in nodes.indices {
-            for j in (i + 1) ..< nodes.count {
-                let a = nodes[i]
-                let b = nodes[j]
+        for outer in nodes.indices {
+            for inner in (outer + 1) ..< nodes.count {
+                let nodeA = nodes[outer]
+                let nodeB = nodes[inner]
                 let range = classify(
-                    a: positions[a.nodeNum],
-                    b: positions[b.nodeNum],
+                    from: positions[nodeA.nodeNum],
+                    to: positions[nodeB.nodeNum],
                     maxRangeMeters: maxRangeMeters
                 )
-                result.append(EarshotPair(a: a, b: b, range: range))
+                result.append(EarshotPair(nodeA: nodeA, nodeB: nodeB, range: range))
             }
         }
         return result

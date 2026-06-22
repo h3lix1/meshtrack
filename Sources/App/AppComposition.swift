@@ -55,23 +55,7 @@ public extension AppModel {
             }
         #endif
 
-        register(.nodes) { [self] in
-            // Route the directory's actions to real sections (Finding 19): "Open
-            // analytics" jumps to Analytics, "Apply config" jumps to Fleet Config —
-            // no more no-op callbacks.
-            AnyView(NodeDirectoryView(
-                viewModel: NodeDirectoryViewModel(store: store),
-                onApply: { _ in self.onNavigate?(.fleet) },
-                onOpenAnalytics: { _ in self.onNavigate?(.analytics) },
-                // Favorite ☆ / Ignore actions send an imperative admin command over the
-                // real OTA link (Phase 10). No radio (sample / snapshot / first-run) →
-                // no factory → the command is a no-op, matching every other live action.
-                onCommand: { command in
-                    guard let otaFactory else { return }
-                    Task { try? await otaFactory.send(command) }
-                }
-            ))
-        }
+        registerNodesSection(store: store, otaFactory: otaFactory)
         register(.packets) {
             // Live decoded traffic when wired; sample data only when there's no
             // coordinator (snapshot / first-run) (Finding 17).
@@ -99,6 +83,25 @@ public extension AppModel {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
         registerProvisioningSections(store: store, otaFactory: otaFactory)
+    }
+
+    /// The node-directory section. Split out of `registerLiveSections` (lint
+    /// body-length cap). Its actions route to real sections (Finding 19) and, new in
+    /// Phase 10, the Favorite ☆ / Ignore actions send an imperative admin command over
+    /// the real OTA link — a no-op when no radio is wired (sample / snapshot / first-run).
+    @MainActor
+    private func registerNodesSection(store: MeshStore, otaFactory: OTAAdminChannelFactory?) {
+        register(.nodes) { [self] in
+            AnyView(NodeDirectoryView(
+                viewModel: NodeDirectoryViewModel(store: store),
+                onApply: { _ in self.onNavigate?(.fleet) },
+                onOpenAnalytics: { _ in self.onNavigate?(.analytics) },
+                onCommand: { command in
+                    guard let otaFactory else { return }
+                    Task { try? await otaFactory.send(command) }
+                }
+            ))
+        }
     }
 
     /// Fleet + Provision sections. Split out of `registerLiveSections` so each
