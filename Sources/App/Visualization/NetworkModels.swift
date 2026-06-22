@@ -75,22 +75,74 @@ public struct TraceEdge: Sendable, Equatable {
 }
 
 /// A node that received a packet, with the hop at which it heard it. Surfaced so the
-/// "show all receivers" overlay (item 6) can mark every node that heard the packet —
-/// including non-repeaters / last hops that never rebroadcast — and annotate each with
-/// its reception hop, not just the trace's final/max hop.
+/// "show all receivers" overlay (item 6/8) can mark every node we have EVIDENCE heard the
+/// packet — and annotate each with its reception hop, not just the trace's final/max hop.
+///
+/// Honesty note: this is NOT every node that physically overheard the packet. The mesh
+/// only reports gateways that uplinked to MQTT plus the 1-byte relay hint; a node that
+/// merely overheard a packet without rebroadcasting (and isn't the addressed destination)
+/// is never reported, so we cannot know it. "Receiver" here = every node we have evidence
+/// received it: reporting gateways, the guessed relay(s), and the addressed destination.
 public struct TraceReceiver: Sendable, Equatable {
+    /// What role the receiver played, for distinct styling (item 8).
+    public enum Kind: Sendable, Equatable {
+        /// A gateway that reported (uplinked) the packet to MQTT.
+        case gateway
+        /// A node guessed to have relayed the packet (from the relay-byte hint).
+        case relay
+        /// The packet's addressed last-hop recipient (`DecodedPacket.to`), when unicast.
+        case destination
+    }
+
     public let nodeID: Int64
     public let position: GeoPoint
     /// The hop count at which this node received the packet (1 = direct from source).
     public let hop: Int
-    /// True when this receiver is a gateway that reported the packet upstream.
-    public let isGateway: Bool
+    /// The receiver's role, driving its marker styling on the map.
+    public let kind: Kind
 
-    public init(nodeID: Int64, position: GeoPoint, hop: Int, isGateway: Bool) {
+    /// True when this receiver is a gateway that reported the packet upstream. Retained
+    /// for back-compat with existing renderer/tests; derived from `kind`.
+    public var isGateway: Bool {
+        kind == .gateway
+    }
+
+    /// True when this is the packet's addressed last-hop recipient (item 8).
+    public var isDestination: Bool {
+        kind == .destination
+    }
+
+    public init(nodeID: Int64, position: GeoPoint, hop: Int, kind: Kind) {
         self.nodeID = nodeID
         self.position = position
         self.hop = hop
-        self.isGateway = isGateway
+        self.kind = kind
+    }
+
+    /// Back-compat initialiser: `isGateway` maps to `.gateway`/`.relay`. Kept so existing
+    /// call sites and tests compile unchanged (the task forbids breaking these).
+    public init(nodeID: Int64, position: GeoPoint, hop: Int, isGateway: Bool) {
+        self.init(nodeID: nodeID, position: position, hop: hop, kind: isGateway ? .gateway : .relay)
+    }
+}
+
+/// A receiver we have evidence heard the packet but CANNOT place on the map (no known
+/// position). Not silently dropped (item 8 §2) — surfaced as a compact textual "received
+/// by (reported)" list in the focused-packet legend so "all receivers" stays complete.
+public struct UnpositionedReceiver: Sendable, Equatable, Identifiable {
+    public let nodeID: Int64
+    /// The hop count at which this node received the packet (0 = unknown / direct).
+    public let hop: Int
+    public let kind: TraceReceiver.Kind
+
+    public var id: Int64 {
+        nodeID
+    }
+
+    public init(nodeID: Int64, hop: Int, kind: TraceReceiver.Kind) {
+        self.nodeID = nodeID
+        self.hop = hop
+        self.kind = kind
     }
 }
 
@@ -100,11 +152,15 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
     public let edges: [TraceEdge]
     /// Hops taken (hop_start - hop_limit) as last observed.
     public let hops: Int
-    /// Every node that received this packet, each tagged with the hop at which it
-    /// heard it (item 6). Includes the source's direct neighbours, intermediate
-    /// relays, and the gateways. Empty for traces built without reception detail
-    /// (older/sample paths) — the "show all receivers" overlay then has nothing to add.
+    /// Every node we have evidence received this packet AND can place on the map, each
+    /// tagged with the hop at which it heard it (item 6/8). Includes intermediate relays,
+    /// the gateways, and the addressed destination (item 8). Empty for traces built without
+    /// reception detail (older/sample paths) — "show all receivers" then has nothing to add.
     public let receivers: [TraceReceiver]
+    /// Receivers we have evidence heard the packet but have NO known position for, so they
+    /// can't be drawn (item 8 §2). Surfaced as a textual list in the focused-packet legend
+    /// rather than silently dropped, so "all receivers" is genuinely complete.
+    public let unpositionedReceivers: [UnpositionedReceiver]
     /// When this trace started animating, seconds on the animation clock.
     public let startedAt: Double
     /// The channel preset this packet ACTUALLY arrived on, captured immutably at ingest
@@ -116,13 +172,15 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
 
     public init(
         id: UInt32, sourceNode: Int64, edges: [TraceEdge], hops: Int, startedAt: Double,
-        receivers: [TraceReceiver] = [], preset: ChannelPreset? = nil
+        receivers: [TraceReceiver] = [], unpositionedReceivers: [UnpositionedReceiver] = [],
+        preset: ChannelPreset? = nil
     ) {
         self.id = id
         self.sourceNode = sourceNode
         self.edges = edges
         self.hops = hops
         self.receivers = receivers
+        self.unpositionedReceivers = unpositionedReceivers
         self.startedAt = startedAt
         self.preset = preset
     }
@@ -142,7 +200,8 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
     public func withPreset(_ preset: ChannelPreset?) -> PacketTrace {
         PacketTrace(
             id: id, sourceNode: sourceNode, edges: edges,
-            hops: hops, startedAt: startedAt, receivers: receivers, preset: preset
+            hops: hops, startedAt: startedAt, receivers: receivers,
+            unpositionedReceivers: unpositionedReceivers, preset: preset
         )
     }
 }
