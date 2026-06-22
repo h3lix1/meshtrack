@@ -18,11 +18,28 @@ public struct TraceRenderer {
     public var clock: Double
     public var hopDuration: Double
     public var mode: TraceTimingMode
+    /// The packet id currently focused in the legend, or nil. Per-hop labels (item 3)
+    /// and the all-receivers overlay (item 6) only draw for the focused packet.
+    public var focusedPacketID: UInt32?
+    /// Whether to mark every node that received the focused packet (item 6).
+    public var showAllReceivers: Bool
 
-    public init(clock: Double, hopDuration: Double, mode: TraceTimingMode) {
+    public init(
+        clock: Double,
+        hopDuration: Double,
+        mode: TraceTimingMode,
+        focusedPacketID: UInt32? = nil,
+        showAllReceivers: Bool = false
+    ) {
         self.clock = clock
         self.hopDuration = hopDuration
         self.mode = mode
+        self.focusedPacketID = focusedPacketID
+        self.showAllReceivers = showAllReceivers
+    }
+
+    private func isFocused(_ id: UInt32) -> Bool {
+        focusedPacketID == id
     }
 
     // MARK: Traces
@@ -37,11 +54,11 @@ public struct TraceRenderer {
         }
     }
 
-    private func progress(_ trace: PacketTrace, _ edgeIndex: Int) -> Double {
+    private func progress(_ trace: PacketTrace, _ edge: TraceEdge) -> Double {
         TraceTiming.edgeProgress(
             clock: clock,
             startedAt: trace.startedAt,
-            edgeIndex: edgeIndex,
+            hopIndex: edge.hopIndex,
             hopDuration: hopDuration,
             mode: mode
         )
@@ -53,50 +70,27 @@ public struct TraceRenderer {
         projection: some TraceProjection
     ) {
         let color = trace.color
-        for (index, edge) in trace.edges.enumerated() {
-            let fraction = progress(trace, index)
+        let focused = isFocused(trace.id)
+        for edge in trace.edges {
+            let fraction = progress(trace, edge)
             guard fraction > 0 else { continue }
-            let start = projection.point(for: edge.from)
-            let end = projection.point(for: edge.to)
-            let tip = TraceTiming.lerp(start, end, fraction)
-
-            var line = Path()
-            line.move(to: start)
-            line.addLine(to: tip)
-            let dash: [CGFloat] = edge.kind == .guessed ? [7, 6] : []
-
-            // Drawn portion (source → tip): a soft glow under a crisp core. The line
-            // grows from the source toward the gateway as `fraction` advances, so the
-            // packet visibly travels along the hop (Task 2).
-            context.drawLayer { layer in
-                layer.addFilter(.blur(radius: 7))
-                layer.stroke(
-                    line,
-                    with: .color(color.opacity(0.6)),
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: dash)
-                )
-            }
-            // A trailing fade behind the moving head: the line is brightest at the tip
-            // (the "comet" head) and fades back toward the source.
-            context.stroke(
-                line,
-                with: .linearGradient(
-                    Gradient(colors: [color.opacity(0.25), color]),
-                    startPoint: start,
-                    endPoint: tip
-                ),
-                style: StrokeStyle(
-                    lineWidth: edge.kind == .guessed ? 1.6 : 2.8,
-                    lineCap: .round,
-                    dash: dash
-                )
+            let segment = Segment(
+                start: projection.point(for: edge.from),
+                end: projection.point(for: edge.to),
+                fraction: fraction
             )
-
-            // The moving spark head: a bright blurred halo + a hot white core that
-            // rides the tip while the edge is still drawing.
-            if fraction < 1, let head = TraceTiming.headPoint(from: start, to: end, progress: fraction) {
-                drawSparkHead(at: head, color: color, in: &context)
+            drawEdge(edge, segment: segment, color: color, in: &context)
+            // When this packet is focused, label EACH hop with its hop number along the
+            // path (item 3) — not just the final/max hop badge below.
+            if focused, fraction > 0.35 {
+                let mid = TraceTiming.lerp(segment.start, segment.end, min(fraction, 0.5))
+                drawHopTick(edge.hopIndex, at: mid, color: color, in: context)
             }
+        }
+        // When focused + the toggle is on, mark every node that received this packet,
+        // annotated with the hop at which it heard it (item 6).
+        if focused, showAllReceivers {
+            drawReceivers(trace, in: &context, projection: projection)
         }
         if let badge = badgePoint(trace, projection: projection) {
             drawBadge(
@@ -105,6 +99,56 @@ public struct TraceRenderer {
                 color: color,
                 in: context
             )
+        }
+    }
+
+    /// A trace edge projected to screen space, with how far along it has drawn.
+    private struct Segment {
+        let start: CGPoint
+        let end: CGPoint
+        let fraction: Double
+    }
+
+    /// Draw one animated edge: glow, comet trail, and spark head at the moving tip.
+    private func drawEdge(
+        _ edge: TraceEdge, segment: Segment, color: Color, in context: inout GraphicsContext
+    ) {
+        let start = segment.start
+        let end = segment.end
+        let fraction = segment.fraction
+        let tip = TraceTiming.lerp(start, end, fraction)
+        var line = Path()
+        line.move(to: start)
+        line.addLine(to: tip)
+        let dash: [CGFloat] = edge.kind == .guessed ? [7, 6] : []
+
+        // Drawn portion (source → tip): a soft glow under a crisp core. The line grows
+        // from the source toward the gateway as `fraction` advances (item 2).
+        context.drawLayer { layer in
+            layer.addFilter(.blur(radius: 7))
+            layer.stroke(
+                line,
+                with: .color(color.opacity(0.6)),
+                style: StrokeStyle(lineWidth: 7, lineCap: .round, dash: dash)
+            )
+        }
+        // A trailing fade behind the moving head: brightest at the tip (the "comet"
+        // head), fading back toward the source.
+        context.stroke(
+            line,
+            with: .linearGradient(
+                Gradient(colors: [color.opacity(0.25), color]),
+                startPoint: start,
+                endPoint: tip
+            ),
+            style: StrokeStyle(
+                lineWidth: edge.kind == .guessed ? 1.6 : 2.8,
+                lineCap: .round,
+                dash: dash
+            )
+        )
+        if fraction < 1, let head = TraceTiming.headPoint(from: start, to: end, progress: fraction) {
+            drawSparkHead(at: head, color: color, in: &context)
         }
     }
 
@@ -123,10 +167,9 @@ public struct TraceRenderer {
 
     /// The point where the hop badge rides: the head of the furthest-along started edge.
     private func badgePoint(_ trace: PacketTrace, projection: some TraceProjection) -> CGPoint? {
-        for index in stride(from: trace.edges.count - 1, through: 0, by: -1) {
-            let fraction = progress(trace, index)
+        for edge in trace.edges.reversed() {
+            let fraction = progress(trace, edge)
             guard fraction > 0 else { continue }
-            let edge = trace.edges[index]
             return TraceTiming.lerp(
                 projection.point(for: edge.from),
                 projection.point(for: edge.to),
@@ -134,6 +177,53 @@ public struct TraceRenderer {
             )
         }
         return nil
+    }
+
+    // MARK: Per-hop labels + receivers (focus mode)
+
+    /// A small "n" hop chip drawn at an edge midpoint when a packet is focused (item 3),
+    /// so the operator reads hop 1, 2, 3 … along the path rather than only the final hop.
+    private func drawHopTick(_ hop: Int, at point: CGPoint, color: Color, in context: GraphicsContext) {
+        let radius: CGFloat = 8
+        let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        context.fill(circle(at: point, radius: radius), with: .color(.black.opacity(0.75)))
+        context.stroke(circle(at: point, radius: radius), with: .color(color), lineWidth: 1.5)
+        let label = context.resolve(
+            Text("\(hop)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+        )
+        context.draw(label, at: CGPoint(x: rect.midX, y: rect.midY))
+    }
+
+    /// Mark every node that received the focused packet — including last hops that never
+    /// rebroadcast — each ringed and tagged with its reception hop (item 6). Only the
+    /// rings whose hop the wavefront has already reached are shown, so they appear in
+    /// step with the expanding animation.
+    private func drawReceivers(
+        _ trace: PacketTrace,
+        in context: inout GraphicsContext,
+        projection: some TraceProjection
+    ) {
+        for receiver in trace.receivers {
+            // Reveal a receiver once the wavefront has reached its hop ring.
+            let reached = TraceTiming.edgeProgress(
+                clock: clock, startedAt: trace.startedAt, hopIndex: receiver.hop,
+                hopDuration: hopDuration, mode: mode
+            )
+            guard reached > 0 else { continue }
+            let center = projection.point(for: receiver.position)
+            let ringRadius: CGFloat = receiver.isGateway ? 14 : 11
+            context.stroke(
+                circle(at: center, radius: ringRadius),
+                with: .color(trace.color.opacity(0.9)),
+                style: StrokeStyle(lineWidth: 2, dash: receiver.isGateway ? [] : [3, 3])
+            )
+            drawHopTick(
+                receiver.hop,
+                at: CGPoint(x: center.x, y: center.y - ringRadius - 8),
+                color: trace.color,
+                in: context
+            )
+        }
     }
 
     private func drawBadge(_ text: String, at point: CGPoint, color: Color, in context: GraphicsContext) {
@@ -178,66 +268,7 @@ public struct TraceRenderer {
         context.draw(resolved, at: CGPoint(x: rect.midX, y: rect.midY))
     }
 
-    // MARK: Nodes
-
-    public func drawNodes(
-        _ nodes: [NetworkNode],
-        in context: inout GraphicsContext,
-        projection: some TraceProjection
-    ) {
-        for node in nodes {
-            drawNode(node, in: &context, projection: projection)
-        }
-    }
-
-    private func drawNode(
-        _ node: NetworkNode,
-        in context: inout GraphicsContext,
-        projection: some TraceProjection
-    ) {
-        let center = projection.point(for: node.position)
-        let color = Self.nodeColor(node)
-        let coreRadius: CGFloat = node.isGateway ? 9 : 6
-
-        context.drawLayer { layer in
-            layer.addFilter(.blur(radius: node.isGateway ? 16 : 10))
-            layer.fill(circle(at: center, radius: 16), with: .color(color.opacity(0.6)))
-        }
-        if node.isGateway {
-            context.stroke(circle(at: center, radius: 15), with: .color(color.opacity(0.85)), lineWidth: 1.5)
-        }
-        context.fill(circle(at: center, radius: coreRadius), with: .color(.white))
-        context.fill(circle(at: center, radius: coreRadius - 2), with: .color(color))
-
-        if let battery = node.batteryPercent {
-            let batteryColor: Color = battery < 20 ? .red : (battery < 50 ? .yellow : .green)
-            var arc = Path()
-            arc.addArc(
-                center: center,
-                radius: coreRadius + 5,
-                startAngle: .degrees(-90),
-                endAngle: .degrees(-90 + 360 * battery / 100),
-                clockwise: false
-            )
-            context.stroke(arc, with: .color(batteryColor.opacity(0.9)), lineWidth: 2)
-        }
-
-        let label = context.resolve(
-            Text(node.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.92))
-        )
-        context.draw(label, at: CGPoint(x: center.x, y: center.y + coreRadius + 15))
-    }
-
-    static func nodeColor(_ node: NetworkNode) -> Color {
-        if node.isGateway { return Color(red: 0.3, green: 0.95, blue: 1.0) }
-        switch node.hopsFromGateway {
-        case 0, 1: return Color(red: 0.45, green: 0.85, blue: 1.0)
-        case 2: return Color(red: 0.6, green: 0.7, blue: 1.0)
-        default: return Color(red: 0.75, green: 0.6, blue: 1.0)
-        }
-    }
-
-    private func circle(at center: CGPoint, radius: CGFloat) -> Path {
+    func circle(at center: CGPoint, radius: CGFloat) -> Path {
         Path(ellipseIn: CGRect(
             x: center.x - radius,
             y: center.y - radius,

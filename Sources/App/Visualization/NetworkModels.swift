@@ -59,12 +59,38 @@ public struct TraceEdge: Sendable, Equatable {
     public let kind: Kind
     /// Geographic length in metres — used to normalise draw speed.
     public let lengthMeters: Double
+    /// 1-based hop number of this edge along the packet's path (hop 1 is the first
+    /// edge out of the source, hop 2 the next, …). All edges sharing a hop number
+    /// form one ring of the expanding wavefront and animate together (item 2); the
+    /// per-hop labels drawn when a packet is focused read this (item 3).
+    public let hopIndex: Int
 
-    public init(from: GeoPoint, to: GeoPoint, kind: Kind) {
+    public init(from: GeoPoint, to: GeoPoint, kind: Kind, hopIndex: Int = 1) {
         self.from = from
         self.to = to
         self.kind = kind
+        self.hopIndex = hopIndex
         lengthMeters = Haversine.distanceMeters(from: from, to: to)
+    }
+}
+
+/// A node that received a packet, with the hop at which it heard it. Surfaced so the
+/// "show all receivers" overlay (item 6) can mark every node that heard the packet —
+/// including non-repeaters / last hops that never rebroadcast — and annotate each with
+/// its reception hop, not just the trace's final/max hop.
+public struct TraceReceiver: Sendable, Equatable {
+    public let nodeID: Int64
+    public let position: GeoPoint
+    /// The hop count at which this node received the packet (1 = direct from source).
+    public let hop: Int
+    /// True when this receiver is a gateway that reported the packet upstream.
+    public let isGateway: Bool
+
+    public init(nodeID: Int64, position: GeoPoint, hop: Int, isGateway: Bool) {
+        self.nodeID = nodeID
+        self.position = position
+        self.hop = hop
+        self.isGateway = isGateway
     }
 }
 
@@ -74,6 +100,11 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
     public let edges: [TraceEdge]
     /// Hops taken (hop_start - hop_limit) as last observed.
     public let hops: Int
+    /// Every node that received this packet, each tagged with the hop at which it
+    /// heard it (item 6). Includes the source's direct neighbours, intermediate
+    /// relays, and the gateways. Empty for traces built without reception detail
+    /// (older/sample paths) — the "show all receivers" overlay then has nothing to add.
+    public let receivers: [TraceReceiver]
     /// When this trace started animating, seconds on the animation clock.
     public let startedAt: Double
     /// The channel preset this packet ACTUALLY arrived on, captured immutably at ingest
@@ -85,12 +116,13 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
 
     public init(
         id: UInt32, sourceNode: Int64, edges: [TraceEdge], hops: Int, startedAt: Double,
-        preset: ChannelPreset? = nil
+        receivers: [TraceReceiver] = [], preset: ChannelPreset? = nil
     ) {
         self.id = id
         self.sourceNode = sourceNode
         self.edges = edges
         self.hops = hops
+        self.receivers = receivers
         self.startedAt = startedAt
         self.preset = preset
     }
@@ -99,12 +131,18 @@ public struct PacketTrace: Identifiable, Sendable, Equatable {
         PacketColor.color(for: id)
     }
 
+    /// The highest hop number across this trace's edges — the wavefront has fully
+    /// expanded once the clock reaches this ring (item 2).
+    public var maxHopIndex: Int {
+        edges.map(\.hopIndex).max() ?? 0
+    }
+
     /// A copy with the channel preset replaced — fields are immutable, so the view model
     /// uses this to stamp a freshly-built trace with the channel it arrived on (Finding 20).
     public func withPreset(_ preset: ChannelPreset?) -> PacketTrace {
         PacketTrace(
             id: id, sourceNode: sourceNode, edges: edges,
-            hops: hops, startedAt: startedAt, preset: preset
+            hops: hops, startedAt: startedAt, receivers: receivers, preset: preset
         )
     }
 }

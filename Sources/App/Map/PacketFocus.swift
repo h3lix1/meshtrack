@@ -29,9 +29,15 @@ public enum PacketFocus {
 
         let sourceIDs = Set(focused.map(\.sourceNode))
         let endpoints = endpointKeys(of: focused)
+        // Every node that received the packet stays visible too, so the all-receivers
+        // overlay (item 6) can ring last-hop nodes that heard it but never appear as an
+        // edge endpoint.
+        let receiverIDs = Set(focused.flatMap(\.receivers).map(\.nodeID))
 
         return nodes.filter { node in
-            sourceIDs.contains(node.id) || endpoints.contains(positionKey(node.position))
+            sourceIDs.contains(node.id)
+                || receiverIDs.contains(node.id)
+                || endpoints.contains(positionKey(node.position))
         }
     }
 

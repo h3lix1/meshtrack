@@ -36,12 +36,22 @@ public final class VizSettings {
     /// slower); when false, hops draw one-after-another.
     public var equaliseFinish: Bool
 
+    /// When true and a packet is focused, the map rings EVERY node that received the
+    /// packet — including non-repeaters / last hops that heard it but never
+    /// rebroadcast — each annotated with the hop at which it received it (item 6).
+    public var showAllReceivers: Bool
+
     public static let minHopDuration: Double = 0.3
     public static let maxHopDuration: Double = 4.0
 
-    public init(hopDuration: Double = 1.2, equaliseFinish: Bool = false) {
+    public init(
+        hopDuration: Double = 1.2,
+        equaliseFinish: Bool = false,
+        showAllReceivers: Bool = false
+    ) {
         _hopDuration = min(Self.maxHopDuration, max(Self.minHopDuration, hopDuration))
         self.equaliseFinish = equaliseFinish
+        self.showAllReceivers = showAllReceivers
     }
 
     /// The timing mode the TraceRenderer/TraceTiming use.
