@@ -47,6 +47,28 @@ public struct MeshStore: Sendable {
         try await writer.read { db in try NodeRecord.fetchOne(db, key: nodeNum) }
     }
 
+    /// Atomically fetch-merge-upsert a node inside a SINGLE write transaction.
+    ///
+    /// `merge` receives the current row (or `fallback` when the node is new),
+    /// mutates it in place, and the result is saved within the same transaction.
+    /// Doing the read and the write under one lock prevents a concurrent
+    /// `setOwnership`/admin write from being clobbered by a stale full-row
+    /// snapshot read in an earlier transaction — the read-modify-write race that
+    /// a separate `fetchNode` + `upsertNode` would expose. Returns the saved row.
+    @discardableResult
+    public func updateNode(
+        nodeNum: Int64,
+        orInsert fallback: @Sendable @escaping () -> NodeRecord,
+        merge: @Sendable @escaping (inout NodeRecord) -> Void
+    ) async throws -> NodeRecord {
+        try await writer.write { db in
+            var node = try NodeRecord.fetchOne(db, key: nodeNum) ?? fallback()
+            merge(&node)
+            try node.save(db)
+            return node
+        }
+    }
+
     /// All nodes, most-recently-heard first (for the node list / dashboard).
     public func allNodes() async throws -> [NodeRecord] {
         try await writer.read { db in
