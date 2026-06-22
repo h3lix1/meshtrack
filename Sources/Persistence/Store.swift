@@ -47,6 +47,28 @@ public struct MeshStore: Sendable {
         try await writer.read { db in try NodeRecord.fetchOne(db, key: nodeNum) }
     }
 
+    /// Atomically fetch-merge-upsert a node inside a SINGLE write transaction.
+    ///
+    /// `merge` receives the current row (or `fallback` when the node is new),
+    /// mutates it in place, and the result is saved within the same transaction.
+    /// Doing the read and the write under one lock prevents a concurrent
+    /// `setOwnership`/admin write from being clobbered by a stale full-row
+    /// snapshot read in an earlier transaction — the read-modify-write race that
+    /// a separate `fetchNode` + `upsertNode` would expose. Returns the saved row.
+    @discardableResult
+    public func updateNode(
+        nodeNum: Int64,
+        orInsert fallback: @Sendable @escaping () -> NodeRecord,
+        merge: @Sendable @escaping (inout NodeRecord) -> Void
+    ) async throws -> NodeRecord {
+        try await writer.write { db in
+            var node = try NodeRecord.fetchOne(db, key: nodeNum) ?? fallback()
+            merge(&node)
+            try node.save(db)
+            return node
+        }
+    }
+
     /// All nodes, most-recently-heard first (for the node list / dashboard).
     public func allNodes() async throws -> [NodeRecord] {
         try await writer.read { db in
@@ -153,33 +175,40 @@ public struct MeshStore: Sendable {
 
     // MARK: Messages (monitor-only, ADR 0006)
 
-    /// Append a decoded text message. Returns the row id.
+    /// Append a decoded text message, idempotent on `(packet_id, from_num)`
+    /// (schema v5). A re-delivery of the same logical message — e.g. via a
+    /// different gateway after a reconnect, which a fresh in-memory `DedupWindow`
+    /// would re-admit — is silently ignored rather than duplicating a chat line.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func recordMessage(_ message: MessageRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = message
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 
-    /// Messages on a channel, oldest-first (the Channels view feed).
+    /// Messages on a channel, oldest-first (the Channels view feed). The `id`
+    /// tie-break makes ordering deterministic when several messages share an
+    /// `rx_time`, so the transcript does not flicker between loads (Finding 13).
     public func messages(channel: Int64, limit: Int = 200) async throws -> [MessageRecord] {
         try await writer.read { db in
             try MessageRecord
                 .filter(Column("channel") == channel)
-                .order(Column("rx_time").desc)
+                .order(Column("rx_time").desc, Column("id").desc)
                 .limit(limit)
                 .fetchAll(db)
                 .reversed()
         }
     }
 
-    /// The most-recent messages across all channels, newest-first.
+    /// The most-recent messages across all channels, newest-first. The `id`
+    /// tie-break keeps ordering stable for equal `rx_time` (Finding 13).
     public func recentMessages(limit: Int = 200) async throws -> [MessageRecord] {
         try await writer.read { db in
             try MessageRecord
-                .order(Column("rx_time").desc)
+                .order(Column("rx_time").desc, Column("id").desc)
                 .limit(limit)
                 .fetchAll(db)
         }
@@ -187,21 +216,28 @@ public struct MeshStore: Sendable {
 
     // MARK: Time-series
 
+    /// Append a telemetry sample, idempotent on `(node_num, t, kind, key)`
+    /// (schema v5). A re-delivered packet (e.g. via a different gateway after a
+    /// reconnect) is silently ignored rather than double-counting the metric.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func appendTelemetry(_ telemetry: TelemetryRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = telemetry
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 
+    /// Append a position fix, idempotent on `(node_num, t)` (schema v5). A
+    /// re-delivered packet is silently ignored rather than duplicating the fix.
+    /// Returns the new row id, or `0` when the insert was ignored as a duplicate.
     @discardableResult
     public func appendPositionFix(_ fix: PositionFixRecord) async throws -> Int64 {
         try await writer.write { db in
             var record = fix
-            try record.insert(db)
-            return record.id ?? db.lastInsertedRowID
+            try record.insert(db, onConflict: .ignore)
+            return db.changesCount > 0 ? (record.id ?? db.lastInsertedRowID) : 0
         }
     }
 
