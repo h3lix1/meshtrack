@@ -32,7 +32,9 @@ public enum AdminConfigField: String, Sendable, CaseIterable {
     case shortName = "short_name"
     /// Owner long name (≤ 39 bytes). Maps to `User.longName` via `setOwner`.
     case longName = "long_name"
-    /// Position broadcast precision (bits). Maps to `Config.PositionConfig.positionFlags` precision.
+    /// Position broadcast precision (bits). Maps to the primary channel's
+    /// `ChannelSettings.ModuleSettings.positionPrecision` via `setChannel` —
+    /// precision is a per-channel module setting, NOT a device-config bitfield.
     case positionPrecision = "position_precision"
 }
 
@@ -57,8 +59,9 @@ public enum AdminMessageMapping {
     /// (and any reboot) until everything is staged.
     ///
     /// Order is stable and deterministic: begin → owner (if any) → config (one
-    /// per config-type touched) → commit. PSKs/channels are out of scope here
-    /// (they live in Keychain and use `setChannel`, a later HIL step).
+    /// per config-type touched) → channel (position precision, if any) → commit.
+    /// PSKs are out of scope here (they live in Keychain); the `setChannel` we
+    /// emit for precision carries only the primary channel's module setting.
     public static func messages(for changes: [ConfigChange]) throws -> [AdminMessage] {
         guard !changes.isEmpty else { return [] }
         let parsed = try changes.map(parse)
@@ -66,6 +69,7 @@ public enum AdminMessageMapping {
         var body: [AdminMessage] = []
         if let owner = ownerMessage(for: parsed) { body.append(owner) }
         body.append(contentsOf: configMessages(for: parsed))
+        if let channel = channelMessage(for: parsed) { body.append(channel) }
 
         // A bare begin/commit with no body would be a pointless round-trip.
         guard !body.isEmpty else { return [] }
@@ -74,11 +78,11 @@ public enum AdminMessageMapping {
 
     // MARK: Config response → snapshot (the read-back / verify path)
 
-    /// Flatten a node's read-back `Config` and `User` into the string snapshot the
-    /// diff compares against. Only the fields Meshtrack provisions are reported;
-    /// absent sub-configs contribute nothing (so a partial read-back never
-    /// fabricates a "current" value).
-    public static func snapshot(config: Config?, owner: User?) -> [String: String] {
+    /// Flatten a node's read-back `Config`, `User` and (primary) `Channel` into the
+    /// string snapshot the diff compares against. Only the fields Meshtrack
+    /// provisions are reported; absent sub-configs contribute nothing (so a partial
+    /// read-back never fabricates a "current" value).
+    public static func snapshot(config: Config?, owner: User?, channel: Channel? = nil) -> [String: String] {
         var snapshot: [String: String] = [:]
         if let config {
             switch config.payloadVariant {
@@ -86,9 +90,6 @@ public enum AdminMessageMapping {
                 snapshot[AdminConfigField.region.rawValue] = regionString(lora.region)
             case let .device(device):
                 snapshot[AdminConfigField.role.rawValue] = roleString(device.role)
-            case let .position(position):
-                snapshot[AdminConfigField.positionPrecision.rawValue] =
-                    String(position.positionFlags)
             default:
                 break
             }
@@ -101,19 +102,25 @@ public enum AdminMessageMapping {
                 snapshot[AdminConfigField.longName.rawValue] = owner.longName
             }
         }
+        if let channel, channel.hasSettings, channel.settings.hasModuleSettings {
+            snapshot[AdminConfigField.positionPrecision.rawValue] =
+                String(channel.settings.moduleSettings.positionPrecision)
+        }
         return snapshot
     }
 
     /// Which firmware config-types a set of changes touches — the `getConfig`
-    /// requests a read-back must issue to verify (region → lora, role → device,
-    /// etc.). Owner fields are read via `getOwnerRequest`, reported separately.
+    /// requests a read-back must issue to verify (region → lora, role → device).
+    /// Owner fields are read via `getOwnerRequest` and position precision via
+    /// `getChannelRequest`; both are reported separately (see `touchesOwner` /
+    /// `touchesChannel`), not as `getConfig` types.
     public static func configTypes(for changes: [ConfigChange]) throws -> Set<AdminMessage.ConfigType> {
         var types: Set<AdminMessage.ConfigType> = []
         for change in changes {
             switch try field(for: change.field) {
             case .region: types.insert(.loraConfig)
             case .role: types.insert(.deviceConfig)
-            case .positionPrecision: types.insert(.positionConfig)
+            case .positionPrecision: break // per-channel, read via getChannelRequest
             case .shortName, .longName: break // owner, not a getConfig type
             }
         }
@@ -126,6 +133,13 @@ public enum AdminMessageMapping {
         changes.contains { field(forOptional: $0.field) == .shortName ||
             field(forOptional: $0.field) == .longName
         }
+    }
+
+    /// Whether the changes touch a per-channel setting (position precision), i.e.
+    /// whether a read-back must also issue a `getChannelRequest` for the primary
+    /// channel to verify.
+    public static func touchesChannel(_ changes: [ConfigChange]) -> Bool {
+        changes.contains { field(forOptional: $0.field) == .positionPrecision }
     }
 
     // MARK: - Internals
@@ -163,8 +177,9 @@ public enum AdminMessageMapping {
         return message
     }
 
-    /// One `setConfig` message per config-type touched (lora / device / position),
-    /// each carrying only the fields that changed.
+    /// One `setConfig` message per config-type touched (lora / device), each
+    /// carrying only the fields that changed. Position precision is per-channel
+    /// (see `channelMessage`), not a device config.
     private static func configMessages(for changes: [ParsedChange]) -> [AdminMessage] {
         var messages: [AdminMessage] = []
         if let region = changes.first(where: { $0.field == .region }) {
@@ -177,12 +192,31 @@ public enum AdminMessageMapping {
             device.role = roleCode(role.value)
             messages.append(setConfig(.device(device)))
         }
-        if let precision = changes.first(where: { $0.field == .positionPrecision }) {
-            var position = Config.PositionConfig()
-            position.positionFlags = UInt32(precision.value) ?? 0
-            messages.append(setConfig(.position(position)))
-        }
         return messages
+    }
+
+    /// The index of the primary channel — where position precision is provisioned.
+    private static let primaryChannelIndex: Int32 = 0
+
+    /// The `setChannel` message carrying position precision as the primary
+    /// channel's `ModuleSettings.positionPrecision` (nil if precision unchanged).
+    /// This is the firmware field precision actually lives in — NOT the
+    /// device-config `position.positionFlags` boolean bitfield.
+    private static func channelMessage(for changes: [ParsedChange]) -> AdminMessage? {
+        guard let precision = changes.first(where: { $0.field == .positionPrecision }) else {
+            return nil
+        }
+        var moduleSettings = ModuleSettings()
+        moduleSettings.positionPrecision = UInt32(precision.value) ?? 0
+        var settings = ChannelSettings()
+        settings.moduleSettings = moduleSettings
+        var channel = Channel()
+        channel.index = primaryChannelIndex
+        channel.role = .primary
+        channel.settings = settings
+        var message = AdminMessage()
+        message.setChannel = channel
+        return message
     }
 
     private static func setConfig(_ variant: Config.OneOf_PayloadVariant) -> AdminMessage {

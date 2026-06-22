@@ -77,16 +77,52 @@ struct AdminMessageMappingTests {
     }
 
     @Test
-    func `position precision maps to a position config message`() throws {
+    func `position precision maps to a setChannel module setting, not a config bitfield`() throws {
         let messages = try AdminMessageMapping.messages(for: [
             ConfigChange(field: "position_precision", from: nil, to: "16")
         ])
-        let body = messages.filter { if case .setConfig = $0.payloadVariant { true } else { false } }
-        guard case let .position(position)? = body.first?.setConfig.payloadVariant else {
-            Issue.record("expected a position config payload")
-            return
-        }
-        #expect(position.positionFlags == 16)
+        // Precision is a per-channel module setting, carried by setChannel — NOT a
+        // device-config payload (the old bug mis-encoded it into positionFlags).
+        let configs = messages.filter { if case .setConfig = $0.payloadVariant { true } else { false } }
+        #expect(configs.isEmpty)
+        let channels = messages.filter { if case .setChannel = $0.payloadVariant { true } else { false } }
+        #expect(channels.count == 1)
+        let channel = try #require(channels.first?.setChannel)
+        #expect(channel.settings.moduleSettings.positionPrecision == 16)
+        // The primary channel carries it.
+        #expect(channel.index == 0)
+        #expect(channel.role == .primary)
+    }
+
+    @Test
+    func `position precision round-trips through the channel codec`() throws {
+        // Encode → wire bytes → decode → snapshot. A verbatim echo (the old fake's
+        // behaviour) would pass even with a wrong mapping; serializing forces the
+        // value through the field the protobuf actually carries.
+        let messages = try AdminMessageMapping.messages(for: [
+            ConfigChange(field: "position_precision", from: nil, to: "14")
+        ])
+        let setChannel = try #require(
+            messages.first { if case .setChannel = $0.payloadVariant { true } else { false } }
+        )
+        let wire: [UInt8] = try setChannel.serializedBytes()
+        let decoded = try AdminMessage(serializedBytes: wire)
+        let snapshot = AdminMessageMapping.snapshot(
+            config: nil, owner: nil, channel: decoded.setChannel
+        )
+        #expect(snapshot["position_precision"] == "14")
+    }
+
+    @Test
+    func `a position setConfig does not fabricate a precision snapshot`() {
+        // Position precision no longer lives in PositionConfig; a position config
+        // (even with positionFlags set) must not be read back as precision.
+        var position = Config.PositionConfig()
+        position.positionFlags = 35 // arbitrary bitfield value, not a precision
+        var config = Config()
+        config.position = position
+        let snapshot = AdminMessageMapping.snapshot(config: config, owner: nil)
+        #expect(snapshot["position_precision"] == nil)
     }
 
     @Test
@@ -191,8 +227,29 @@ struct AdminMessageMappingTests {
     }
 
     @Test
+    func `position precision is not a getConfig type, it is read via the channel`() throws {
+        let types = try AdminMessageMapping.configTypes(for: [
+            ConfigChange(field: "position_precision", from: nil, to: "16")
+        ])
+        #expect(types.isEmpty)
+        #expect(AdminMessageMapping.touchesChannel([
+            ConfigChange(field: "position_precision", from: nil, to: "16")
+        ]))
+    }
+
+    @Test
     func `touchesOwner is true only when a name field changes`() {
         #expect(AdminMessageMapping.touchesOwner([ConfigChange(field: "short_name", from: nil, to: "X")]))
         #expect(!AdminMessageMapping.touchesOwner([ConfigChange(field: "region", from: nil, to: "US")]))
+    }
+
+    @Test
+    func `touchesChannel is true only when position precision changes`() {
+        #expect(AdminMessageMapping.touchesChannel([
+            ConfigChange(field: "position_precision", from: nil, to: "16")
+        ]))
+        #expect(!AdminMessageMapping.touchesChannel([
+            ConfigChange(field: "region", from: nil, to: "US")
+        ]))
     }
 }
