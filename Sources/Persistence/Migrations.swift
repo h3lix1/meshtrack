@@ -64,6 +64,11 @@ public enum MeshtrackMigrator {
             try dropExtractionUniqueIndexes(db)
             try createDedupSeen(db)
         }
+        // Phase 10 (items 11–13): durable per-node / per-port mesh-traffic counters
+        // backing the Port-numbers + Largest-offenders analytics screens, so the
+        // offenders ranking survives across sessions. The builder lives in its own
+        // file (`Migrations+TrafficStats.swift`); appended here, never editing v1–v6.
+        registerTrafficStats(&migrator)
         return migrator
     }
 
