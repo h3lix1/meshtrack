@@ -194,10 +194,12 @@ public struct TraceRenderer {
         context.draw(label, at: CGPoint(x: rect.midX, y: rect.midY))
     }
 
-    /// Mark every node that received the focused packet — including last hops that never
-    /// rebroadcast — each ringed and tagged with its reception hop (item 6). Only the
-    /// rings whose hop the wavefront has already reached are shown, so they appear in
-    /// step with the expanding animation.
+    /// Mark every node we have evidence received the focused packet — gateways, guessed
+    /// relays, and the addressed destination — each ringed and tagged with its reception
+    /// hop (item 6/8). The destination is styled distinctly (item 8). Only the rings whose
+    /// hop the wavefront has already reached are shown, so they appear in step with the
+    /// expanding animation. (Receivers without a known position can't be drawn — those are
+    /// listed textually in the legend instead, see VizLegend.receivedBy.)
     private func drawReceivers(
         _ trace: PacketTrace,
         in context: inout GraphicsContext,
@@ -210,20 +212,37 @@ public struct TraceRenderer {
                 hopDuration: hopDuration, mode: mode
             )
             guard reached > 0 else { continue }
-            let center = projection.point(for: receiver.position)
-            let ringRadius: CGFloat = receiver.isGateway ? 14 : 11
-            context.stroke(
-                circle(at: center, radius: ringRadius),
-                with: .color(trace.color.opacity(0.9)),
-                style: StrokeStyle(lineWidth: 2, dash: receiver.isGateway ? [] : [3, 3])
-            )
-            drawHopTick(
-                receiver.hop,
-                at: CGPoint(x: center.x, y: center.y - ringRadius - 8),
-                color: trace.color,
-                in: context
-            )
+            drawReceiverRing(receiver, color: trace.color, projection: projection, in: &context)
         }
+    }
+
+    /// Draw one receiver's ring + hop tick. The destination gets a distinct double-ring +
+    /// solid emphasis so the operator reads it as the addressed last-hop recipient (item 8);
+    /// gateways get a solid ring, guessed relays a dashed one.
+    private func drawReceiverRing(
+        _ receiver: TraceReceiver,
+        color: Color,
+        projection: some TraceProjection,
+        in context: inout GraphicsContext
+    ) {
+        let center = projection.point(for: receiver.position)
+        let ringRadius: CGFloat = receiver.isDestination ? 16 : (receiver.isGateway ? 14 : 11)
+        let dash: [CGFloat] = receiver.kind == .relay ? [3, 3] : []
+        context.stroke(
+            circle(at: center, radius: ringRadius),
+            with: .color(color.opacity(0.9)),
+            style: StrokeStyle(lineWidth: receiver.isDestination ? 3 : 2, dash: dash)
+        )
+        if receiver.isDestination {
+            // A second inner ring marks the addressed final recipient apart from gateways.
+            context.stroke(circle(at: center, radius: ringRadius - 4), with: .color(color), lineWidth: 1.5)
+        }
+        drawHopTick(
+            receiver.hop,
+            at: CGPoint(x: center.x, y: center.y - ringRadius - 8),
+            color: color,
+            in: context
+        )
     }
 
     private func drawBadge(_ text: String, at point: CGPoint, color: Color, in context: GraphicsContext) {

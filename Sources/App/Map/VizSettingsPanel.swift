@@ -44,12 +44,37 @@ public struct VizSettingsPanel: View {
             edgeKey
             Divider().overlay(Color.white.opacity(0.12))
             legend
+            receivedBySection
         }
         .padding(14)
         .frame(width: 240, alignment: .leading)
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12), lineWidth: 1))
         .foregroundStyle(.white)
+    }
+
+    /// The focused packet's complete "received by (reported)" roster (item 8): every
+    /// receiver we have evidence for — both the nodes ringed on the map and the ones we can
+    /// only list because we have no position to draw them — each with its reception hop.
+    /// Only shown when a packet is focused and the toggle is on. The "(reported)" qualifier
+    /// is deliberate: this is what the mesh reports, not every silent overhearer.
+    @ViewBuilder
+    private var receivedBySection: some View {
+        let rows = focusedReceiverRows
+        if !rows.isEmpty {
+            Divider().overlay(Color.white.opacity(0.12))
+            ReceivedByList(rows: rows)
+        }
+    }
+
+    /// The focused packet's receiver roster, or empty when nothing is focused / the toggle
+    /// is off — kept off the view body so the `if` above stays single-condition.
+    private var focusedReceiverRows: [VizLegend.ReceiverRow] {
+        guard settings.showAllReceivers,
+              let focused = selectedPacketID,
+              let trace = traces.first(where: { $0.id == focused })
+        else { return [] }
+        return VizLegend.receivedBy(trace)
     }
 
     // MARK: Timing
@@ -167,6 +192,42 @@ public struct VizSettingsPanel: View {
                 .help(isFocused ? "Show all packets" : "Isolate this packet")
         } else {
             row
+        }
+    }
+}
+
+/// The focused packet's "received by (reported)" roster (item 8). Lists every receiver we
+/// have evidence for: the ones ringed on the map (`onMap`) and the ones we could only list
+/// because we have no position to draw them (a dot beside the row distinguishes the two).
+/// The "(reported)" heading is honest — this is what the mesh reports (gateways, guessed
+/// relays, the addressed destination), NOT every node that silently overheard the packet.
+private struct ReceivedByList: View {
+    let rows: [VizLegend.ReceiverRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Received by (reported)")
+                .font(.caption.weight(.bold)).foregroundStyle(.white.opacity(0.7))
+            ForEach(rows) { row in
+                receiverRow(row)
+            }
+            Text("only nodes the mesh reported \u{2014} silent overhearers are unknowable")
+                .font(.system(size: 9)).foregroundStyle(.white.opacity(0.45))
+        }
+    }
+
+    private func receiverRow(_ row: VizLegend.ReceiverRow) -> some View {
+        HStack(spacing: 8) {
+            // Filled dot = drawn on the map; hollow dot = listed-only (no known position).
+            Circle()
+                .strokeBorder(.white.opacity(0.7), lineWidth: 1)
+                .background(Circle().fill(row.onMap ? .white.opacity(0.7) : .clear))
+                .frame(width: 7, height: 7)
+            Text(row.label).font(.system(size: 10).monospaced())
+            Text(row.roleLabel).font(.system(size: 9)).foregroundStyle(.white.opacity(0.5))
+            Spacer()
+            Text("hop \(row.hop)").font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.6))
         }
     }
 }
