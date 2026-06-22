@@ -58,13 +58,15 @@ public enum RuleEvaluator {
     ///   `voltage_below` — evaluate only when the node is managed**, so we never
     ///   raise battery/silence alerts for strangers' nodes. The node → class →
     ///   global config hierarchy is unchanged: this gate is applied *after*
-    ///   resolution, never altering it. Defaults to managed so existing
-    ///   single-fleet callers keep firing.
+    ///   resolution, never altering it. **Required, with no default**: omitting a
+    ///   node's ownership must be a compile error, never a silent "treat as
+    ///   managed" that fires stale/battery alerts for unclassified strangers
+    ///   (ADR 0008 — Domain defaults a fresh node to ``NodeManagement/unowned``).
     public static func conditions(
         for snapshot: NodeSnapshot,
         rules: RuleSet,
         now: Instant,
-        management: NodeManagement = NodeManagement(isManaged: true)
+        management: NodeManagement
     ) -> [AlertCondition] {
         var conditions: [AlertCondition] = []
         // Ownership-sensitive rules: skipped entirely for unmanaged nodes.

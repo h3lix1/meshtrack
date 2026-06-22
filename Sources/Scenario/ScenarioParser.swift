@@ -54,9 +54,11 @@ public struct ScenarioParser: Sendable {
         let arm = try parseArm(mapping, node: node)
         let fixes = try parseFixes(mapping, node: node)
         let silenceHours = try optionalDouble(mapping, key: "silence_hours", node: node)
-        // ADR 0008: omitted `managed` defaults to managed (single-fleet); declare
-        // `managed: false` to assert a stranger's node is never alerted.
-        let isManaged = try optionalBool(mapping, key: "managed", node: node) ?? true
+        // ADR 0008: omitted `managed` defaults to UNMANAGED, matching Domain's
+        // `.unowned` default for a freshly-observed node — an unclassified node
+        // never fires a false battery/silence alert. Declare `managed: true` to
+        // assert an owned node's stale/battery alerts.
+        let isManaged = try optionalBool(mapping, key: "managed", node: node) ?? false
         let expected = try parseExpectedAlerts(mapping, node: node)
 
         return Scenario(
