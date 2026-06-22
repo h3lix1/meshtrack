@@ -51,6 +51,19 @@ public enum MeshtrackMigrator {
             try dedupeExtractionTables(db)
             try addExtractionUniqueIndexes(db)
         }
+        // Phase 9 (Finding 5): the v5 PERMANENT unique indexes silently drop EVERY
+        // future row sharing a coarse natural key forever — violating the SPEC §2.4
+        // sliding-window dedup contract. Legitimate packet-id reuse after the 600s
+        // window, or two genuinely-distinct fixes/samples that happen to share the
+        // coarse key, are lost permanently. v6 replaces the permanent index with a
+        // BOUNDED, window-correct dedup ledger: drop the unique indexes (the v1
+        // non-unique query indexes already cover reads) and add `dedup_seen`, a
+        // small last-seen ledger consulted against the 600s window. Cross-run/reconnect
+        // idempotency is preserved; expiry lets a key recur after the window.
+        migrator.registerMigration("v6") { db in
+            try dropExtractionUniqueIndexes(db)
+            try createDedupSeen(db)
+        }
         return migrator
     }
 
@@ -321,6 +334,42 @@ extension MeshtrackMigrator {
             on: Table.positionFix,
             columns: ["node_num", "t"],
             options: [.unique]
+        )
+    }
+}
+
+// MARK: - v6 windowed-dedup ledger (Phase 9, Finding 5)
+
+extension MeshtrackMigrator {
+    /// Remove the v5 PERMANENT unique indexes. They enforced a coarse natural key
+    /// for all time, so `INSERT OR IGNORE` dropped legitimate later rows (packet-id
+    /// reuse past the window, or distinct samples/fixes that share the coarse key).
+    /// The v1 non-unique indexes (`idx_message_channel_time`, `idx_telemetry_*`,
+    /// `idx_position_fix_node_time`) already serve every read, so dropping these
+    /// costs no query speed. `IF EXISTS` keeps the drop idempotent.
+    static func dropExtractionUniqueIndexes(_ db: Database) throws {
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_message_packet_from")
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_telemetry_natural_key")
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_position_fix_natural_key")
+    }
+
+    /// `dedup_seen` — the bounded, window-correct extraction dedup ledger (SPEC
+    /// §2.4). One row per packet identity (`<from>:<packet_id>`) carrying the last
+    /// time we extracted it. The store admits an extraction only when the key is
+    /// absent or last seen MORE than the dedup window ago, then records/slides the
+    /// row and prunes expired keys — so a reconnect re-delivery within the window
+    /// is deduped (durably, across `run()` boundaries the in-memory window cannot
+    /// span) yet the same key recurring after the window records a fresh extraction.
+    static func createDedupSeen(_ db: Database) throws {
+        try db.create(table: Table.dedupSeen) { t in
+            t.primaryKey("key", .text)
+            t.column("last_seen_at", .integer).notNull()
+        }
+        // Bounded-size pruning deletes by age; index the time column for it.
+        try db.create(
+            index: "idx_dedup_seen_last_seen",
+            on: Table.dedupSeen,
+            columns: ["last_seen_at"]
         )
     }
 }

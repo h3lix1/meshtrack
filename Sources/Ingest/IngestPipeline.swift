@@ -80,8 +80,27 @@ public struct IngestPipeline: Sendable {
             }
 
             // Count telemetry/position/message once per (packet_id, from) in window.
+            // Two dedup layers share the same window: the in-memory `DedupWindow`
+            // (fast, per-run — surfaced in `extractionsDeduped`) and a DURABLE
+            // ledger in the store (Finding 5). The ledger is what makes a reconnect
+            // re-delivery — a NEW run() with a FRESH in-memory window, re-admitted
+            // here — still extract exactly once. It silently replaces the role the
+            // v5 permanent unique index played (a within-run dup is the counted
+            // case; a cross-run dup is absorbed durably) and, unlike that index,
+            // lets a legitimate packet-id reuse AFTER the window record a new
+            // extraction rather than dropping it forever.
             guard dedup.admit(packet.dedupKey, at: packet.rxTime) else {
                 summary.extractionsDeduped += 1
+                continue
+            }
+            guard try await store.admitExtraction(
+                packetID: Int64(packet.packetID),
+                fromNum: Int64(packet.from),
+                at: packet.rxTime,
+                windowSeconds: dedupWindowSeconds
+            ) else {
+                // Durable cross-run dedup: absorbed silently, just like the v5 index
+                // it replaces, so within-run `extractionsDeduped` stays meaningful.
                 continue
             }
             try await extract(packet, node: node, frame: frame, into: &summary)
