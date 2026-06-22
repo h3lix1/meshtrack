@@ -90,6 +90,52 @@ struct FleetRolloutViewModelTests {
         }
     }
 
+    /// Records which nodes actually had `apply` invoked — so a test can prove an
+    /// abort during node 1 means node 2's apply is NEVER reached.
+    private actor ApplyRecorder {
+        private var appliedNodes: Set<Int64> = []
+        func record(_ nodeNum: Int64) { appliedNodes.insert(nodeNum) }
+        func applied(node nodeNum: Int64) -> Bool { appliedNodes.contains(nodeNum) }
+    }
+
+    /// A gated channel that records its apply against a shared recorder before
+    /// parking. Distinct instances per node let a test assert node 2 is untouched.
+    private actor RecordingGatedChannel: AdminChannel {
+        private let nodeNum: Int64
+        private let recorder: ApplyRecorder
+        private var config: [String: String]
+        private var gate: CheckedContinuation<Void, Never>?
+        private var didEnter = false
+        private var enteredWaiter: CheckedContinuation<Void, Never>?
+
+        init(nodeNum: Int64, recorder: ApplyRecorder, config: [String: String] = [:]) {
+            self.nodeNum = nodeNum
+            self.recorder = recorder
+            self.config = config
+        }
+
+        func currentConfig() -> [String: String] { config }
+
+        func apply(_ changes: [ConfigChange]) async {
+            await recorder.record(nodeNum)
+            didEnter = true
+            enteredWaiter?.resume()
+            enteredWaiter = nil
+            await withCheckedContinuation { gate = $0 }
+            for change in changes { config[change.field] = change.to }
+        }
+
+        func waitUntilEntered() async {
+            if didEnter { return }
+            await withCheckedContinuation { enteredWaiter = $0 }
+        }
+
+        func release() {
+            gate?.resume()
+            gate = nil
+        }
+    }
+
     private let template = NodeTemplate(name: "fleet-std", region: "US", role: "CLIENT")
 
     private func member(_ num: Int64) -> FleetMember {
@@ -255,6 +301,41 @@ struct FleetRolloutViewModelTests {
         await gate.release() // let the cancelled task wind down without leaking
     }
 
+    @Test
+    func `aborting during node 1 never applies node 2 and never mutates a row after the stop`() async {
+        // Per-node gated channels sharing one apply-recorder, so we can prove node 2's
+        // apply is never reached after an abort during node 1 — the engine must check
+        // cancellation BETWEEN members, not just cancel the wrapper task.
+        let applies = ApplyRecorder()
+        let node1 = RecordingGatedChannel(nodeNum: 1, recorder: applies)
+        let node2 = RecordingGatedChannel(nodeNum: 2, recorder: applies)
+        let map: [Int64: RecordingGatedChannel] = [1: node1, 2: node2]
+        let vm = FleetRolloutViewModel(
+            channelFor: { map[$0] ?? node1 },
+            template: template,
+            members: [member(1), member(2)]
+        )
+
+        vm.startRollout()
+        await node1.waitUntilEntered() // parked inside node 1's apply
+        #expect(vm.rows[0].status == .applying)
+
+        vm.abort()
+        await node1.release() // let node 1's (cancelled) apply finish
+
+        // Give the cancelled engine task ample time to (not) advance to node 2.
+        await settle()
+
+        #expect(await applies.applied(node: 1)) // node 1 was mid-apply when aborted
+        #expect(!(await applies.applied(node: 2))) // node 2's apply was NEVER reached
+        #expect(vm.phase == .aborted) // a stale callback can't flip us back to rolling
+        // No row mutated after the abort: the in-flight node reverted to pending,
+        // node 2 untouched. Neither was driven to .verified by a post-abort callback.
+        #expect(vm.rows[0].status == .pending)
+        #expect(vm.rows[1].status == .pending)
+        #expect(vm.verifiedCount == 0)
+    }
+
     // MARK: Helpers
 
     /// Spin the main actor until the rollout reaches a terminal phase.
@@ -262,5 +343,11 @@ struct FleetRolloutViewModelTests {
         for _ in 0 ..< 1000 where vm.phase == .rolling {
             await Task.yield()
         }
+    }
+
+    /// Yield the main actor enough times for a cancelled engine task to (fail to)
+    /// advance — gives a regression the chance to incorrectly apply the next node.
+    private func settle() async {
+        for _ in 0 ..< 1000 { await Task.yield() }
     }
 }

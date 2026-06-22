@@ -56,11 +56,30 @@ public struct MeshAdminChannel: AdminChannel {
     /// send them over the transport. (Validation runs upstream in `AdminApplier`,
     /// shared across every adapter; read-back verification is also the
     /// `AdminApplier`'s job, which re-reads via `currentConfig()`.)
+    ///
+    /// Position precision is per-channel and `setChannel` REPLACES the whole channel,
+    /// so when a change touches precision we first read back the node's current
+    /// primary channel and feed it to the mapping as a read-modify-write — the
+    /// emitted `setChannel` preserves the existing name, PSK, role and uplink/
+    /// downlink flags and only moves `positionPrecision`.
     public func apply(_ changes: [ConfigChange]) async throws {
         guard !changes.isEmpty else { return }
-        let messages = try AdminMessageMapping.messages(for: changes)
+        let current = try await currentPrimaryChannelIfNeeded(for: changes)
+        let messages = try AdminMessageMapping.messages(for: changes, currentPrimaryChannel: current)
         guard !messages.isEmpty else { return }
         try await transport.send(messages, to: target)
+    }
+
+    /// Read back the node's current primary `Channel` when (and only when) a change
+    /// touches a per-channel setting (position precision) — so the precision apply is
+    /// a read-modify-write that preserves the rest of the channel. Returns `nil` when
+    /// no precision change is present (no channel read needed).
+    private func currentPrimaryChannelIfNeeded(for changes: [ConfigChange]) async throws -> Channel? {
+        guard AdminMessageMapping.touchesChannel(changes) else { return nil }
+        let readback = try await transport.readback(
+            configTypes: [], owner: false, channel: true, from: target
+        )
+        return readback.channel
     }
 
     /// Flatten a multi-config read-back into the diff snapshot, merging each

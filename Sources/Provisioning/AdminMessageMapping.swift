@@ -60,16 +60,29 @@ public enum AdminMessageMapping {
     ///
     /// Order is stable and deterministic: begin → owner (if any) → config (one
     /// per config-type touched) → channel (position precision, if any) → commit.
-    /// PSKs are out of scope here (they live in Keychain); the `setChannel` we
-    /// emit for precision carries only the primary channel's module setting.
-    public static func messages(for changes: [ConfigChange]) throws -> [AdminMessage] {
+    ///
+    /// `currentPrimaryChannel` is the node's existing primary `Channel`, read back
+    /// before the apply. Position precision is a per-channel module setting, and the
+    /// firmware treats `setChannel` as a REPLACE of the whole channel — so a
+    /// precision change MUST be a read-modify-write that preserves the existing name,
+    /// PSK, role and uplink/downlink flags. Pass the read-back channel here so the
+    /// emitted `setChannel` carries those forward and only `positionPrecision` moves.
+    /// When `nil` (no precision change, or no channel could be read) the channel is
+    /// built fresh — acceptable only because precision is the sole field we touch and
+    /// a missing read-back means there is nothing to preserve.
+    public static func messages(
+        for changes: [ConfigChange],
+        currentPrimaryChannel: Channel? = nil
+    ) throws -> [AdminMessage] {
         guard !changes.isEmpty else { return [] }
         let parsed = try changes.map(parse)
 
         var body: [AdminMessage] = []
         if let owner = ownerMessage(for: parsed) { body.append(owner) }
         body.append(contentsOf: configMessages(for: parsed))
-        if let channel = channelMessage(for: parsed) { body.append(channel) }
+        if let channel = channelMessage(for: parsed, current: currentPrimaryChannel) {
+            body.append(channel)
+        }
 
         // A bare begin/commit with no body would be a pointless round-trip.
         guard !body.isEmpty else { return [] }
@@ -202,21 +215,42 @@ public enum AdminMessageMapping {
     /// channel's `ModuleSettings.positionPrecision` (nil if precision unchanged).
     /// This is the firmware field precision actually lives in — NOT the
     /// device-config `position.positionFlags` boolean bitfield.
-    private static func channelMessage(for changes: [ParsedChange]) -> AdminMessage? {
+    ///
+    /// Read-modify-write: `setChannel` REPLACES the whole channel on the node, so we
+    /// start from the read-back `current` channel (name, PSK, role, uplink/downlink
+    /// flags, every other module setting) and overwrite ONLY `positionPrecision`.
+    /// Without a read-back we fall back to a fresh channel — there is nothing to
+    /// preserve, and precision is the only field this message ever sets.
+    private static func channelMessage(
+        for changes: [ParsedChange],
+        current: Channel?
+    ) -> AdminMessage? {
         guard let precision = changes.first(where: { $0.field == .positionPrecision }) else {
             return nil
         }
-        var moduleSettings = ModuleSettings()
+        // Preserve everything the node already has; mutate only the precision.
+        var channel = current ?? freshPrimaryChannel()
+        // A read-back channel always has settings, but guard so a partial one can't
+        // drop the existing fields by writing an empty ChannelSettings.
+        var settings = channel.hasSettings ? channel.settings : ChannelSettings()
+        var moduleSettings = settings.hasModuleSettings ? settings.moduleSettings : ModuleSettings()
         moduleSettings.positionPrecision = UInt32(precision.value) ?? 0
-        var settings = ChannelSettings()
         settings.moduleSettings = moduleSettings
-        var channel = Channel()
+        channel.settings = settings
+        // Pin the addressing even when read-back omitted it (it targets the primary).
         channel.index = primaryChannelIndex
         channel.role = .primary
-        channel.settings = settings
         var message = AdminMessage()
         message.setChannel = channel
         return message
+    }
+
+    /// A bare primary `Channel` used only when no read-back is available.
+    private static func freshPrimaryChannel() -> Channel {
+        var channel = Channel()
+        channel.index = primaryChannelIndex
+        channel.role = .primary
+        return channel
     }
 
     private static func setConfig(_ variant: Config.OneOf_PayloadVariant) -> AdminMessage {
