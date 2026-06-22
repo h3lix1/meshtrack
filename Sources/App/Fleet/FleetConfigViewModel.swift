@@ -28,14 +28,43 @@ public final class FleetConfigViewModel {
     }
 
     /// The editor's working copy of a template's fields (strings for binding).
+    ///
+    /// `name`, naming DSLs and channels are template-only concerns (no per-node form
+    /// equivalent) and stay as scalar strings. The broad protocol surface — every
+    /// LoRa/Device/Position/Power/Display/Network/Bluetooth/Security/module knob,
+    /// including `region`/`role`/`position_precision` — lives in `fields`, keyed by
+    /// `AdminConfigField.rawValue`, so the editor can drive the SAME bespoke
+    /// `NodeConfigForm` the per-node editor uses. Only the keys the operator actually
+    /// set are kept, so a template carries a minimal group-default set.
     public struct TemplateDraft: Sendable, Equatable {
         public var name: String
-        public var region: String
-        public var role: String
         public var shortNameDSL: String
         public var longNameDSL: String
         public var channels: String // comma-separated channel names
-        public var positionPrecision: String // empty = unset
+        /// Broad config defaults, keyed by `AdminConfigField.rawValue`. Region/role/
+        /// precision live here too (they are real admin fields).
+        public var fields: [String: String]
+
+        /// Region the rollout always sets (legal, SPEC §2.9). Reads/writes
+        /// `fields["region"]`, defaulting to "US" so a fresh draft is connectable.
+        public var region: String {
+            get { fields["region"] ?? "US" }
+            set { fields["region"] = newValue }
+        }
+
+        /// Device role default. Reads/writes `fields["role"]` (back-compat accessor —
+        /// the broad form edits the same key directly). Empty string clears it.
+        public var role: String {
+            get { fields["role"] ?? "" }
+            set { fields["role"] = newValue.isEmpty ? nil : newValue }
+        }
+
+        /// Position broadcast precision (bits) default. Reads/writes
+        /// `fields["position_precision"]`; empty string clears it.
+        public var positionPrecision: String {
+            get { fields["position_precision"] ?? "" }
+            set { fields["position_precision"] = newValue.isEmpty ? nil : newValue }
+        }
 
         public init(
             name: String = "New template",
@@ -44,15 +73,20 @@ public final class FleetConfigViewModel {
             shortNameDSL: String = "{shortName}",
             longNameDSL: String = "{longName}",
             channels: String = "",
-            positionPrecision: String = ""
+            positionPrecision: String = "",
+            fields: [String: String] = [:]
         ) {
             self.name = name
-            self.region = region
-            self.role = role
             self.shortNameDSL = shortNameDSL
             self.longNameDSL = longNameDSL
             self.channels = channels
-            self.positionPrecision = positionPrecision
+            var seeded = fields
+            seeded["region"] = seeded["region"] ?? region
+            if seeded["role"] == nil, !role.isEmpty { seeded["role"] = role }
+            if seeded["position_precision"] == nil, !positionPrecision.isEmpty {
+                seeded["position_precision"] = positionPrecision
+            }
+            self.fields = seeded
         }
     }
 
@@ -60,6 +94,14 @@ public final class FleetConfigViewModel {
     /// The template currently loaded in the editor (`nil` = a new, unsaved draft).
     public private(set) var selectedTemplateID: Int64?
     public var draft = TemplateDraft()
+
+    /// The editor's broad-config form, driving the SAME bespoke `NodeConfigForm`
+    /// sections (Device/LoRa/Position/…) the per-node editor renders. Seeded with an
+    /// empty baseline so its `values` hold EXACTLY the keys the template carries as
+    /// group defaults; `select`/`newTemplate` rebuild it from the draft and save/preview
+    /// reconcile the draft's `fields` from it. Which fields a template sets, the rollout
+    /// applies; a per-node `NodeConfigEdit` then overrides on top.
+    public private(set) var configForm = NodeConfigFormState(baseline: [:])
 
     // MARK: Members
 
@@ -160,21 +202,42 @@ public final class FleetConfigViewModel {
     public func newTemplate() {
         selectedTemplateID = nil
         draft = TemplateDraft()
+        rebuildConfigForm()
     }
 
     public func select(_ id: Int64) {
         guard let item = templates.first(where: { $0.id == id }) else { return }
         selectedTemplateID = id
         draft = Self.draft(from: item.template)
+        rebuildConfigForm()
+    }
+
+    /// Reseed the broad-config form from the current draft so the shared
+    /// `NodeConfigForm` sections show this template's defaults. Called whenever the
+    /// draft is replaced (new / select).
+    public func rebuildConfigForm() {
+        configForm = NodeConfigFormState(templateFields: draft.fields)
+    }
+
+    /// Fold the editor form's broad-config edits back into the draft. The bespoke
+    /// `NodeConfigSectionView` mutates `configForm` directly; before persisting (or
+    /// previewing) we copy its `changedFields` — only the keys the operator actually
+    /// edited in the form — into the draft. Applying just the edits (not every value)
+    /// means a draft scalar set elsewhere (e.g. `draft.role`) isn't clobbered by the
+    /// form's stale seed.
+    private func syncFormIntoDraft() {
+        for (key, value) in configForm.changedFields {
+            draft.fields[key] = value
+        }
     }
 
     /// Persist the current draft (insert or update) and reselect it.
     public func saveTemplate() async {
+        syncFormIntoDraft()
         do {
-            let id = try await store.upsertTemplate(Self.record(
-                from: currentTemplate(),
-                id: selectedTemplateID
-            ))
+            let template = currentTemplate()
+            try template.validate() // reject an unsupported broad key before persisting
+            let id = try await store.upsertTemplate(Self.record(from: template, id: selectedTemplateID))
             selectedTemplateID = id
             await loadTemplates()
         } catch {
@@ -188,6 +251,7 @@ public final class FleetConfigViewModel {
             try await store.deleteTemplate(id: id)
             selectedTemplateID = nil
             draft = TemplateDraft()
+            rebuildConfigForm()
             await loadTemplates()
         } catch {
             lastError = "\(error)"
@@ -195,19 +259,30 @@ public final class FleetConfigViewModel {
     }
 
     /// The `NodeTemplate` described by the current draft (what a rollout applies).
+    ///
+    /// Region/role/precision are pulled out of the draft's broad `fields` into the
+    /// template's typed properties (so the existing named-field `desiredConfig` path +
+    /// its tests are unchanged); every OTHER set field rides in `fields` as a group
+    /// default. Blank values are dropped so the template carries only what the operator
+    /// actually configured.
     public func currentTemplate() -> NodeTemplate {
-        NodeTemplate(
+        var broad = draft.fields.filter { !$0.value.isEmpty }
+        let region = broad.removeValue(forKey: "region") ?? "US"
+        let role = broad.removeValue(forKey: "role")
+        let precision = broad.removeValue(forKey: "position_precision").flatMap(Int.init)
+        return NodeTemplate(
             name: draft.name,
-            region: draft.region,
-            role: draft.role.isEmpty ? nil : draft.role,
+            region: region,
+            role: role,
             shortNameDSL: draft.shortNameDSL.isEmpty ? nil : draft.shortNameDSL,
             longNameDSL: draft.longNameDSL.isEmpty ? nil : draft.longNameDSL,
             channels: draft.channels
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty },
-            positionPrecisionBits: Int(draft.positionPrecision),
-            firmwareVariant: nil
+            positionPrecisionBits: precision,
+            firmwareVariant: nil,
+            fields: broad
         )
     }
 
@@ -251,6 +326,7 @@ public final class FleetConfigViewModel {
     }
 
     private func buildRollout() -> FleetRolloutViewModel {
+        syncFormIntoDraft() // carry the broad-config edits into the template a rollout applies
         let chosen = Self.dedupByNodeNum(candidates.filter { selected.contains($0.nodeNum) })
         let members = chosen.map { candidate in
             FleetMember(

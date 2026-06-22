@@ -8,7 +8,12 @@
 import SwiftUI
 
 public struct FleetConfigConsole: View {
-    @State private var viewModel: FleetConfigViewModel
+    /// Internal (not private) so the broad-config editor section, split into
+    /// `FleetConfigConsole+Template.swift` to keep this type body within the lint cap,
+    /// can read it.
+    @State var viewModel: FleetConfigViewModel
+    /// Which broad-config sections are expanded in the template editor (collapsible).
+    @State var expandedSections: Set<String> = ["LoRa"]
 
     public init(viewModel: FleetConfigViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -56,12 +61,11 @@ public struct FleetConfigConsole: View {
                 }
 
                 labeledField("Name", text: $model.draft.name)
-                labeledField("Region", text: $model.draft.region)
-                labeledField("Role", text: $model.draft.role)
                 labeledField("Short-name DSL", text: $model.draft.shortNameDSL)
                 labeledField("Long-name DSL", text: $model.draft.longNameDSL)
                 labeledField("Channels (comma-separated)", text: $model.draft.channels)
-                labeledField("Position precision (bits)", text: $model.draft.positionPrecision)
+
+                broadConfigSections
 
                 HStack {
                     Button("Save template") { Task { await viewModel.saveTemplate() } }
