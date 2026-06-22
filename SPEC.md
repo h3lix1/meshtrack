@@ -261,8 +261,9 @@ on regression.
 ## 10. Resolved decisions (was: open questions)
 
 1. **Broker:** Public broker (`mqtt.meshtastic.org`). Honor zero-hop uplink policy.
-2. **Channels/PSKs:** Configurable in-app; up to **20** channels for MQTT, **7** for
-   the local device. Entered/rotated in-app; stored in Keychain.
+2. **Channels/PSKs:** Configurable in-app; **MQTT channels are uncapped**, **7** for
+   the local device (firmware slot limit). Entered/rotated in-app; stored in Keychain.
+   See ADR 0009 (supersedes the earlier "20 MQTT" cap).
 3. **Remote admin:** Support **both** PKI admin key (per node) and legacy admin
    channel.
 4. **Deployment:** **Single-Mac.** Shared GRDB store (WAL) + XPC between
