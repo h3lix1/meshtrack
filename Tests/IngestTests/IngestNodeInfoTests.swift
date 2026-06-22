@@ -189,6 +189,40 @@ struct IngestNodeInfoTests {
     }
 
     @Test
+    func `an ownership write racing a NODEINFO ingest is not lost (Finding 9)`() async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // A pre-existing, operator-classified node.
+        try await store.upsertNode(NodeRecord(
+            node_num: 0xC0DE,
+            short_name: "OLD",
+            first_seen_at: at(1).nanosecondsSinceEpoch,
+            last_heard_at: at(1).nanosecondsSinceEpoch
+        ))
+
+        // Fire the ownership write and the NODEINFO ingest concurrently. Because
+        // the ingest now fetch-merges-upserts inside a SINGLE write transaction,
+        // neither effect can clobber the other regardless of interleaving: the
+        // NODEINFO's name AND the ownership flag must both survive.
+        let frames = [frame(
+            from: 0xC0DE,
+            packetID: 21,
+            payload: nodeInfoPayload(id: "!0000c0de", longName: "Concurrent Node", shortName: "CON"),
+            at: at(60)
+        )]
+        async let ownership: Void = store.setOwnership(nodeNum: 0xC0DE, isMine: true, isManaged: true)
+        async let ingest = pipeline(store).run(StubTransport(queued: frames))
+        _ = try await (ownership, ingest)
+
+        let node = try await store.fetchNode(nodeNum: 0xC0DE)
+        // The NODEINFO identity landed …
+        #expect(node?.short_name == "CON")
+        #expect(node?.long_name == "Concurrent Node")
+        // … and the racing ownership write was NOT clobbered by a stale snapshot.
+        #expect(node?.is_mine == true)
+        #expect(node?.is_managed == true)
+    }
+
+    @Test
     func `malformed NODEINFO bytes are skipped, not fatal`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())
         let frames = [frame(

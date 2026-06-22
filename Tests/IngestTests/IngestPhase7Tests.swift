@@ -156,6 +156,108 @@ struct IngestPhase7Tests {
         #expect(try await store.recentMessages().isEmpty)
     }
 
+    /// A position frame addressed broadcast, from `from`, via `gateway`.
+    private func positionFrame(
+        from: UInt32, packetID: UInt32, gateway: String, latI: Int32, lonI: Int32, at instant: Instant
+    ) -> InboundFrame {
+        var position = Position()
+        position.latitudeI = latI
+        position.longitudeI = lonI
+        var data = DataMessage()
+        data.portnum = .positionApp
+        data.payload = (try? position.serializedData()) ?? Data()
+        var packet = MeshPacket()
+        packet.from = from
+        packet.id = packetID
+        packet.channel = 8
+        packet.decoded = data
+        var env = ServiceEnvelope()
+        env.packet = packet
+        env.gatewayID = gateway
+        return InboundFrame(
+            transport: .mqtt, topic: "msh/US/2/e/MediumFast/\(gateway)",
+            payload: (try? [UInt8](env.serializedData())) ?? [], receivedAt: instant, gatewayID: gateway
+        )
+    }
+
+    private func telemetryFrame(
+        from: UInt32, packetID: UInt32, gateway: String, at instant: Instant
+    ) -> InboundFrame {
+        var data = DataMessage()
+        data.portnum = .telemetryApp
+        data.payload = telemetryPayload(battery: 80, voltage: 4.0)
+        var packet = MeshPacket()
+        packet.from = from
+        packet.id = packetID
+        packet.channel = 8
+        packet.decoded = data
+        var env = ServiceEnvelope()
+        env.packet = packet
+        env.gatewayID = gateway
+        return InboundFrame(
+            transport: .mqtt, topic: "msh/US/2/e/MediumFast/\(gateway)",
+            payload: (try? [UInt8](env.serializedData())) ?? [], receivedAt: instant, gatewayID: gateway
+        )
+    }
+
+    // MARK: Reconnect-then-redeliver idempotency (Finding 2)
+    //
+    // A reconnect/config change starts a FRESH `run()` with a brand-new
+    // in-memory `DedupWindow`, and observation dedup is gateway-scoped. So the
+    // same packet re-delivered via a DIFFERENT gateway after a reconnect:
+    //   • passes observation dedup (new gateway = new provenance row), and
+    //   • is re-admitted by the fresh window.
+    // The store's v5 unique indexes are the only thing that keeps extraction
+    // "count once" — proving the durable idempotency these tests assert.
+
+    @Test
+    func `a message re-delivered via a different gateway after a reconnect is not duplicated`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        // First connection: ingest via gw1.
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw1", body: "hello", at: at(0))
+        ]))
+        // Reconnect → a NEW run() (fresh DedupWindow) re-delivers via gw2.
+        let summary = try await pipeline(store).run(StubTransport(queued: [
+            textFrame(from: 7, packetID: 99, gateway: "!gw2", body: "hello", at: at(1))
+        ]))
+
+        // New gateway = a new provenance row, and the fresh window re-admitted it …
+        #expect(summary.observationsRecorded == 1)
+        #expect(summary.extractionsDeduped == 0)
+        // … but the store ignored the duplicate, so there is still ONE message.
+        #expect(try await store.recentMessages().count == 1)
+    }
+
+    @Test
+    func `telemetry re-delivered via a different gateway after a reconnect is not double-counted`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            telemetryFrame(from: 7, packetID: 99, gateway: "!gw1", at: at(0))
+        ]))
+        // Same rx_time so the natural key (node_num, t, kind, key) matches.
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            telemetryFrame(from: 7, packetID: 99, gateway: "!gw2", at: at(0))
+        ]))
+        // battery_pct + voltage, recorded exactly once (not 4 rows).
+        #expect(try await store.telemetry(forNode: 7).count == 2)
+    }
+
+    @Test
+    func `a position re-delivered via a different gateway after a reconnect is not duplicated`(
+    ) async throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            positionFrame(from: 7, packetID: 99, gateway: "!gw1", latI: 377_749_000, lonI: -1_224_194_000, at: at(0))
+        ]))
+        _ = try await pipeline(store).run(StubTransport(queued: [
+            positionFrame(from: 7, packetID: 99, gateway: "!gw2", latI: 377_749_000, lonI: -1_224_194_000, at: at(0))
+        ]))
+        #expect(try await store.positionFixes(forNode: 7).count == 1)
+    }
+
     @Test
     func `onDecoded fires once per decoded packet for the live trace feed`() async throws {
         let store = try MeshStore(DatabaseConnection.inMemory())
