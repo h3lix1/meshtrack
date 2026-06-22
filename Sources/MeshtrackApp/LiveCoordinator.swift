@@ -55,6 +55,10 @@ enum LiveConnectionStatus: Equatable {
 final class LiveCoordinator {
     /// The live network view model the shell renders (nodes + animated traces).
     let viewModel: NetworkViewModel
+    /// The live packet inspector, fed from the same decoded-packet tap as the network
+    /// view model (Finding 17). Backs the `.packets` section with real traffic instead
+    /// of sample data, and its `latencyMillis` feeds the map's latency overlay.
+    let packetInspector: PacketInspectorViewModel
     /// The connection state for the status indicator (endpoint only, never secrets).
     private(set) var status: LiveConnectionStatus = .offline
 
@@ -86,6 +90,14 @@ final class LiveCoordinator {
     /// channel entered in settings actually decrypt in the live app (Finding 8).
     private let keyStore: any KeyStore
 
+    /// The sync-readable gate the resolver consults for the default-PSK fallback, and
+    /// the channel manager that refreshes it from the registry + tombstone. `nil` when
+    /// a custom `keyStore` was injected (tests own their own gating). When present, a
+    /// removed default channel stops default-key decoding this session and on relaunch
+    /// (Finding 16).
+    private let defaultGate: DefaultChannelGate?
+    private let channelManager: KeychainChannelManager?
+
     /// Build a coordinator over a fresh in-memory store. The broker connection is
     /// resolved later via `applyBrokerConfig(_:)` / `start(settings:)`, so the
     /// coordinator exists before any broker is configured (first-run/onboarding).
@@ -103,9 +115,27 @@ final class LiveCoordinator {
     ) {
         self.refreshInterval = refreshInterval
         self.store = store
-        self.keyStore = keyStore
-            ?? ChannelKeyResolver(primary: KeychainKeyStore(), defaultKey: Self.defaultKey)
+        if let keyStore {
+            // A test injected its own resolver; it owns its default-key gating.
+            self.keyStore = keyStore
+            defaultGate = nil
+            channelManager = nil
+        } else {
+            // Production: gate the default-PSK fallback on the registry + tombstone so
+            // removing the default channel stops default-key decoding (Finding 16). The
+            // channel manager shares the same gate so an in-session removal takes effect
+            // immediately; the slow refresh loop + startup re-derive it from the store.
+            let gate = DefaultChannelGate()
+            defaultGate = gate
+            channelManager = KeychainChannelManager(store: store, defaultGate: gate)
+            self.keyStore = ChannelKeyResolver(
+                primary: KeychainKeyStore(),
+                defaultKey: Self.defaultKey,
+                defaultEnabled: { gate.isEnabled() }
+            )
+        }
         viewModel = NetworkViewModel(store: store)
+        packetInspector = PacketInspectorViewModel(clock: SystemWallClock())
     }
 
     /// Resolve the active data source from the persisted selection (`DataSourceStore`)
@@ -114,10 +144,17 @@ final class LiveCoordinator {
     /// stream's, the stream restarts; identical → no-op. With nothing connectable the
     /// stream stops and the status goes offline. The broker password is read from the
     /// `CredentialStore` and held only in memory; it is never logged.
+    ///
+    /// `allowAutoStart` gates whether a connectable source is started automatically.
+    /// Launch passes `LiveStartupPolicy.shouldConnectOnLaunch(...)` so an operator who
+    /// turned `autoConnect` off stays offline until they explicitly connect; an already-
+    /// running stream still reconnects-on-change. An explicit `connect()` (the Connect
+    /// affordance / a successful Settings save) always starts, regardless of this gate.
     func applyConfig(
         gateway: any ConfigGateway,
         credentials: any CredentialStore,
-        dataSourceStore: any DataSourceStore
+        dataSourceStore: any DataSourceStore,
+        allowAutoStart: Bool = true
     ) async {
         let brokerConfig = try? await gateway.loadBrokerConfig()
         let resolved = LiveDataSource.resolve(
@@ -129,7 +166,35 @@ final class LiveCoordinator {
             stop()
             return
         }
+        // When auto-start is withheld (autoConnect off) and we are not already
+        // streaming, stay offline: don't begin a connection the operator didn't ask
+        // for. A live stream still reconnects-on-change so a saved edit takes effect.
+        guard allowAutoStart || isRunning else { return }
         apply(dataSource: resolved)
+    }
+
+    /// Explicit operator-initiated connect: resolve the active source and start the
+    /// live stream regardless of the `autoConnect` preference. Invoked from the
+    /// Connect affordance (onboarding / status bar) and from a successful Settings
+    /// save, so a user action always overrides `autoConnect == false`.
+    func connect(
+        gateway: any ConfigGateway,
+        credentials: any CredentialStore,
+        dataSourceStore: any DataSourceStore
+    ) async {
+        await applyConfig(
+            gateway: gateway,
+            credentials: credentials,
+            dataSourceStore: dataSourceStore,
+            allowAutoStart: true
+        )
+    }
+
+    /// Whether a live stream is currently running (a source is resolved and tasks are
+    /// active). Used to keep reconnect-on-change working while withholding a fresh
+    /// auto-start when `autoConnect` is off.
+    private var isRunning: Bool {
+        dataSource != nil
     }
 
     /// (Re)start the live stream against `newSettings` (an MQTT broker). Convenience
@@ -162,6 +227,7 @@ final class LiveCoordinator {
         )
         let pipeline = IngestPipeline(store: store, decoder: decoder)
         let model = viewModel
+        let inspector = packetInspector
         // A @MainActor tap that promotes the status to `.connected`; capturing this
         // closure (rather than `self`) keeps the Sendable ingest closure clean.
         let onFirstPacket: @MainActor @Sendable () -> Void = { [weak self] in
@@ -169,20 +235,44 @@ final class LiveCoordinator {
         }
 
         // Ingest: decode + decrypt + persist, tapping each decoded packet into the
-        // live trace animation. `ingest` hops to the main actor (the VM is
-        // @MainActor); the tap is awaited per packet, so it stays in order. The
-        // first decoded packet flips the status to `.connected` (we have a stream).
+        // live trace animation AND the packet inspector (Finding 17). `ingest` hops to
+        // the main actor (the VMs are @MainActor); the tap is awaited per packet, so it
+        // stays in order. The first decoded packet flips the status to `.connected`.
         tasks.append(Task {
             _ = try? await pipeline.run(adapter) { packet in
                 await model.ingest(packet)
+                await inspector.ingest(packet)
                 await onFirstPacket()
             }
         })
 
-        // Slow refresh: surface nodes as soon as they report a position.
-        tasks.append(Task { [refreshInterval] in
+        // The live alert loop's reusable ports (Finding 7): a store-backed snapshot
+        // source, the configured rule store (HOURS→SECONDS over the GRDB adapter), the
+        // store sink, and a wall clock. The management lookup is rebuilt per pass so it
+        // tracks the latest ownership classification.
+        let snapshotSource = StoreAlertSnapshotSource(store: store)
+        let ruleStore = HoursToSecondsAlertRuleStore(wrapping: MeshStoreAlertRuleStore(store: store))
+        let alertSink = store
+        let alertClock = SystemWallClock()
+
+        // Slow refresh: surface nodes as soon as they report a position; re-derive the
+        // default-PSK gate from the registry + tombstone so a default-channel removal
+        // stops default-key decoding within a refresh cycle (Finding 16); and run live
+        // telemetry through RuleEvaluator → AlertEngine → store so battery/stale/voltage
+        // alerts the console shows are actually generated (Finding 7).
+        tasks.append(Task { [refreshInterval, channelManager] in
             while !Task.isCancelled {
                 try? await model.loadNodes()
+                await channelManager?.refreshDefaultGate()
+                let management = await StoreAlertNodeManagementLookup(store: store)
+                let evaluator = LiveAlertEvaluator(
+                    snapshots: snapshotSource,
+                    rules: ruleStore,
+                    management: management,
+                    sink: alertSink,
+                    clock: alertClock
+                )
+                _ = try? await evaluator.evaluate()
                 try? await Task.sleep(for: refreshInterval)
             }
         })

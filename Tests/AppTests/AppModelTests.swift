@@ -1,10 +1,24 @@
 @testable import App
+import Domain
+import Persistence
 import SwiftUI
 import Testing
 
 @Suite("AppModel section registry")
 @MainActor
 struct AppModelTests {
+    @Test
+    func `registerLiveSections with a live packet inspector keeps every section registered (Finding 17)`(
+    ) throws {
+        let store = try MeshStore(DatabaseConnection.inMemory())
+        let model = AppModel(nodes: [], traces: [], live: true)
+        let inspector = PacketInspectorViewModel(clock: InjectedClock())
+        model.registerLiveSections(store: store, clock: InjectedClock(), packetInspector: inspector)
+        for section in AppSection.allCases {
+            #expect(model.isRegistered(section), "live registry missing \(section.rawValue)")
+        }
+    }
+
     @Test
     func `the default registry provides a view for every section`() {
         let model = AppModel(nodes: SampleNetwork.nodes, traces: SampleNetwork.traces, live: false)
@@ -29,6 +43,22 @@ struct AppModelTests {
         #expect(model.live == false)
         #expect(model.nodes.count == SampleNetwork.nodes.count)
         #expect(model.traces.count == SampleNetwork.traces.count)
+    }
+
+    @Test
+    func `onNavigate fires with the requested section (Finding 19)`() {
+        let model = AppModel()
+        var navigated: [AppSection] = []
+        model.onNavigate = { navigated.append($0) }
+        // Section views invoke onNavigate (e.g. node directory "Open analytics"/"Apply").
+        model.onNavigate?(.analytics)
+        model.onNavigate?(.fleet)
+        #expect(navigated == [.analytics, .fleet])
+    }
+
+    @Test
+    func `onNavigate is nil until the shell wires it`() {
+        #expect(AppModel().onNavigate == nil)
     }
 
     @Test

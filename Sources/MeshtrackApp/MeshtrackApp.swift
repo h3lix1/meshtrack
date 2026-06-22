@@ -38,8 +38,10 @@ struct MeshtrackApp: App {
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
     /// The persisted data-source selection (MQTT broker vs locally-attached node).
-    /// Non-secret; `UserDefaults`-backed so broker persistence stays untouched.
-    private let dataSourceStore: any DataSourceStore
+    /// Non-secret; backed by the shared `MeshStore` `app_config` table so it lives in
+    /// the same durable store as the rest of the config (Finding 23). Concrete type so
+    /// the composition root can `hydrate()` it from disk before resolving the source.
+    private let dataSourceStore: MeshStoreDataSourceStore
 
     /// The settings window's tab registry, populated eagerly in `init` (before the
     /// Settings window first renders) so the initially-selected tab shows its content.
@@ -48,6 +50,11 @@ struct MeshtrackApp: App {
     /// The live theme applied across the app's chrome; seeded from the saved
     /// `AppSettings.themeID` and updated when the General picker selects a preset.
     @State private var themeController: ThemeController
+    /// Reconnect-on-save signal (Finding 1): the Connection settings save path bumps
+    /// it; `ContentView` observes its `token` and re-runs `resolveAndApply()`. Created
+    /// in `init` so the same instance is injected into both the Settings tab and the
+    /// content view.
+    @State private var configRevision: LiveConfigRevision
 
     /// Promotes the process to a regular foreground GUI app on launch — see
     /// `MeshtrackAppDelegate`. Required because `swift run MeshtrackApp` starts a bare
@@ -62,7 +69,7 @@ struct MeshtrackApp: App {
         self.store = store
         let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
         let credentials: any CredentialStore = KeychainCredentialStore()
-        let dataSources: any DataSourceStore = UserDefaultsDataSourceStore()
+        let dataSources = MeshStoreDataSourceStore(store: store)
         configGateway = gateway
         credentialStore = credentials
         dataSourceStore = dataSources
@@ -71,15 +78,18 @@ struct MeshtrackApp: App {
         // renders. (Doing it in `.onAppear` resolved the initially-selected tab
         // against an empty registry, so it stayed blank until the selection changed.)
         let themeController = ThemeController()
+        let revision = LiveConfigRevision()
         let model = SettingsModel()
         Self.registerTabs(
             on: model,
             ports: ConfigPorts(gateway: gateway, credentials: credentials, dataSources: dataSources),
             store: store,
-            themeController: themeController
+            themeController: themeController,
+            revision: revision
         )
         _settingsModel = State(initialValue: model)
         _themeController = State(initialValue: themeController)
+        _configRevision = State(initialValue: revision)
     }
 
     /// Open the durable on-disk store under Application Support, falling back to an
@@ -112,6 +122,7 @@ struct MeshtrackApp: App {
                 gateway: configGateway,
                 credentials: credentialStore,
                 dataSources: dataSourceStore,
+                revision: configRevision,
                 openConnectionSettings: openConnectionSettings
             )
             .frame(minWidth: 1100, minHeight: 720)
@@ -149,14 +160,16 @@ struct MeshtrackApp: App {
         on model: SettingsModel,
         ports: ConfigPorts,
         store: MeshStore,
-        themeController: ThemeController
+        themeController: ThemeController,
+        revision: LiveConfigRevision
     ) {
         model.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
                 gateway: ports.gateway,
                 credentials: ports.credentials,
                 test: { await probeBrokerConnection($0, password: $1) },
-                dataSourceStore: ports.dataSources
+                dataSourceStore: ports.dataSources,
+                revision: revision
             )))
         }
         model.register(.channels) {
@@ -212,17 +225,32 @@ struct ContentView: View {
     let store: MeshStore
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
-    let dataSources: any DataSourceStore
+    /// Concrete so the view can `hydrate()` the persisted selection from `app_config`
+    /// before resolving the live source (Finding 23).
+    let dataSources: MeshStoreDataSourceStore
+    /// Reconnect-on-save signal (Finding 1): bumped by the Connection settings save;
+    /// observing its `token` re-runs `resolveAndApply()` so a save goes live without
+    /// a relaunch. A successful save is also an EXPLICIT connect, so it forces a start.
+    let revision: LiveConfigRevision
     let openConnectionSettings: () -> Void
 
     @State private var coordinator: LiveCoordinator?
     /// `nil` until the first config resolution completes (avoids flashing
     /// onboarding before we know whether a broker is saved).
     @State private var resolved = false
+    /// Whether a connectable source is saved but we stayed offline at launch (because
+    /// `autoConnect` is off). Drives the onboarding "Connect now" affordance (Finding 2).
+    @State private var hasConnectableSource = false
 
     var body: some View {
         content
             .task { await resolveAndApply() }
+            // A successful Settings save bumps the revision. Re-resolve AND force a
+            // connect: saving a connectable broker is an explicit operator action, so
+            // it goes live even when `autoConnect` is off (Finding 1 + Finding 2).
+            .onChange(of: revision.token) { _, _ in
+                Task { await connectNow() }
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -233,7 +261,10 @@ struct ContentView: View {
         } else if resolved {
             OnboardingView(
                 onSetUpConnection: openConnectionSettings,
-                onExploreSample: { root.exploringSample = true }
+                onExploreSample: { root.exploringSample = true },
+                // Offer an explicit connect only when a connectable source is saved
+                // but auto-connect kept us offline at launch (Finding 2).
+                onConnectNow: hasConnectableSource ? { Task { await connectNow() } } : nil
             )
         } else {
             // Brief, neutral splash while we read the saved config.
@@ -244,10 +275,17 @@ struct ContentView: View {
 
     /// Resolve the saved data source (MQTT broker or a locally-attached node) and
     /// (re)start the live coordinator. Builds the coordinator lazily on first
-    /// connectable source. Idempotent and reconnect-safe: `applyConfig` restarts only
-    /// when the resolved source changes.
+    /// connectable source, using the operator's configured refresh cadence. Idempotent
+    /// and reconnect-safe: `applyConfig` restarts only when the resolved source changes.
+    ///
+    /// Honors `AppSettings.autoConnect` (Finding 2): with auto-connect off the app
+    /// stays offline at launch even with a connectable source saved — the operator
+    /// connects explicitly via the Connect affordance (which calls `connectNow()`).
     @MainActor private func resolveAndApply() async {
         defer { resolved = true }
+        // Load the persisted data-source selection from app_config into the sync cache
+        // before resolving (Finding 23).
+        await dataSources.hydrate()
         await seedFromEnvIfNeeded()
         // Go live when the active source is connectable: an MQTT broker is configured,
         // OR a local node is selected with the coordinates it needs.
@@ -257,13 +295,50 @@ struct ContentView: View {
             brokerConfig: brokerConfig,
             password: { credentials.password(host: $0, username: $1) }
         ) != nil
+        hasConnectableSource = connectable
         guard connectable else {
             coordinator?.stop()
             return
         }
-        let live = coordinator ?? LiveCoordinator(store: store)
+        // Build the coordinator with the operator's configured refresh cadence so the
+        // slow "surface newly-positioned nodes" loop matches AppSettings (Finding 2).
+        let settings = await (try? gateway.loadAppSettings()) ?? .default
+        let live = coordinator ?? LiveCoordinator(
+            store: store,
+            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+        )
         coordinator = live
-        await live.applyConfig(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
+        let allowAutoStart = LiveStartupPolicy.shouldConnectOnLaunch(
+            settings: settings,
+            hasConnectableSource: connectable
+        )
+        await live.applyConfig(
+            gateway: gateway,
+            credentials: credentials,
+            dataSourceStore: dataSources,
+            allowAutoStart: allowAutoStart
+        )
+    }
+
+    /// Explicit operator-initiated connect (the Connect affordance / onboarding /
+    /// status bar), overriding `autoConnect == false`. Builds the coordinator if
+    /// needed (using the configured refresh cadence) and forces a connect.
+    @MainActor private func connectNow() async {
+        let settings = await (try? gateway.loadAppSettings()) ?? .default
+        // Refresh the onboarding "Connect now" eligibility against the latest save.
+        let brokerConfig = try? await gateway.loadBrokerConfig()
+        hasConnectableSource = LiveDataSource.resolve(
+            dataSource: dataSources.load(),
+            brokerConfig: brokerConfig,
+            password: { credentials.password(host: $0, username: $1) }
+        ) != nil
+        let live = coordinator ?? LiveCoordinator(
+            store: store,
+            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+        )
+        coordinator = live
+        await live.connect(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
+        resolved = true
     }
 
     /// One-time bootstrap: if nothing is saved yet but the legacy `MESHTRACK_MQTT_*`
@@ -286,14 +361,31 @@ struct ContentView: View {
 struct LiveRootView: View {
     let coordinator: LiveCoordinator
     @State private var model: AppModel
+    /// The ⌘K command palette over the live fleet (Finding 17). Store-backed so the
+    /// corpus reflects real nodes/packets/channels; selecting a result routes to the
+    /// matching section via `model.onNavigate`.
+    @State private var search: SearchViewModel
+    /// The live time-travel transport (Finding 17): loads the last 24h of real
+    /// observations, and its `controlState` drives the VCR overlay.
+    @State private var timeline: TimelineViewModel
 
     init(coordinator: LiveCoordinator) {
         self.coordinator = coordinator
         let model = AppModel(nodes: [], traces: [], live: true)
         // Wire every section to its live, store-backed view (the headline MapKit map,
-        // node directory, telemetry, analytics, alerts, messages, health).
-        model.registerLiveSections(store: coordinator.store, clock: SystemWallClock())
+        // node directory, telemetry, analytics, alerts, messages, health) — the
+        // production OTA admin link so Fleet/Provision apply through the real
+        // MeshAdminChannel rather than a same-DB echo (Finding 8; `LiveAdminLink` is
+        // the single HIL seam) — and the live packet inspector (Finding 17).
+        model.registerLiveSections(
+            store: coordinator.store,
+            clock: SystemWallClock(),
+            adminLink: LiveAdminLink(),
+            packetInspector: coordinator.packetInspector
+        )
         _model = State(initialValue: model)
+        _search = State(initialValue: SearchViewModel(store: coordinator.store))
+        _timeline = State(initialValue: TimelineViewModel(store: coordinator.store, clock: SystemWallClock()))
     }
 
     var body: some View {
@@ -305,7 +397,21 @@ struct LiveRootView: View {
             }
             ConnectionStatusBadge(status: coordinator.status)
                 .padding(16)
+            // The time-travel transport bar, anchored bottom-centre over the shell.
+            VCRControlView(
+                state: timeline.controlState,
+                actions: VCRControlActions(
+                    togglePlay: { timeline.togglePlay() },
+                    scrub: { timeline.scrub(toFraction: $0) },
+                    setSpeed: { timeline.setSpeed($0) },
+                    goLive: { timeline.goLive() }
+                )
+            )
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        // The ⌘K palette layers over every section; selecting routes via onNavigate.
+        .commandPalette(search)
         // Mirror the live view model into the AppModel registry. Reading the
         // @Observable nodes/traces here re-runs this body as packets arrive, and
         // re-seeding the model rebuilds its section providers over the new data.
@@ -314,6 +420,27 @@ struct LiveRootView: View {
         }
         .onChange(of: coordinator.viewModel.traces) { _, traces in
             model.traces = traces
+        }
+        // Refresh the palette corpus from the store each time it opens.
+        .onChange(of: search.isPresented) { _, presented in
+            if presented { Task { try? await search.reloadCorpus() } }
+        }
+        // Route a selected search result to its section, then clear the target.
+        .onChange(of: search.selectedTarget) { _, target in
+            guard let target else { return }
+            model.onNavigate?(Self.section(for: target))
+            search.consumeTarget()
+        }
+        // Load the timeline's 24h observation window once the shell appears.
+        .task { try? await timeline.load() }
+    }
+
+    /// Map a command-palette target to the section that surfaces it (Finding 17).
+    private static func section(for target: SearchTarget) -> AppSection {
+        switch target {
+        case .node: .nodes
+        case .packet: .packets
+        case .channel: .messages
         }
     }
 }

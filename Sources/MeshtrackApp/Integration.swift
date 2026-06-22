@@ -139,15 +139,29 @@ actor KeychainChannelManager: ChannelKeyManaging {
     private let keys: KeychainKeyStore
     private let store: MeshStore
     private static let registryKey = "channel_registry"
+    /// Persisted "default channel removed" tombstone (Finding 16). When set, the
+    /// out-of-the-box MediumFast default is NOT re-seeded and the live decoder
+    /// withholds the default-PSK fallback — this session AND across relaunch.
+    private static let tombstoneKey = "default_channel_tombstone"
+
+    /// Optional sync-readable gate shared with the live `ChannelKeyResolver`. Updated
+    /// the moment the operator removes the default so default-key decoding stops this
+    /// session without waiting for the next store refresh.
+    private let defaultGate: DefaultChannelGate?
 
     /// Set once we've seeded (or attempted to seed) the out-of-the-box default
     /// channel, so subsequent reads over an empty registry never re-seed — in
     /// particular after the operator deletes the default channel this run.
     private var didSeedDefault = false
 
-    init(keys: KeychainKeyStore = KeychainKeyStore(), store: MeshStore) {
+    init(
+        keys: KeychainKeyStore = KeychainKeyStore(),
+        store: MeshStore,
+        defaultGate: DefaultChannelGate? = nil
+    ) {
         self.keys = keys
         self.store = store
+        self.defaultGate = defaultGate
     }
 
     func channels() async throws -> [ChannelEntry] {
@@ -172,6 +186,46 @@ actor KeychainChannelManager: ChannelKeyManaging {
         stored.removeAll { $0.hash == hash }
         try await save(stored)
         try? keys.removeKey(forChannelHash: hash)
+        // Removing the out-of-the-box default sets a durable tombstone so it is never
+        // re-seeded and the live decoder stops the default-PSK fallback (Finding 16).
+        let defaultHash = await defaultChannelHash()
+        if hash == defaultHash {
+            try await store.setAppConfigValue("1", forKey: Self.tombstoneKey)
+            // Stop default-key decoding immediately this session, too.
+            defaultGate?.set(false)
+        }
+    }
+
+    /// The on-wire hash of the out-of-the-box default channel (MediumFast + the
+    /// well-known default PSK). The name lives on the (main-actor) settings VM — read
+    /// it there so this and the seed path share one source of truth and never drift.
+    private func defaultChannelHash() async -> UInt32 {
+        let name = await MainActor.run { ChannelsSettingsViewModel.defaultChannelName }
+        return ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+    }
+
+    /// Whether the operator removed the out-of-the-box default channel (persisted).
+    private func isTombstoned() async throws -> Bool {
+        try await store.appConfigValue(forKey: Self.tombstoneKey) != nil
+    }
+
+    /// Recompute the live default-PSK gate from the persisted state and push it into
+    /// the shared `DefaultChannelGate` (if any). The default is enabled only while the
+    /// default channel is present in the registry AND not tombstoned (Finding 16).
+    /// Called at startup and on the slow refresh loop so a relaunch and an in-session
+    /// removal both settle the gate. Returns the computed value.
+    @discardableResult
+    func refreshDefaultGate() async -> Bool {
+        let defaultHash = await defaultChannelHash()
+        let registryContainsDefault = await (try? registry())?
+            .contains { $0.hash == defaultHash } ?? false
+        let tombstoned = await (try? isTombstoned()) ?? false
+        let enabled = DefaultChannelDecodePolicy.defaultEnabled(
+            registryContainsDefault: registryContainsDefault,
+            tombstoned: tombstoned
+        )
+        defaultGate?.set(enabled)
+        return enabled
     }
 
     func hasKey(forChannelHash hash: UInt32) async -> Bool {
@@ -199,6 +253,9 @@ actor KeychainChannelManager: ChannelKeyManaging {
     private func seedDefaultChannelIfNeeded() async throws {
         guard !didSeedDefault else { return }
         didSeedDefault = true
+        // Never resurrect the default after the operator removed it (Finding 16): the
+        // tombstone survives relaunch, so an empty registry stays empty by choice.
+        guard try await !isTombstoned() else { return }
         guard try await registry().isEmpty else { return }
 
         // The defaults live on the (main-actor) settings VM; read them there so the
