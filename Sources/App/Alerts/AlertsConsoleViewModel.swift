@@ -56,10 +56,11 @@ public final class AlertsConsoleViewModel {
     @ObservationIgnored private let store: MeshStore
     @ObservationIgnored private let clock: Clock
     /// Default snooze duration (seconds) applied by the parameterless `snooze`
-    /// action. Phase 8 persists this in `app_config`; the lead injects the stored
-    /// value here in composition (Finding 12). Defaults to one hour so a console
-    /// constructed without the persisted value still behaves as before.
-    @ObservationIgnored public let defaultSnoozeSeconds: Double
+    /// action. Phase 8 persists this in `app_config`; the composition root loads the
+    /// stored value (`AlertDefaultSnoozeStore.load`) and assigns it after init, so the
+    /// console's Snooze honours the operator's setting (Finding 12). Defaults to one
+    /// hour so a console constructed without the persisted value still behaves as before.
+    @ObservationIgnored public var defaultSnoozeSeconds: Double
     /// The lifecycle state machine, rehydrated from the persisted rows on `load`.
     @ObservationIgnored private var engine = AlertEngine()
     /// The full, unfiltered set from the last load — `regroup` filters from this.

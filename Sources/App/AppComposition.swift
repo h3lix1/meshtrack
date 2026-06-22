@@ -101,8 +101,12 @@ struct PerNodeSectionView<Content: View>: View {
 struct AlertsSectionView: View {
     @State private var alerts: AlertsConsoleViewModel
     @State private var arming: ArmingFlowViewModel
+    /// The shared store, retained so `.task` can read the persisted default-snooze
+    /// duration before the console's first Snooze (Finding 12).
+    private let store: MeshStore
 
     init(store: MeshStore, clock: any Domain.Clock) {
+        self.store = store
         _alerts = State(initialValue: AlertsConsoleViewModel(store: store, clock: clock))
         _arming = State(initialValue: ArmingFlowViewModel(store: store, clock: clock))
     }
@@ -115,10 +119,14 @@ struct AlertsSectionView: View {
             suppressed: alerts.suppressedNodes,
             arming: arming.rows,
             onAcknowledge: { item in Task { try? await alerts.acknowledge(item) } },
-            onSnooze: { item in Task { try? await alerts.snooze(item, forSeconds: 3600) } },
+            // Honour the operator's persisted default-snooze duration (Finding 12),
+            // loaded in `.task` below — no more hardcoded 3600s.
+            onSnooze: { item in Task { try? await alerts.snooze(item) } },
             onResolve: { item in Task { try? await alerts.resolve(item) } }
         )
         .task {
+            alerts.defaultSnoozeSeconds = await (try? AlertDefaultSnoozeStore.load(from: store))
+                ?? AlertDefaultSnoozeStore.fallbackSeconds
             try? await alerts.load()
             try? await arming.load()
         }
