@@ -32,19 +32,48 @@ public final class PacketInspectorViewModel {
 
     /// The user's explicit master/detail pick (a packet id). Nil means "follow the
     /// newest visible packet" — the live default. Set it to pin the detail pane.
-    public var selectedID: UInt32?
+    /// While a packet is selected it is *also* pinned in the window: its receptions
+    /// are never evicted by the cap, so its aggregate detail stays intact and its
+    /// row doesn't vanish while you inspect it (item 6). It ages out normally once
+    /// deselected. Changing the selection re-runs eviction so a now-unpinned packet
+    /// can drop and the newly-pinned one is protected.
+    public var selectedID: UInt32? {
+        didSet { evictOverflow() }
+    }
+
+    /// The live sliding-window cap (in receptions), configurable from the screen
+    /// (item 7). Growing it lets more history accumulate; shrinking it evicts the
+    /// oldest receptions immediately (still honouring the selection pin). Clamped to
+    /// `>= 1`. Defaults to 200; `init(clock:maxPackets:)` seeds it. Backed by a private
+    /// store so the setter never self-assigns — an `@Observable` `didSet` that rewrites
+    /// its own property re-enters the observation machinery and overflows the stack.
+    public var windowSize: Int {
+        get { storedWindowSize }
+        set {
+            let clamped = max(1, newValue)
+            guard clamped != storedWindowSize else { return }
+            storedWindowSize = clamped
+            evictOverflow()
+        }
+    }
+
+    private var storedWindowSize: Int
 
     private let clock: Clock
-    private let maxPackets: Int
     private var nextSequence = 0
 
     /// - Parameters:
     ///   - clock: source of the ingest wall-clock used to compute latency for live
     ///     packets. Production wires `SystemClock`; tests wire `InjectedClock`.
-    ///   - maxPackets: sliding-window size (in receptions); oldest evicted past this.
-    public init(clock: Clock, maxPackets: Int = 200) {
+    ///   - maxPackets: initial sliding-window size (in receptions); oldest evicted
+    ///     past this. Settable live afterwards via `windowSize`. The default reads the
+    ///     user's persisted choice (item 7) so the live app restores it on launch
+    ///     without a view-lifecycle hook — those crash the headless ImageRenderer. A
+    ///     clean defaults domain (CI/tests) yields 200, so the literal default is
+    ///     unchanged from the caller's perspective; explicit values bypass persistence.
+    public init(clock: Clock, maxPackets: Int = PacketWindowPreference.restore()) {
         self.clock = clock
-        self.maxPackets = max(1, maxPackets)
+        storedWindowSize = max(1, maxPackets)
     }
 
     // MARK: Ingest seam
@@ -65,9 +94,7 @@ public final class PacketInspectorViewModel {
         )
         nextSequence += 1
         packets.insert(inspection, at: 0) // newest first
-        if packets.count > maxPackets {
-            packets.removeLast(packets.count - maxPackets)
-        }
+        evictOverflow()
         dropStaleSelection()
     }
 
@@ -136,6 +163,26 @@ public final class PacketInspectorViewModel {
     }
 
     // MARK: Internals
+
+    /// Trim the window back to `windowSize`, dropping the *oldest* receptions —
+    /// except every reception of the currently-`selectedID` packet, which is pinned
+    /// (item 6) so the inspected aggregate stays intact and its row never vanishes.
+    /// Unpinned receptions are dropped oldest-first until the cap is met; if the
+    /// pinned packet alone exceeds the cap, the window may stay larger than the cap
+    /// (the pin wins), but that resolves the moment the packet is deselected/ages.
+    private func evictOverflow() {
+        guard packets.count > windowSize else { return }
+        let pinnedID = selectedID
+        var keptUnpinned = 0
+        // packets is newest-first: walk newest→oldest, keep all pinned receptions
+        // plus the first `windowSize` unpinned ones, drop the rest.
+        packets = packets.filter { reception in
+            if reception.packetID == pinnedID { return true }
+            guard keptUnpinned < windowSize else { return false }
+            keptUnpinned += 1
+            return true
+        }
+    }
 
     /// Clear an explicit selection that's no longer visible (filtered out or
     /// evicted from the window), so the detail pane falls back to the newest
