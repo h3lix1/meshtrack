@@ -9,6 +9,7 @@
 // live transport is the remaining HIL step; the factory takes a `channelFor`
 // override so that wiring is a one-liner when the radio adapter lands.
 
+import Domain
 import Foundation
 import Persistence
 import Provisioning
@@ -53,6 +54,6 @@ public enum ProvisioningWorkflowFactory {
     }
 
     private static func hexID(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }

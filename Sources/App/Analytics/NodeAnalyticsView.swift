@@ -7,6 +7,7 @@
 // control) so the whole view renders deterministically under the headless
 // ImageRenderer snapshot gate.
 
+import Domain
 import Persistence
 import SwiftUI
 
@@ -156,7 +157,7 @@ public struct NodeAnalyticsView: View {
     }
 
     private static func hex(_ nodeNum: Int64) -> String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }
 

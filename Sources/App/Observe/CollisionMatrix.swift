@@ -32,12 +32,12 @@ public struct CollisionNode: Sendable, Equatable, Identifiable {
     /// The conventional 4-hex "short id" (the low 16 bits, e.g. `c3d4`). Meshtastic
     /// node short ids are the last two hex bytes of the `!aabbccdd` id.
     public var shortID: String {
-        String(format: "%04x", UInt16(truncatingIfNeeded: nodeNum))
+        NodeID.shortHex(UInt32(truncatingIfNeeded: nodeNum))
     }
 
     /// The full `!aabbccdd` hex id.
     public var hexID: String {
-        "!" + String(format: "%08x", UInt32(truncatingIfNeeded: nodeNum))
+        NodeID.hex(UInt32(truncatingIfNeeded: nodeNum))
     }
 }
 

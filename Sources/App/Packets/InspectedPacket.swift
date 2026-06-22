@@ -122,7 +122,7 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
 
     /// `!aabbccdd` formatting for a node id.
     public static func hexID(_ value: UInt32) -> String {
-        String(format: "!%08x", value)
+        NodeID.hex(value)
     }
 
     public var fromHex: String {
@@ -180,7 +180,7 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
 
     /// A free-text haystack for the inspector's text filter: hex ids, port, payload.
     public var searchHaystack: String {
-        var parts = [fromHex, toHex, portName, String(format: "!%08x", packetID)]
+        var parts = [fromHex, toHex, portName, NodeID.hex(packetID)]
         if let gateway = packet.gatewayID { parts.append(Self.hexID(gateway)) }
         // include printable payload so text-message bodies are searchable
         let printable = String(packet.payload.compactMap { byte -> Character? in

@@ -3,6 +3,7 @@
 // receive the packet and publish onto MQTT"). PacketsView is the master/detail:
 // a recent-packets list (each id its own colour) beside the inspector.
 
+import Domain
 import SwiftUI
 
 public struct GatewayReceptionRow: Identifiable, Sendable {
@@ -64,7 +65,7 @@ public struct PacketInspection: Identifiable, Sendable {
     }
 
     func hex(_ value: Int64) -> String {
-        String(format: "!%08x", UInt32(truncatingIfNeeded: value))
+        NodeID.hex(UInt32(truncatingIfNeeded: value))
     }
 }
 
@@ -107,7 +108,7 @@ public struct PacketsView: View {
         HStack(spacing: 9) {
             Circle().fill(packet.color).frame(width: 9, height: 9).shadow(color: packet.color, radius: 3)
             VStack(alignment: .leading, spacing: 1) {
-                Text(String(format: "!%08x", packet.packetID))
+                Text(NodeID.hex(packet.packetID))
                     .font(.system(size: 12, design: .monospaced)).foregroundStyle(.white)
                 Text(packet.portNum).font(.system(size: 9)).foregroundStyle(.secondary)
             }
@@ -142,7 +143,7 @@ public struct PacketInspectorView: View {
             RoundedRectangle(cornerRadius: 5).fill(packet.color).frame(width: 10, height: 34)
                 .shadow(color: packet.color, radius: 5)
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: "Packet !%08x", packet.packetID)).font(.system(size: 18, weight: .bold))
+                Text("Packet " + NodeID.hex(packet.packetID)).font(.system(size: 18, weight: .bold))
                 Text("\(packet.hex(packet.from)) → \(packet.hex(packet.to)) · \(packet.portNum)")
                     .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
             }
