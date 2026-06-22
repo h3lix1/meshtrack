@@ -67,6 +67,41 @@ struct LivePacketTraceCollectorTests {
     }
 
     @Test
+    func `a clockless packet beside clocked ones does not saturate hop progress`() {
+        // Task 3: mixing regimes (a ~7.9e8 reference-date clock against a ~0.4 per-index
+        // stagger) made the clocked packet's startedAt ≈ clock, so clock - startedAt was
+        // huge and its hop lines drew instantly complete. When ANY packet lacks an
+        // arrival clock the whole window must fall back uniformly to the small stagger,
+        // so every packet's startedAt stays in the same regime as the overlay clock.
+        let referenceClock = 790_000_000.0 // typical timeIntervalSinceReferenceDate
+        var collector = LivePacketTraceCollector()
+        collector.ingest(packet(id: 0x01, gateway: 0x0000_00FF), arrivalClock: referenceClock)
+        collector.ingest(packet(id: 0x02, gateway: 0x0000_00EE)) // clockless neighbour
+
+        let stagger = 0.4
+        let traces = collector.traces(positions: positions, stagger: stagger)
+        #expect(traces.count == 2)
+
+        // All startedAt values must be in the small stagger regime, NOT anchored to the
+        // huge reference clock.
+        for trace in traces {
+            #expect(trace.startedAt < referenceClock / 2)
+            #expect(trace.startedAt <= Double(traces.count) * stagger)
+        }
+
+        // Replay the view's edgeProgress math with an overlay clock that has just begun
+        // ticking (start of playback, ~0): no first edge should already be complete.
+        let hopDuration = 1.2
+        func edgeProgress(_ trace: PacketTrace, _ edgeIndex: Int, clock: Double) -> Double {
+            let elapsed = clock - trace.startedAt - Double(edgeIndex) * hopDuration
+            return min(1, max(0, elapsed / hopDuration))
+        }
+        for trace in traces {
+            #expect(edgeProgress(trace, 0, clock: 0.0) < 1.0)
+        }
+    }
+
+    @Test
     func `re-reception via another gateway keeps the original arrival clock`() {
         var collector = LivePacketTraceCollector()
         collector.ingest(packet(id: 0x01, gateway: 0x0000_00FF), arrivalClock: 500.0)
