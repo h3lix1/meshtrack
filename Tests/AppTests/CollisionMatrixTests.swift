@@ -166,7 +166,7 @@ struct EarshotTests {
 
     @Test
     func `nearby nodes are in range`() {
-        let range = Earshot.classify(a: london, b: londonNorth)
+        let range = Earshot.classify(from: london, to: londonNorth)
         guard case let .inRange(meters) = range else {
             Issue.record("expected inRange, got \(range)")
             return
@@ -176,7 +176,7 @@ struct EarshotTests {
 
     @Test
     func `distant nodes are out of range`() {
-        let range = Earshot.classify(a: london, b: edinburgh)
+        let range = Earshot.classify(from: london, to: edinburgh)
         guard case let .outOfRange(meters) = range else {
             Issue.record("expected outOfRange, got \(range)")
             return
@@ -187,18 +187,18 @@ struct EarshotTests {
 
     @Test
     func `a missing position yields unknown`() {
-        #expect(Earshot.classify(a: london, b: nil) == .unknown)
-        #expect(Earshot.classify(a: nil, b: edinburgh) == .unknown)
-        #expect(Earshot.classify(a: nil, b: nil) == .unknown)
+        #expect(Earshot.classify(from: london, to: nil) == .unknown)
+        #expect(Earshot.classify(from: nil, to: edinburgh) == .unknown)
+        #expect(Earshot.classify(from: nil, to: nil) == .unknown)
     }
 
     @Test
     func `the threshold is the in-range boundary and is configurable`() {
         // ~1.3 km apart: in range at 10 km default, out of range at 1 km.
-        if case .inRange = Earshot.classify(a: london, b: londonNorth) {} else {
+        if case .inRange = Earshot.classify(from: london, to: londonNorth) {} else {
             Issue.record("expected in range at default threshold")
         }
-        if case .outOfRange = Earshot.classify(a: london, b: londonNorth, maxRangeMeters: 1000) {} else {
+        if case .outOfRange = Earshot.classify(from: london, to: londonNorth, maxRangeMeters: 1000) {} else {
             Issue.record("expected out of range at a 1 km threshold")
         }
     }
@@ -220,7 +220,7 @@ struct EarshotTests {
         #expect(pairs.count == 3)
         #expect(pairs.allSatisfy { $0.range == .unknown })
         // Pairs respect ascending nodeNum order within each pair.
-        #expect(pairs.allSatisfy { $0.a.nodeNum < $0.b.nodeNum })
+        #expect(pairs.allSatisfy { $0.nodeA.nodeNum < $0.nodeB.nodeNum })
     }
 
     @Test
@@ -236,8 +236,8 @@ struct EarshotTests {
         ]
         let pairs = Earshot.pairs(in: analysis.lastByteBuckets[0xD4], positions: positions)
         // a↔b nearby = in range; a↔c and b↔c far = out of range.
-        let ab = try #require(pairs.first { $0.a.nodeNum == a.nodeNum && $0.b.nodeNum == b.nodeNum })
-        let ac = try #require(pairs.first { $0.a.nodeNum == a.nodeNum && $0.b.nodeNum == c.nodeNum })
+        let ab = try #require(pairs.first { $0.nodeA.nodeNum == a.nodeNum && $0.nodeB.nodeNum == b.nodeNum })
+        let ac = try #require(pairs.first { $0.nodeA.nodeNum == a.nodeNum && $0.nodeB.nodeNum == c.nodeNum })
         if case .inRange = ab.range {} else { Issue.record("a↔b should be in range") }
         if case .outOfRange = ac.range {} else { Issue.record("a↔c should be out of range") }
     }
