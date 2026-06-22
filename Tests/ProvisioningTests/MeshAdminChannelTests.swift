@@ -15,6 +15,7 @@ struct MeshAdminChannelTests {
     private actor FakeTransport: AdminTransport {
         private(set) var sentBatches: [[AdminMessage]] = []
         private var configByType: [AdminMessage.ConfigType: Config] = [:]
+        private var moduleByType: [AdminMessage.ModuleConfigType: ModuleConfig] = [:]
         private var owner: User?
         private var channel: Channel?
         var failSend = false
@@ -34,6 +35,11 @@ struct MeshAdminChannelTests {
             failSend = value
         }
 
+        /// Seed an existing module config (so a read-modify-write apply has a base).
+        func seed(module: ModuleConfig, as type: AdminMessage.ModuleConfigType) {
+            moduleByType[type] = module
+        }
+
         func send(_ messages: [AdminMessage], to _: AdminTarget) async throws {
             if failSend { throw AdminTransportError.notConnected }
             sentBatches.append(messages)
@@ -46,6 +52,8 @@ struct MeshAdminChannelTests {
                 switch parsed.payloadVariant {
                 case let .setConfig(config):
                     store(config)
+                case let .setModuleConfig(module):
+                    store(module)
                 case let .setOwner(user):
                     owner = user
                 case let .setChannel(channel):
@@ -58,13 +66,16 @@ struct MeshAdminChannelTests {
 
         func readback(
             configTypes: Set<AdminMessage.ConfigType>,
+            moduleConfigTypes: Set<AdminMessage.ModuleConfigType>,
             owner wantsOwner: Bool,
             channel wantsChannel: Bool,
             from _: AdminTarget
         ) async throws -> AdminReadback {
             let configs = configTypes.compactMap { configByType[$0] }
+            let modules = moduleConfigTypes.compactMap { moduleByType[$0] }
             return AdminReadback(
                 configs: configs,
+                modules: modules,
                 owner: wantsOwner ? owner : nil,
                 channel: wantsChannel ? channel : nil
             )
@@ -79,6 +90,19 @@ struct MeshAdminChannelTests {
             case .lora: configByType[.loraConfig] = config
             case .device: configByType[.deviceConfig] = config
             case .position: configByType[.positionConfig] = config
+            default: break
+            }
+        }
+
+        private func store(_ module: ModuleConfig) {
+            switch module.payloadVariant {
+            case .mqtt: moduleByType[.mqttConfig] = module
+            case .telemetry: moduleByType[.telemetryConfig] = module
+            case .neighborInfo: moduleByType[.neighborinfoConfig] = module
+            case .storeForward: moduleByType[.storeforwardConfig] = module
+            case .detectionSensor: moduleByType[.detectionsensorConfig] = module
+            case .rangeTest: moduleByType[.rangetestConfig] = module
+            case .paxcounter: moduleByType[.paxcounterConfig] = module
             default: break
             }
         }

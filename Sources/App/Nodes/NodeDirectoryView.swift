@@ -11,6 +11,7 @@
 // Bespoke cards (LazyVGrid, no stock `List`) + a hand-rolled tab bar / search row
 // so the section renders faithfully under the headless ImageRenderer snapshot gate.
 
+import Provisioning
 import SwiftUI
 
 public struct NodeDirectoryView: View {
@@ -22,15 +23,20 @@ public struct NodeDirectoryView: View {
     /// Drill through to analytics for a node (G4 seam — the lead links it to
     /// `NodeAnalyticsView`).
     private let onOpenAnalytics: (Int64) -> Void
+    /// Run an imperative node command (favorite / ignore) over the admin path. The
+    /// lead wires it to a `MeshAdminChannel.send(_:)`; `nil`/default is a no-op.
+    private let onCommand: (NodeAdminCommand) -> Void
 
     public init(
         viewModel: NodeDirectoryViewModel,
         onApply: @escaping (NodeConfigEdit) -> Void = { _ in },
-        onOpenAnalytics: @escaping (Int64) -> Void = { _ in }
+        onOpenAnalytics: @escaping (Int64) -> Void = { _ in },
+        onCommand: @escaping (NodeAdminCommand) -> Void = { _ in }
     ) {
         _viewModel = State(initialValue: viewModel)
         self.onApply = onApply
         self.onOpenAnalytics = onOpenAnalytics
+        self.onCommand = onCommand
     }
 
     public var body: some View {
@@ -58,7 +64,8 @@ public struct NodeDirectoryView: View {
                 },
                 onSetOwnership: { isMine, isManaged in
                     classifySingle(entry.nodeNum, isMine: isMine, isManaged: isManaged)
-                }
+                },
+                onCommand: onCommand
             )
         }
     }
