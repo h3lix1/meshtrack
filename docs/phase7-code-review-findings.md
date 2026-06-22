@@ -160,7 +160,7 @@ in-memory fakes mask divergence from real behavior.
 
 ## 🧹 Cleanup (highest-value only)
 
-### [ ] 14. Node hex-ID format copy-pasted across 15+ files
+### [x] 14. Node hex-ID format copy-pasted across 15+ files
 - **Where:** e.g. `Sources/App/Search/SearchViewModel.swift:102`,
   `Sources/App/Fleet/FleetConfigViewModel.swift:277`,
   `Sources/App/Timeline/TimelineViewModel.swift:203`
