@@ -366,8 +366,15 @@ struct LiveRootView: View {
         self.coordinator = coordinator
         let model = AppModel(nodes: [], traces: [], live: true)
         // Wire every section to its live, store-backed view (the headline MapKit map,
-        // node directory, telemetry, analytics, alerts, messages, health).
-        model.registerLiveSections(store: coordinator.store, clock: SystemWallClock())
+        // node directory, telemetry, analytics, alerts, messages, health) — and the
+        // production OTA admin link so Fleet/Provision apply through the real
+        // MeshAdminChannel rather than a same-DB echo (Finding 8). `LiveAdminLink` is
+        // the single HIL seam (throws until an outbound radio link exists).
+        model.registerLiveSections(
+            store: coordinator.store,
+            clock: SystemWallClock(),
+            adminLink: LiveAdminLink()
+        )
         _model = State(initialValue: model)
     }
 
