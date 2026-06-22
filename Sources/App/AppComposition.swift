@@ -6,15 +6,31 @@
 
 import Domain
 import Persistence
+import Provisioning
 import SwiftUI
 
 public extension AppModel {
     /// Register every section to its store-backed bespoke view. The Network section
     /// uses the real MapKit substrate (G1, ADR 0007) when MapKit is available, else
     /// the deterministic Canvas map already registered by default.
+    ///
+    /// `adminLink` is the production over-the-air admin primitive (Finding 8). When
+    /// provided, the Fleet + Provision sections apply through the real OTA path
+    /// (`MeshAdminChannel` → `LiveAdminTransport`) instead of the same-DB
+    /// `StoreBackedAdminChannel` echo. `nil` keeps the store-backed default (sample /
+    /// snapshot / first-run, where there is no radio).
     @MainActor
-    func registerLiveSections(store: MeshStore, clock: any Domain.Clock) {
+    func registerLiveSections(
+        store: MeshStore,
+        clock: any Domain.Clock,
+        adminLink: (any AdminLink)? = nil
+    ) {
         let viz = VizSettings()
+        // The production OTA channel factory over the live admin link (Finding 8). The
+        // closures replace the store-backed `channelFor` defaults so an apply SENDS
+        // real begin → set… → commit admin messages and verifies by reading config
+        // back — no more same-DB echo. `nil` when no radio link is wired.
+        let otaFactory = adminLink.map { OTAAdminChannelFactory(link: $0) }
 
         #if canImport(MapKit) && os(macOS)
             register(.network) { [self] in
@@ -64,11 +80,18 @@ public extension AppModel {
             AnyView(CollisionMatrixView(viewModel: CollisionMatrixViewModel(store: store)))
         }
         register(.fleet) {
-            AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(store: store)))
+            AnyView(FleetConfigConsole(viewModel: FleetConfigViewModel(
+                store: store,
+                channelFor: otaFactory?.fleetChannelFor()
+            )))
         }
         register(.provision) {
             AnyView(ProvisioningWorkflowView(
-                viewModel: ProvisioningWorkflowFactory.make(store: store, draft: .init(), channelFor: nil)
+                viewModel: ProvisioningWorkflowFactory.make(
+                    store: store,
+                    draft: .init(),
+                    channelFor: otaFactory?.provisionChannelFor()
+                )
             ))
         }
     }
