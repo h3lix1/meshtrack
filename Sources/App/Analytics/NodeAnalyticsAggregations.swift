@@ -66,7 +66,11 @@ public enum NodeAnalytics {
     /// Bin `values` into `binCount` equal-width buckets spanning [min, max].
     /// Returns `.empty` when there are no samples. A single distinct value (zero
     /// span) is widened to one unit so it still renders one populated bin.
-    public static func distribution(of values: [Double], binCount: Int = 12) -> SignalDistribution {
+    public static func distribution(of rawValues: [Double], binCount: Int = 12) -> SignalDistribution {
+        // Drop non-finite samples up front: `Int(NaN)`/`Int(.infinity)` is a runtime
+        // trap, and NaN defeats the bin-index clamps below (NaN compares false against
+        // both bounds), so a single bad sample would otherwise crash the analytics view.
+        let values = rawValues.filter(\.isFinite)
         guard !values.isEmpty, binCount > 0 else { return .empty }
         let dataMin = values.min() ?? 0
         var high = values.max() ?? 0
