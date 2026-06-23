@@ -22,13 +22,22 @@ public struct BrokerConfig: Sendable, Equatable, Codable {
     /// Stable MQTT client id; empty → the adapter generates one.
     public var clientID: String
 
+    /// The default public Bay Area broker the app ships pointed at: `mqtt.bayme.sh`
+    /// on the plaintext MQTT port (1883, so `useTLS` defaults off).
+    public static let defaultHost = "mqtt.bayme.sh"
+    public static let defaultPort: UInt16 = 1883
+    /// The community broker's well-known account. The username is non-secret; the
+    /// password is publicly published, so it ships as the default and is stored
+    /// locally like any other credential — it is not a private secret.
+    public static let defaultUsername = "meshdev"
+    public static let defaultPassword = "large4cats"
     public static let defaultTopic = "msh/US/bayarea/2/e/#"
 
     public init(
-        host: String = "",
-        port: UInt16 = 8883,
-        username: String? = nil,
-        useTLS: Bool = true,
+        host: String = BrokerConfig.defaultHost,
+        port: UInt16 = BrokerConfig.defaultPort,
+        username: String? = BrokerConfig.defaultUsername,
+        useTLS: Bool = false,
         allowUntrustedCert: Bool = false,
         topics: [String] = [BrokerConfig.defaultTopic],
         clientID: String = ""
@@ -45,6 +54,13 @@ public struct BrokerConfig: Sendable, Equatable, Codable {
     /// Whether this config is complete enough to attempt a connection.
     public var isConnectable: Bool {
         !host.isEmpty && !topics.filter { !$0.isEmpty }.isEmpty
+    }
+
+    /// The shipped default password when this config targets the well-known public
+    /// broker account (host + username match the defaults), `""` otherwise. Lets the
+    /// Connection form pre-fill the published credential before the operator saves.
+    public var shippedDefaultPassword: String {
+        host == Self.defaultHost && username == Self.defaultUsername ? Self.defaultPassword : ""
     }
 }
 

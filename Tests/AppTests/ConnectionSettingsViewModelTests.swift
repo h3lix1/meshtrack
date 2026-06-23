@@ -69,14 +69,15 @@ struct ConnectionSettingsViewModelTests {
     }
 
     @Test
-    func `load with no saved config falls back to BrokerConfig defaults`() async throws {
+    func `load with no saved config falls back to the shipped public-broker defaults`() async throws {
         let model = try makeHarness().model
         try await model.load()
-        #expect(model.host.isEmpty)
-        #expect(model.portText == "8883") // default port
-        #expect(model.useTLS) // default TLS on
+        #expect(model.host == BrokerConfig.defaultHost) // mqtt.bayme.sh
+        #expect(model.portText == "1883") // plaintext MQTT port
+        #expect(!model.useTLS) // 1883 is non-TLS
+        #expect(model.username == BrokerConfig.defaultUsername) // meshdev
         #expect(model.topics == [BrokerConfig.defaultTopic])
-        #expect(model.password.isEmpty)
+        #expect(model.password == BrokerConfig.defaultPassword) // large4cats, pre-filled
     }
 
     // MARK: Save round-trip

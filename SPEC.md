@@ -259,7 +259,9 @@ regression.
 
 ## 10. Resolved decisions (was: open questions)
 
-1. **Broker:** Public broker (`mqtt.meshtastic.org`). Honor zero-hop uplink policy.
+1. **Broker:** Defaults to the public Bay Area broker (`mqtt.bayme.sh:1883`, user
+   `meshdev` with the community-published password). Configurable in-app. Honor the
+   zero-hop uplink policy.
 2. **Channels/PSKs:** Configurable in-app; **MQTT channels are uncapped**, **7** for
    the local device (firmware slot limit). Entered/rotated in-app; stored in the
    local SQLite store (supersedes the earlier "20 MQTT" cap).
