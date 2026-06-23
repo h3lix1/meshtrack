@@ -18,7 +18,8 @@ muter-report*
 # macOS
 .DS_Store
 
-# Local secrets / config (secrets live in Keychain, never the repo)
+# Local secrets / config (runtime config lives in the app's local SQLite store,
+# never the repo)
 *.local.env
 secrets.json
 

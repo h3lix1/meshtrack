@@ -33,9 +33,9 @@ public enum MeshtrackMigrator {
             try createMessage(db)
         }
         // Phase 8: configuration moves out of env vars into the shared store
-        // (SPEC §2.5/§10). Non-secret app config (broker connection, app
-        // settings) is JSON-encoded into a simple key-value table; secrets stay
-        // in the Keychain (`CredentialStore`), never here.
+        // (SPEC §2.5/§10). App config (broker connection, app settings) is
+        // JSON-encoded into a simple key-value table; the broker password and
+        // channel PSKs live in the same table (`CredentialStore` / `KeyStore`).
         migrator.registerMigration("v4") { db in
             try createAppConfig(db)
         }

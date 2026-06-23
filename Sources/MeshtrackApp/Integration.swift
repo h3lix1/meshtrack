@@ -131,12 +131,13 @@ struct MeshStoreAlertRuleStore: App.AlertRuleStore {
     }
 }
 
-/// Adapts `KeychainKeyStore` (channel PSKs, in the Keychain) + the `app_config`
-/// channel registry (names/hashes/kinds, non-secret) to the App-layer async
-/// `ChannelKeyManaging` port the Channels & Keys screen programs to. PSKs never
-/// enter the registry or any log; `hasKey` is derived from the Keychain.
-actor KeychainChannelManager: ChannelKeyManaging {
-    private let keys: KeychainKeyStore
+/// Adapts the local `DatabaseKeyStore` (channel PSKs, in the app's own SQLite store)
+/// + the `app_config` channel registry (names/hashes/kinds) to the App-layer async
+/// `ChannelKeyManaging` port the Channels & Keys screen programs to. PSKs never enter
+/// the registry or any log; `hasKey` is derived from the key store. The `keys` instance
+/// is shared with the live decoder's resolver so a freshly-added key decodes at once.
+actor LocalChannelManager: ChannelKeyManaging {
+    private let keys: DatabaseKeyStore
     private let store: MeshStore
     private static let registryKey = "channel_registry"
     /// Persisted "default channel removed" tombstone (Finding 16). When set, the
@@ -155,7 +156,7 @@ actor KeychainChannelManager: ChannelKeyManaging {
     private var didSeedDefault = false
 
     init(
-        keys: KeychainKeyStore = KeychainKeyStore(),
+        keys: DatabaseKeyStore,
         store: MeshStore,
         defaultGate: DefaultChannelGate? = nil
     ) {

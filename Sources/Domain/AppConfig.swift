@@ -1,15 +1,16 @@
-// App configuration contracts (Phase 8) — the persisted, non-secret settings that
-// drive the app + collector, plus the effect ports that store them. These are the
-// shared contracts the Settings UI and the persistence/Keychain adapters all code
-// against, so configuration moves out of environment variables and into proper
-// screens (secrets in Keychain, the rest in the shared store; SPEC §2.5/§10).
+// App configuration contracts (Phase 8) — the persisted settings that drive the app
+// + collector, plus the effect ports that store them. These are the shared contracts
+// the Settings UI and the persistence adapters all code against, so configuration
+// moves out of environment variables and into proper screens (SPEC §2.5/§10).
 //
-// Pure: Domain owns the value types and the ports; the GRDB + Keychain
-// implementations live in the outer ring (Persistence / Crypto).
+// Pure: Domain owns the value types and the ports; the GRDB implementations
+// (`ConfigGateway`, `DatabaseKeyStore`, `DatabaseCredentialStore`) live in the outer
+// ring (Persistence). Secrets here are already-public broker/channel keys, stored
+// locally alongside the rest of the config rather than the system Keychain.
 
-/// Non-secret MQTT broker connection settings. The password is NOT here — it is a
-/// secret and lives in the Keychain via `CredentialStore` (SPEC §2.5). The username
-/// is treated as non-secret (it is routinely visible and not sufficient alone).
+/// MQTT broker connection settings. The password is NOT here — it is stored
+/// separately via `CredentialStore` (the local `app_config` store), keyed by host +
+/// username. The username is treated as non-secret (routinely visible).
 public struct BrokerConfig: Sendable, Equatable, Codable {
     public var host: String
     public var port: UInt16
@@ -86,9 +87,9 @@ public struct AppSettings: Sendable, Equatable, Codable {
     public static let `default` = AppSettings()
 }
 
-/// Port: loads/saves the non-secret configuration. Production is GRDB-backed
-/// (`MeshStore` in Persistence); tests/previews use an in-memory fake. Secrets never
-/// flow through here — see `CredentialStore`.
+/// Port: loads/saves the broker/app configuration. Production is GRDB-backed
+/// (`MeshStore` in Persistence); tests/previews use an in-memory fake. The broker
+/// password flows through `CredentialStore`, not here.
 public protocol ConfigGateway: Sendable {
     /// The saved broker config, or `nil` if none has been configured yet.
     func loadBrokerConfig() async throws -> BrokerConfig?
@@ -98,9 +99,10 @@ public protocol ConfigGateway: Sendable {
     func saveAppSettings(_ settings: AppSettings) async throws
 }
 
-/// Port: stores the broker password (a secret) in the Keychain, keyed by broker
-/// host + username so multiple brokers/accounts coexist. Mirrors `KeyStore`
-/// (SPEC §2.5: secrets only in Keychain, never the DB, never logs).
+/// Port: stores the broker password in the local app store, keyed by broker host +
+/// username so multiple brokers/accounts coexist. Production is `DatabaseCredentialStore`
+/// (the `app_config` table); the passwords for the public brokers this app targets are
+/// already published, so they live with the rest of the config. Never logged.
 public protocol CredentialStore: Sendable {
     func password(host: String, username: String?) -> String?
     func setPassword(_ password: String?, host: String, username: String?) throws

@@ -22,8 +22,9 @@ public enum Table {
     public static let template = "template"
     /// Monitor-only decoded text messages (schema v3, SPEC §1 amended / ADR 0006).
     public static let message = "message"
-    /// Key-value store for non-secret app configuration (schema v4, Phase 8,
-    /// SPEC §2.5/§10). Secrets never live here — they go to the Keychain.
+    /// Key-value store for app configuration (schema v4, Phase 8, SPEC §2.5/§10):
+    /// broker/app settings plus the already-public broker password and channel PSKs
+    /// (`DatabaseCredentialStore` / `DatabaseKeyStore`).
     public static let appConfig = "app_config"
     /// Bounded sliding-window extraction-dedup ledger (schema v6, Phase 9,
     /// Finding 5). One last-seen row per packet identity, checked against the 600s

@@ -89,7 +89,7 @@ struct ChannelCustomPSKReKeyTests {
 
 /// Bridges the test's `InMemoryChannelKeyManager` (an actor) to the synchronous
 /// `KeyStore` the resolver consults, by snapshotting its keys at construction. The
-/// live app uses the lead's Keychain-backed `KeyStore`; this fake mirrors the seam.
+/// live app uses the local `DatabaseKeyStore`; this fake mirrors the seam.
 private struct KeyStoreAdapter: KeyStore {
     private let keysByHash: [UInt32: ChannelKey]
     init(_ store: InMemoryChannelKeyManager) async {

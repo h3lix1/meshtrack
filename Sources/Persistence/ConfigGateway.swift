@@ -1,9 +1,9 @@
 // `ConfigGateway` adapter on `MeshStore` (Phase 8, SPEC §2.5/§10).
 //
-// Non-secret app configuration moves out of environment variables into the
-// shared GRDB store: `BrokerConfig` and `AppSettings` are `Codable`, so each is
-// JSON-encoded into one `app_config` row under a stable key. Secrets never flow
-// through here — the broker password lives in the Keychain via `CredentialStore`.
+// App configuration moves out of environment variables into the shared GRDB store:
+// `BrokerConfig` and `AppSettings` are `Codable`, so each is JSON-encoded into one
+// `app_config` row under a stable key. The broker password does not flow through
+// here — it has its own `CredentialStore` (also `app_config`-backed).
 //
 // JSON (rather than a wide typed table) keeps the schema stable as the Domain
 // config structs evolve: adding a field is a Domain-only change, no migration.

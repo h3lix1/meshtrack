@@ -3,15 +3,15 @@
 // to the well-known default PSK.
 //
 // The live app lets the operator register custom-PSK channels in Channels & Keys
-// (those PSKs live in the Keychain). Before this, the live ingest path keyed every
-// channel with the default PSK, so any non-default channel silently failed to
+// (those PSKs live in the local app store). Before this, the live ingest path keyed
+// every channel with the default PSK, so any non-default channel silently failed to
 // decrypt even though the settings UI implied it worked (Finding 8). This resolver
-// is the fix: it composes a primary `KeyStore` (the Keychain channel registry) with
+// is the fix: it composes a primary `KeyStore` (the local channel-key store) with
 // a default fallback, so custom PSKs decode AND public default channels still work.
 //
-// Pure over the `Domain.KeyStore` port (no Crypto / Keychain import), so it lives in
-// the snapshot-pure App library and is unit-tested headless. The executable composes
-// it with the real `KeychainKeyStore` as the primary.
+// Pure over the `Domain.KeyStore` port, so it lives in the snapshot-pure App library
+// and is unit-tested headless. The executable composes it with the real
+// `DatabaseKeyStore` as the primary.
 
 import Domain
 
@@ -34,7 +34,7 @@ public struct ChannelKeyResolver: KeyStore {
     private let defaultEnabled: @Sendable () -> Bool
 
     /// - Parameters:
-    ///   - primary: the per-channel key source (Keychain channel registry in the
+    ///   - primary: the per-channel key source (the local `DatabaseKeyStore` in the
     ///     live app; an in-memory fake in tests). Consulted first.
     ///   - defaultKey: the fallback key for any hash the `primary` doesn't hold —
     ///     the well-known default PSK so public channels keep decoding.

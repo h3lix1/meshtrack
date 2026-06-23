@@ -1,15 +1,15 @@
 // In-memory `KeyStore` fake (SPEC §2.5). Used by unit tests and the replay
-// pipeline, where there is no Keychain (or we do not want to touch it). Keys
-// live only in process memory and are never persisted.
+// pipeline, where we do not want to touch the durable store. Keys live only in
+// process memory and are never persisted.
 
 import Domain
 import Synchronization
 
 /// A thread-safe, in-memory `Domain.KeyStore`.
 ///
-/// This is the fake that ships alongside the real `KeychainKeyStore` adapter
+/// This is the fake that ships alongside the real `DatabaseKeyStore` adapter
 /// (every effect ships a fake, per AGENTS.md). It is the store used in the unit
-/// tests, since Keychain access is unavailable in headless/CI runs.
+/// tests, where we keep keys out of any durable store.
 ///
 /// State is guarded by a `Mutex` (from `Synchronization`, which is part of the
 /// toolchain — no Foundation), so the type is `Sendable` and safe to share

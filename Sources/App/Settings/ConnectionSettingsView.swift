@@ -58,8 +58,8 @@ public struct ConnectionSettingsView: View {
                 Text("Connection").font(.system(size: 18, weight: .bold))
             }
             Text("Where the live feed comes from: an MQTT broker, or a locally-attached "
-                + "node over USB-serial or BLE. Credentials are stored in the Keychain — "
-                + "never in the database or logs.")
+                + "node over USB-serial or BLE. Credentials are stored locally on this "
+                + "Mac — never in logs.")
                 .font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -161,13 +161,13 @@ public struct ConnectionSettingsView: View {
                     textField("optional", text: $viewModel.username)
                 }
                 labeledField("Password", systemImage: "key.fill") {
-                    SecureField("stored in Keychain", text: $viewModel.password)
+                    SecureField("stored locally", text: $viewModel.password)
                         .textFieldStyle(.plain)
                         .padding(9)
                         .background(Palette.field, in: RoundedRectangle(cornerRadius: 8))
                 }
-                Text("The password is held only in the Keychain, keyed by host + "
-                    + "username. It is never written to the database or any log.")
+                Text("The password is stored locally on this Mac, keyed by host + "
+                    + "username. It is never written to any log.")
                     .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45))
                     .fixedSize(horizontal: false, vertical: true)
             }

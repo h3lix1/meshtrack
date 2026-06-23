@@ -1,10 +1,10 @@
 // DataSourceConfig — where the live feed comes from (MQTT broker vs a locally
 // attached Meshtastic node over USB-serial or BLE).
 //
-// This is a SMALL, pure, non-secret selection that sits ALONGSIDE the existing
-// `BrokerConfig` rather than inside it: the broker settings keep persisting exactly
-// as before (Keychain for the password, `app_config` for the rest), and this adds
-// only "which source is active, and — for a local node — which device". `App` is
+// This is a SMALL, pure selection that sits ALONGSIDE the existing `BrokerConfig`
+// rather than inside it: the broker settings keep persisting exactly as before (the
+// local `app_config` store for the password and the rest), and this adds only
+// "which source is active, and — for a local node — which device". `App` is
 // snapshot-pure and cannot import `Transport`, so the kind is a plain enum here; the
 // composition root (`LiveCoordinator`) maps it onto the real `SerialAdapter` /
 // `BLEAdapter`.
@@ -12,8 +12,8 @@
 // Persistence is deliberately decoupled from `ConfigGateway` (which the broker owns)
 // via the tiny `DataSourceStore` port below: the production adapter is
 // `UserDefaults`-backed (so existing broker persistence is untouched), and an
-// in-memory fake serves previews/tests. Nothing here is a secret, so none of it
-// touches the Keychain or is ever logged.
+// in-memory fake serves previews/tests. Nothing here is a secret, and none of it
+// is ever logged.
 
 import Foundation
 

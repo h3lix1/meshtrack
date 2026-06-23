@@ -86,11 +86,11 @@ final class LiveCoordinator {
     /// The well-known Meshtastic default channel key (PSK index 1, "AQ=="), shared
     /// by the public MediumFast/LongFast channels. Used as the *fallback* for any
     /// channel hash the operator hasn't registered a custom PSK for — custom PSKs
-    /// are resolved from the Keychain registry first (see `keyStore`).
+    /// are resolved from the local key store first (see `keyStore`).
     private static let defaultKey = ChannelKey(psk: MeshtasticChannelHash.defaultPSK)
 
     /// The live channel-key resolver: custom PSKs registered in Channels & Keys
-    /// (held in the Keychain, keyed by channel hash) are resolved FIRST, with the
+    /// (held in the local app store, keyed by channel hash) are resolved FIRST, with the
     /// public default PSK as the fallback. This is what lets a non-default-PSK
     /// channel entered in settings actually decrypt in the live app (Finding 8).
     private let keyStore: any KeyStore
@@ -101,7 +101,7 @@ final class LiveCoordinator {
     /// removed default channel stops default-key decoding this session and on relaunch
     /// (Finding 16).
     private let defaultGate: DefaultChannelGate?
-    private let channelManager: KeychainChannelManager?
+    private let channelManager: LocalChannelManager?
 
     /// Build a coordinator over a fresh in-memory store. The broker connection is
     /// resolved later via `applyBrokerConfig(_:)` / `start(settings:)`, so the
@@ -110,13 +110,19 @@ final class LiveCoordinator {
     /// newly-positioned nodes.
     ///
     /// `keyStore` resolves the decrypt key per channel hash. It defaults to a
-    /// `ChannelKeyResolver` over the real `KeychainKeyStore`, so custom PSKs the
+    /// `ChannelKeyResolver` over the local `DatabaseKeyStore`, so custom PSKs the
     /// operator registered in Channels & Keys are resolved by hash, with the public
     /// default PSK as the fallback (Finding 8). Injectable for tests.
+    ///
+    /// `channelKeyStore` is the shared, on-device PSK store. The composition root
+    /// passes ONE instance so the Channels & Keys screen and this decoder read/write
+    /// the same keys (a key added in Settings decodes immediately). Defaults to a
+    /// fresh one over `store` when not supplied.
     init(
         store: MeshStore,
         refreshInterval: Duration = .seconds(3),
-        keyStore: (any KeyStore)? = nil
+        keyStore: (any KeyStore)? = nil,
+        channelKeyStore: DatabaseKeyStore? = nil
     ) {
         self.refreshInterval = refreshInterval
         self.store = store
@@ -132,9 +138,12 @@ final class LiveCoordinator {
             // immediately; the slow refresh loop + startup re-derive it from the store.
             let gate = DefaultChannelGate()
             defaultGate = gate
-            channelManager = KeychainChannelManager(store: store, defaultGate: gate)
+            // One shared on-device key store for both the manager (writes) and the
+            // resolver (reads), so a freshly-registered key decodes without a relaunch.
+            let primary = channelKeyStore ?? DatabaseKeyStore(store)
+            channelManager = LocalChannelManager(keys: primary, store: store, defaultGate: gate)
             self.keyStore = ChannelKeyResolver(
-                primary: KeychainKeyStore(),
+                primary: primary,
                 defaultKey: Self.defaultKey,
                 defaultEnabled: { gate.isEnabled() }
             )

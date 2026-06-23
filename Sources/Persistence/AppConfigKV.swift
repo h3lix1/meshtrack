@@ -1,8 +1,8 @@
 // Generic key-value access over the `app_config` table (Phase 8). Used for small
-// non-secret app state that doesn't warrant its own table — e.g. the channel
-// registry (names/hashes/kinds; the PSKs themselves live in the Keychain). The
-// typed `ConfigGateway` (broker / app settings) uses its own reserved keys; callers
-// here must pick distinct keys.
+// app state that doesn't warrant its own table — e.g. the channel registry
+// (names/hashes/kinds; the PSKs themselves are kept by `DatabaseKeyStore`, also in
+// `app_config`). The typed `ConfigGateway` (broker / app settings) uses its own
+// reserved keys; callers here must pick distinct keys.
 
 import GRDB
 
