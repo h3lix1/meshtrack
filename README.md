@@ -41,3 +41,7 @@ Requires macOS 26 / Swift 6.2 (Xcode 26).
 Hexagonal / ports-and-adapters. `Domain` is pure and deterministic; all time
 enters through the `Clock` port. The collector and UI are split so liveness/battery
 alerting runs 24/7 over a shared store.
+
+## License
+
+Meshtrack is released under the [MIT License](LICENSE).
