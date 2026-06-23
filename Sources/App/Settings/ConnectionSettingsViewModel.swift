@@ -142,7 +142,10 @@ public final class ConnectionSettingsViewModel {
     public func load() async throws {
         let config = try await gateway.loadBrokerConfig() ?? BrokerConfig()
         apply(config)
-        password = credentials.password(host: config.host, username: config.username) ?? ""
+        // Use the operator's stored password if any; otherwise pre-fill the shipped
+        // public-broker default so the form is ready to connect out of the box.
+        password = credentials.password(host: config.host, username: config.username)
+            ?? config.shippedDefaultPassword
         apply(dataSourceStore.load())
         testResult = .untested
     }

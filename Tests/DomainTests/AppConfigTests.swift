@@ -5,13 +5,17 @@ import Testing
 @Suite("App configuration value types (Phase 8)")
 struct AppConfigTests {
     @Test
-    func `BrokerConfig defaults are TLS on, port 8883, the default topic`() {
+    func `BrokerConfig defaults target the public Bay Area broker (bayme.sh, 1883, meshdev)`() {
         let config = BrokerConfig()
-        #expect(config.port == 8883)
-        #expect(config.useTLS)
+        #expect(config.host == "mqtt.bayme.sh")
+        #expect(config.port == 1883)
+        #expect(!config.useTLS) // 1883 is plaintext MQTT
         #expect(config.allowUntrustedCert == false)
         #expect(config.topics == [BrokerConfig.defaultTopic])
-        #expect(config.username == nil)
+        #expect(config.username == "meshdev")
+        #expect(config.isConnectable) // the shipped default is ready to connect
+        // The published default password is exposed for the form pre-fill only.
+        #expect(config.shippedDefaultPassword == "large4cats")
     }
 
     @Test
