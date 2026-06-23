@@ -82,6 +82,22 @@ public final class OffendersViewModel {
         selectedNode = nil
     }
 
+    // MARK: Reset
+
+    /// Wipe ALL offender metrics so the ranking starts fresh: both the in-session
+    /// aggregate (cleared synchronously here so the UI empties instantly) AND the
+    /// durable all-time ranking in `node_traffic_stat` (cleared via a fire-and-forget
+    /// task; a no-op when there's no store, e.g. previews/snapshots).
+    public func reset() {
+        aggregator = TrafficAggregator()
+        rows = []
+        persistedRows = []
+        totalReceptions = 0
+        selectedNode = nil
+        sinceLastPersist = 0
+        Task { try? await store?.clearNodeTraffic() }
+    }
+
     // MARK: Persistence
 
     /// Hydrate the all-time ranking from `node_traffic_stat` at launch.

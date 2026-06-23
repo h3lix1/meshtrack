@@ -76,7 +76,12 @@ public struct LivePacketTraceCollector: Sendable {
     /// ones), the whole window falls back UNIFORMLY to the per-index `stagger`. Mixing
     /// the two — a ~0.4 stagger against a ~7.9e8 clock in the same frame — made hop
     /// lines saturate to fully-drawn instantly, which this avoids.
-    public func traces(positions: [Int64: GeoPoint], stagger: Double = 0.4) -> [PacketTrace] {
+    public func traces(
+        positions: [Int64: GeoPoint],
+        stagger: Double = 0.4,
+        relayGuessing: RelayGuessingPolicy = .nearestCandidate,
+        nonRelayNodes: Set<Int64> = []
+    ) -> [PacketTrace] {
         let allClocked = arrivalOrder.allSatisfy { arrivalClockByPacket[$0] != nil }
         return arrivalOrder.enumerated().flatMap { index, packetID in
             let startedAt = allClocked
@@ -85,7 +90,9 @@ public struct LivePacketTraceCollector: Sendable {
             return PacketTraceBuilder.build(
                 receptions: receptionsByPacket[packetID] ?? [],
                 positions: positions,
-                startedAt: startedAt
+                startedAt: startedAt,
+                relayGuessing: relayGuessing,
+                nonRelayNodes: nonRelayNodes
             )
         }
     }

@@ -23,7 +23,21 @@ struct LiveRootView: View {
 
     init(coordinator: LiveCoordinator) {
         self.coordinator = coordinator
+        let timeline = TimelineViewModel(store: coordinator.store, clock: SystemWallClock())
         let model = AppModel(nodes: [], traces: [], live: true)
+        model.onPacketFocusChange = { [weak model] packetID in
+            if let packetID {
+                Task {
+                    let didFocus = await (try? timeline.reloadAndFocusPacket(packetID, autoplay: true)) ??
+                        false
+                    if !didFocus {
+                        await MainActor.run { model?.focusedPacketID = nil }
+                    }
+                }
+            } else {
+                Task { timeline.focusPacket(nil) }
+            }
+        }
         // Wire every section to its live, store-backed view (the headline MapKit map,
         // node directory, telemetry, analytics, alerts, messages, health) — the
         // production OTA admin link so Fleet/Provision apply through the real
@@ -35,11 +49,15 @@ struct LiveRootView: View {
             adminLink: LiveAdminLink(),
             packetInspector: coordinator.packetInspector,
             portStats: coordinator.portStats,
-            offenders: coordinator.offenders
+            offenders: coordinator.offenders,
+            onRelayGuessingChange: { policy in
+                coordinator.viewModel.setRelayGuessingPolicy(policy)
+                timeline.setRelayGuessingPolicy(policy)
+            }
         )
         _model = State(initialValue: model)
         _search = State(initialValue: SearchViewModel(store: coordinator.store))
-        _timeline = State(initialValue: TimelineViewModel(store: coordinator.store, clock: SystemWallClock()))
+        _timeline = State(initialValue: timeline)
     }
 
     var body: some View {
@@ -62,7 +80,12 @@ struct LiveRootView: View {
                         togglePlay: { timeline.togglePlay() },
                         scrub: { timeline.scrub(toFraction: $0) },
                         setSpeed: { timeline.setSpeed($0) },
-                        goLive: { timeline.goLive() },
+                        setRepeatDelay: { timeline.packetRepeatDelaySeconds = $0 },
+                        goLive: {
+                            timeline.goLive()
+                            model.focusedPacketID = nil
+                            model.replayClock = nil
+                        },
                         tick: { timeline.tick(delta: $0) }
                     )
                 )
@@ -87,14 +110,22 @@ struct LiveRootView: View {
             if reviewing {
                 model.nodes = timeline.nodes
                 model.traces = timeline.traces
+                model.replayClock = timeline.clock
             } else {
                 model.nodes = coordinator.viewModel.nodes
                 model.traces = coordinator.viewModel.traces
+                model.replayClock = nil
             }
         }
         // While reviewing, keep feeding the reconstructed frame as the playhead moves.
         .onChange(of: timeline.traces) { _, traces in
             if timeline.isReviewing { model.traces = traces }
+        }
+        .onChange(of: timeline.clock) { _, clock in
+            if timeline.isReviewing { model.replayClock = clock }
+        }
+        .onChange(of: timeline.focusedPacketID) { _, packetID in
+            model.focusedPacketID = packetID
         }
         // Refresh the palette corpus from the store each time it opens.
         .onChange(of: search.isPresented) { _, presented in

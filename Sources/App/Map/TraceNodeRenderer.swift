@@ -13,19 +13,27 @@ extension TraceRenderer {
     public func drawNodes(
         _ nodes: [NetworkNode],
         in context: inout GraphicsContext,
-        projection: some TraceProjection
+        projection: some TraceProjection,
+        cullingBounds: CGRect? = nil
     ) {
         for node in nodes {
-            drawNode(node, in: &context, projection: projection)
+            drawNode(node, in: &context, projection: projection, cullingBounds: cullingBounds)
         }
     }
 
     private func drawNode(
         _ node: NetworkNode,
         in context: inout GraphicsContext,
-        projection: some TraceProjection
+        projection: some TraceProjection,
+        cullingBounds: CGRect? = nil
     ) {
         let center = projection.point(for: node.position)
+        // Skip an off-screen node entirely — its glow, core, battery arc and label —
+        // when culling is opted in (cullingBounds != nil).
+        if let bounds = cullingBounds,
+           !Self.isPointVisible(center, in: bounds, margin: Self.cullingMargin) {
+            return
+        }
         let color = Self.nodeColor(node)
         let coreRadius: CGFloat = node.isGateway ? 9 : 6
 

@@ -16,6 +16,7 @@ trusts.
 ## Concurrency
 - Swift 6 strict concurrency, **zero warnings** (warnings-as-errors per target).
   Mutable state lives in actors. Everything crossing a boundary is `Sendable`.
+- Use Use multiple parallel background tasks whenever possible to get done work faster.
 
 ## Safety
 - No force-unwraps / `try!` / `as!` in non-test code. Typed errors. Any

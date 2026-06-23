@@ -25,13 +25,25 @@
         /// Store backing the tap-to-open node-detail popover (Task 5/6). When nil the
         /// markers aren't tappable (e.g. preview/snapshot composition).
         public let store: MeshStore?
+        /// Synthetic VCR/replay clock. nil uses the live animation clock.
+        public let clockOverride: Double?
+        /// Controlled packet focus from the live shell. nil with no callback means
+        /// MeshMapSection owns focus locally (preview/default path).
+        public let selectedPacketID: UInt32?
+        /// Called when the operator focuses or clears a packet from the legend.
+        public let onSelectPacket: ((UInt32?) -> Void)?
+        /// Called when the operator changes how ambiguous relay-byte guesses are handled.
+        public let onRelayGuessingPolicyChange: ((RelayGuessingPolicy) -> Void)?
 
         private let settings: VizSettings
         @State private var mapState = MeshMapState()
         @State private var channelFilter = ChannelFilter()
         @State private var selectedNode: NetworkNode?
         /// The packet id currently isolated on the map (nil = show all packets).
-        @State private var selectedPacketID: UInt32?
+        @State private var localSelectedPacketID: UInt32?
+        /// The last full trace for the focused packet, kept so live-window eviction does
+        /// not make the focused legend row/path disappear before the operator clears it.
+        @State private var pinnedPacketTrace: PacketTrace?
 
         public init(
             nodes: [NetworkNode],
@@ -40,7 +52,11 @@
             latencyMillis: [UInt32: Int] = [:],
             relayCandidateCount: Int = 1,
             availablePresets: [ChannelPreset] = [],
-            store: MeshStore? = nil
+            store: MeshStore? = nil,
+            clockOverride: Double? = nil,
+            selectedPacketID: UInt32? = nil,
+            onSelectPacket: ((UInt32?) -> Void)? = nil,
+            onRelayGuessingPolicyChange: ((RelayGuessingPolicy) -> Void)? = nil
         ) {
             self.nodes = nodes
             self.traces = traces
@@ -49,6 +65,14 @@
             self.relayCandidateCount = relayCandidateCount
             self.availablePresets = availablePresets
             self.store = store
+            self.clockOverride = clockOverride
+            self.selectedPacketID = selectedPacketID
+            self.onSelectPacket = onSelectPacket
+            self.onRelayGuessingPolicyChange = onRelayGuessingPolicyChange
+        }
+
+        private var focusedPacketID: UInt32? {
+            onSelectPacket == nil ? localSelectedPacketID : selectedPacketID
         }
 
         /// The channel/focus-narrowed collections the body needs, derived ONCE from the
@@ -66,14 +90,19 @@
         }
 
         private var derived: DerivedView {
+            let tracePool = PacketFocus.pinSelectedTrace(
+                traces,
+                selectedPacketID: focusedPacketID,
+                pinnedTrace: pinnedPacketTrace
+            )
             let channelledNodes = channelFilter.nodes(nodes)
-            let channelledTraces = channelFilter.traces(traces, nodes: nodes)
+            let channelledTraces = channelFilter.traces(tracePool, nodes: nodes)
             let visibleNodes = PacketFocus.focusNodes(
-                channelledNodes, traces: channelledTraces, selectedPacketID: selectedPacketID
+                channelledNodes, traces: channelledTraces, selectedPacketID: focusedPacketID
             )
             return DerivedView(
                 visibleNodes: visibleNodes,
-                visibleTraces: PacketFocus.focusTraces(channelledTraces, selectedPacketID: selectedPacketID),
+                visibleTraces: PacketFocus.focusTraces(channelledTraces, selectedPacketID: focusedPacketID),
                 channelledTraces: channelledTraces
             )
         }
@@ -84,52 +113,128 @@
             // clock lives inside the TimelineView closure below, which now just reads these
             // precomputed values instead of re-filtering every frame.
             let derived = derived
-            return ZStack(alignment: .topTrailing) {
-                // The MapKit substrate updates only when the node set changes — it stays
-                // OUTSIDE the TimelineView so it isn't re-created every animation frame
-                // (which spun updateNSView → state mutation → a view-graph beachball).
-                MeshMapView(
-                    nodes: derived.visibleNodes,
-                    state: mapState,
-                    onSelectNode: store == nil ? nil : { id in
-                        selectedNode = derived.visibleNodes.first { $0.id == id }
-                    }
-                )
-
-                // Only the animated trace overlay needs the per-frame clock.
-                TimelineView(.animation) { timeline in
-                    TraceOverlayCanvas(
+            return GeometryReader { geometry in
+                let panelMaxHeight = min(520, max(180, geometry.size.height - 84))
+                ZStack(alignment: .topTrailing) {
+                    // The MapKit substrate updates only when the node set changes — it stays
+                    // OUTSIDE the TimelineView so it isn't re-created every animation frame
+                    // (which spun updateNSView → state mutation → a view-graph beachball).
+                    MeshMapView(
                         nodes: derived.visibleNodes,
-                        traces: derived.visibleTraces,
                         state: mapState,
-                        clock: timeline.date.timeIntervalSinceReferenceDate,
-                        hopDuration: settings.hopDuration,
-                        mode: settings.mode,
-                        latencyMillis: latencyMillis,
-                        focusedPacketID: selectedPacketID,
-                        showAllReceivers: settings.showAllReceivers
-                    )
-                }
-                .allowsHitTesting(false)
-
-                VStack(alignment: .trailing, spacing: 12) {
-                    ChannelFilterControl(filter: channelFilter, presets: availablePresets)
-                    VizSettingsPanel(
-                        settings: settings,
-                        traces: derived.channelledTraces,
-                        relayCandidateCount: relayCandidateCount,
-                        selectedPacketID: selectedPacketID,
-                        onSelectPacket: {
-                            selectedPacketID = PacketFocus.toggled($0, current: selectedPacketID)
+                        onSelectNode: store == nil ? nil : { id in
+                            selectedNode = derived.visibleNodes.first { $0.id == id }
                         }
                     )
+
+                    // Static node glows/labels: their own Canvas, redrawn only when the
+                    // camera (regionRevision) or the node set changes — NOT on the
+                    // per-frame animation clock. This keeps hundreds of blurred glows +
+                    // text labels off the trace-animation redraw path.
+                    NodeOverlayCanvas(nodes: derived.visibleNodes, state: mapState)
+
+                    // The animated trace overlay + floating controls are factored into
+                    // helpers so this view-builder expression stays within the Swift
+                    // type-checker's budget.
+                    traceOverlay(derived)
+                    controlsPanel(derived, panelMaxHeight: panelMaxHeight)
                 }
-                .padding(16)
+            }
+            .onChange(of: traces) { _, newTraces in
+                refreshPinnedTrace(from: newTraces)
+            }
+            .onChange(of: selectedPacketID) { _, newSelection in
+                guard onSelectPacket != nil else { return }
+                refreshPinnedTrace(from: traces, selectedPacketID: newSelection)
+            }
+            .onChange(of: settings.relayGuessingPolicy) { _, _ in
+                onRelayGuessingPolicyChange?(settings.relayGuessingPolicy)
             }
             .popover(item: $selectedNode) { node in
                 if let store {
                     NodeDetailPopover(node: node, store: store)
                 }
+            }
+        }
+
+        /// The animated trace overlay, on its demand-driven schedule (idles when nothing
+        /// is animating). Extracted from `body` to keep the view-builder expression within
+        /// the Swift type-checker's budget.
+        @ViewBuilder
+        private func traceOverlay(_ derived: DerivedView) -> some View {
+            TimelineView(traceAnimationSchedule(for: derived.visibleTraces)) { timeline in
+                let renderClock = clockOverride ?? timeline.date.timeIntervalSinceReferenceDate
+                TraceOverlayCanvas(
+                    nodes: derived.visibleNodes,
+                    traces: derived.visibleTraces,
+                    state: mapState,
+                    clock: renderClock,
+                    hopDuration: settings.hopDuration,
+                    mode: settings.mode,
+                    latencyMillis: latencyMillis,
+                    focusedPacketID: focusedPacketID,
+                    showAllReceivers: settings.showAllReceivers
+                )
+            }
+            .allowsHitTesting(false)
+        }
+
+        /// The floating channel-filter + viz-settings panel, extracted from `body` for the
+        /// same type-checker reason.
+        @ViewBuilder
+        private func controlsPanel(_ derived: DerivedView, panelMaxHeight: CGFloat) -> some View {
+            VStack(alignment: .trailing, spacing: 12) {
+                ChannelFilterControl(filter: channelFilter, presets: availablePresets)
+                VizSettingsPanel(
+                    settings: settings,
+                    traces: derived.channelledTraces,
+                    relayCandidateCount: relayCandidateCount,
+                    selectedPacketID: focusedPacketID,
+                    maxHeight: panelMaxHeight,
+                    onSelectPacket: { packetID in
+                        togglePacketFocus(packetID, availableTraces: derived.channelledTraces)
+                    }
+                )
+            }
+            .padding(16)
+        }
+
+        /// The demand-driven animation schedule for the trace overlay: it repaints only
+        /// while a trace is still drawing, then idles — instead of the stock `.animation`
+        /// schedule's continuous full-refresh-rate repaints that pinned a CPU at 100%.
+        /// During replay the clock is supplied externally (`clockOverride`), so the
+        /// schedule is paused and parent re-renders (a new `clockOverride`) drive redraws.
+        private func traceAnimationSchedule(for traces: [PacketTrace]) -> TraceAnimationSchedule {
+            guard clockOverride == nil else { return .paused }
+            return TraceAnimationSchedule(
+                horizon: TraceAnimationSchedule.horizon(
+                    for: traces, hopDuration: settings.hopDuration, mode: settings.mode
+                )
+            )
+        }
+
+        private func togglePacketFocus(_ packetID: UInt32, availableTraces: [PacketTrace]) {
+            let next = PacketFocus.toggled(packetID, current: focusedPacketID)
+            if let onSelectPacket {
+                onSelectPacket(next)
+            } else {
+                localSelectedPacketID = next
+            }
+            refreshPinnedTrace(from: availableTraces, selectedPacketID: next)
+        }
+
+        private func refreshPinnedTrace(
+            from availableTraces: [PacketTrace],
+            selectedPacketID: UInt32? = nil
+        ) {
+            guard let selectedPacketID = selectedPacketID ?? focusedPacketID else {
+                pinnedPacketTrace = nil
+                return
+            }
+            if let current = availableTraces.first(where: { $0.id == selectedPacketID }) {
+                pinnedPacketTrace = current
+            } else if pinnedPacketTrace?.id != selectedPacketID {
+                pinnedPacketTrace = nil
             }
         }
     }

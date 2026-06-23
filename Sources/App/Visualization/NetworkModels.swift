@@ -100,6 +100,11 @@ public struct TraceReceiver: Sendable, Equatable {
     public let hop: Int
     /// The receiver's role, driving its marker styling on the map.
     public let kind: Kind
+    /// The resolved previous hop/router this receiver heard the packet from, when known.
+    /// This lets "Show all receivers" fan listeners out from the correct router instead
+    /// of guessing from only the receiver's hop number.
+    public let heardFromNodeID: Int64?
+    public let heardFromPosition: GeoPoint?
 
     /// True when this receiver is a gateway that reported the packet upstream. Retained
     /// for back-compat with existing renderer/tests; derived from `kind`.
@@ -112,11 +117,20 @@ public struct TraceReceiver: Sendable, Equatable {
         kind == .destination
     }
 
-    public init(nodeID: Int64, position: GeoPoint, hop: Int, kind: Kind) {
+    public init(
+        nodeID: Int64,
+        position: GeoPoint,
+        hop: Int,
+        kind: Kind,
+        heardFromNodeID: Int64? = nil,
+        heardFromPosition: GeoPoint? = nil
+    ) {
         self.nodeID = nodeID
         self.position = position
         self.hop = hop
         self.kind = kind
+        self.heardFromNodeID = heardFromNodeID
+        self.heardFromPosition = heardFromPosition
     }
 
     /// Back-compat initialiser: `isGateway` maps to `.gateway`/`.relay`. Kept so existing

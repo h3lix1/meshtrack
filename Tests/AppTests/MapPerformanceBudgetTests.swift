@@ -19,6 +19,16 @@ struct MapPerformanceBudgetTests {
     }
 
     @Test
+    func `burst fixture stays clustered at mid zoom to avoid annotation noise`() {
+        let fixture = MapPerfFixture.make(.burst)
+        let level = MapDeclutterPolicy.level(metersPerPoint: 30, visibleNodeCount: fixture.nodes.count)
+
+        #expect(level == .clustered)
+        #expect(level.clustersAnnotations)
+        #expect(!level.allowsSpiderfy)
+    }
+
+    @Test
     func `projection cache converts each unique coordinate once per frame`() {
         let base = CountingProjection()
         let cache = CachedTraceProjection(base: base)

@@ -54,6 +54,11 @@
         private func applySpiderfyBody(on mapView: MKMapView, settled: Bool) {
             lastSpiderfyAt = ProcessInfo.processInfo.systemUptime
             let annotations = mapView.annotations.compactMap { $0 as? MeshNodeAnnotation }
+            guard declutterLevel.allowsSpiderfy else {
+                resetMarkerOffsets(annotations, on: mapView)
+                if !lastLeaderSignature.isEmpty { clearLeaderLines(on: mapView) }
+                return
+            }
             guard !annotations.isEmpty else {
                 if !lastLeaderSignature.isEmpty { clearLeaderLines(on: mapView) }
                 return
@@ -76,6 +81,13 @@
             }
 
             refreshLeaderLines(on: mapView, placements: placements, force: settled)
+        }
+
+        private func resetMarkerOffsets(_ annotations: [MeshNodeAnnotation], on mapView: MKMapView) {
+            for annotation in annotations {
+                guard let view = mapView.view(for: annotation), view.centerOffset != .zero else { continue }
+                view.centerOffset = .zero
+            }
         }
 
         /// Replace the leader-line overlays only when their geometry changed (or a

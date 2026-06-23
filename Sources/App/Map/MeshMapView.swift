@@ -30,13 +30,20 @@
         public private(set) var projection: MapProjection?
         /// True while the user/MapKit camera is actively panning or zooming.
         public private(set) var isInteracting = false
+        /// Current zoom/density declutter level for the live MapKit substrate.
+        public private(set) var declutterLevel: MapDeclutterLevel = .overview
 
         public init() {}
 
         /// Called by the substrate's coordinator after the map region settles.
-        func update(projection: MapProjection, isInteracting: Bool) {
+        func update(
+            projection: MapProjection,
+            isInteracting: Bool,
+            declutterLevel: MapDeclutterLevel
+        ) {
             self.projection = projection
             self.isInteracting = isInteracting
+            self.declutterLevel = declutterLevel
             regionRevision &+= 1
         }
     }
@@ -215,6 +222,8 @@
             /// The leader-line endpoints (anchor+displaced screen points keyed by id) from
             /// the last pass; lets us skip the overlay remove/add when nothing moved.
             var lastLeaderSignature: [Int64: SpiderLeaderKey] = [:]
+            /// Zoom/density mode currently applied to annotation views.
+            var declutterLevel: MapDeclutterLevel = .overview
             /// Min seconds between continuous-motion spiderfy passes.
             static let spiderfyInterval: TimeInterval = 0.1
             /// Cap overlay camera updates to 60 Hz even on higher-frequency callbacks.
@@ -245,7 +254,7 @@
 
             /// Persist the current visible region, debounced. Runs off the observed
             /// state (UserDefaults), so it never re-enters the SwiftUI update loop.
-            private func scheduleRegionSave() {
+            func scheduleRegionSave() {
                 saveWorkItem?.cancel()
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, let map else { return }
@@ -280,70 +289,12 @@
                         return map.convert(coordinate, toPointTo: map)
                     }
                 }
-                state.update(projection: projection, isInteracting: interacting)
-            }
-
-            public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-                publishProjection(interacting: false, force: true)
-                // The gesture/animation has settled — do the full, authoritative spiderfy
-                // pass (fan markers + rebuild leader lines) exactly once here.
-                applySpiderfy(on: mapView, settled: true)
-                scheduleRegionSave()
-            }
-
-            public func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-                publishProjection(interacting: true, force: false)
-                // Fires every frame during a continuous pan/zoom. Item 5: keep the cheap
-                // projection publish so the Canvas overlay tracks the map, but THROTTLE
-                // the expensive spiderfy (O(n²) cluster + overlay remove/add) so it runs
-                // at most once per `spiderfyInterval`, not 60×/sec. The settled callback
-                // above guarantees a final correct pass when motion stops.
-                throttledSpiderfy(on: mapView)
-            }
-
-            public func mapView(
-                _ mapView: MKMapView,
-                rendererFor overlay: any MKOverlay
-            ) -> MKOverlayRenderer {
-                guard let line = overlay as? MKPolyline else {
-                    return MKOverlayRenderer(overlay: overlay)
-                }
-                let renderer = MKPolylineRenderer(polyline: line)
-                renderer.strokeColor = NSColor.white.withAlphaComponent(0.45)
-                renderer.lineWidth = 1
-                return renderer
-            }
-
-            public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-                guard let annotation = view.annotation as? MeshNodeAnnotation else { return }
-                onSelectNode?(annotation.nodeID)
-                // Deselect immediately so the same marker can be tapped again to reopen
-                // the popover (MapKit otherwise suppresses re-selection of the current).
-                mapView.deselectAnnotation(annotation, animated: false)
-            }
-
-            public func mapView(
-                _ mapView: MKMapView,
-                viewFor annotation: any MKAnnotation
-            ) -> MKAnnotationView? {
-                if annotation is MKClusterAnnotation {
-                    let view = mapView.dequeueReusableAnnotationView(
-                        withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier,
-                        for: annotation
-                    )
-                    if let marker = view as? MKMarkerAnnotationView {
-                        marker.markerTintColor = .systemTeal
-                        marker.titleVisibility = .hidden
-                    }
-                    return view
-                }
-                guard let node = annotation as? MeshNodeAnnotation else { return nil }
-                let view = mapView.dequeueReusableAnnotationView(
-                    withIdentifier: MeshNodeAnnotationView.reuseID,
-                    for: node
+                let nextDeclutterLevel = refreshDeclutterLevel(on: map)
+                state.update(
+                    projection: projection,
+                    isInteracting: interacting,
+                    declutterLevel: nextDeclutterLevel
                 )
-                (view as? MeshNodeAnnotationView)?.configure(for: node)
-                return view
             }
         }
     }

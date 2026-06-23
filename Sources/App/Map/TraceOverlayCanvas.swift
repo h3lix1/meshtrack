@@ -13,6 +13,10 @@
     import SwiftUI
 
     public struct TraceOverlayCanvas: View {
+        /// Kept for source-compatibility with the MeshMapSection call site, but no longer
+        /// drawn here: the static node glows/labels now render in their own
+        /// `NodeOverlayCanvas`, which redraws only on camera/node changes rather than on
+        /// every trace-animation frame.
         public let nodes: [NetworkNode]
         public let traces: [PacketTrace]
         public let state: MeshMapState
@@ -50,23 +54,30 @@
         }
 
         public var body: some View {
-            Canvas { context, _ in
+            Canvas { context, size in
                 // Reading regionRevision inside the Canvas closure makes the overlay
                 // re-render whenever the map's camera moves.
                 _ = state.regionRevision
                 guard let projection = state.projection else { return }
                 let cachedProjection = CachedTraceProjection(base: projection)
-                let detail: TraceRenderDetail = state.isInteracting ? .interactive : .full
+                let detail = MapDeclutterPolicy.traceDetail(
+                    isInteracting: state.isInteracting,
+                    declutterLevel: state.declutterLevel
+                )
                 let renderer = TraceRenderer(
                     clock: clock, hopDuration: hopDuration, mode: mode,
                     focusedPacketID: focusedPacketID,
                     showAllReceivers: showAllReceivers,
                     detail: detail
                 )
+                let cullingBounds = CGRect(origin: .zero, size: size)
                 MapPerfSignpost.interval("map.overlay.draw") {
-                    renderer.drawTraces(traces, in: &context, projection: cachedProjection)
+                    // Nodes are now drawn by NodeOverlayCanvas (off the per-frame clock);
+                    // this overlay paints only the moving traces + their latency tooltips.
+                    renderer.drawTraces(
+                        traces, in: &context, projection: cachedProjection, cullingBounds: cullingBounds
+                    )
                     if detail == .full {
-                        renderer.drawNodes(nodes, in: &context, projection: cachedProjection)
                         for trace in traces {
                             guard let latencyMs = latencyMillis[trace.id] else { continue }
                             renderer.drawLatencyTooltip(

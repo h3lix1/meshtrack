@@ -67,7 +67,11 @@ public struct PacketDecoder: Sendable {
             channel: packet.channel,
             port: MeshPort(portNumRawValue: Int(data.portnum.rawValue)),
             payload: [UInt8](data.payload),
-            rxTime: Self.receiveTime(packet, fallback: receivedAt),
+            // Our internal frame-receipt clock is the canonical packet time. The node's
+            // firmware RTC is too often skewed to trust for ordering/placement, so we keep
+            // it only as `nodeRxTime` for the descriptive receive→publish latency.
+            rxTime: receivedAt,
+            nodeRxTime: Self.nodeClaimedTime(packet),
             rxRssi: packet.rxRssi != 0 ? Int(packet.rxRssi) : nil,
             rxSnr: packet.rxSnr != 0 ? Double(packet.rxSnr) : nil,
             hopStart: packet.hopStart != 0 ? UInt8(truncatingIfNeeded: packet.hopStart) : nil,
@@ -85,15 +89,14 @@ public struct PacketDecoder: Sendable {
         return UInt32(raw.dropFirst(), radix: 16)
     }
 
-    /// The instant a packet was *received by the radio*, used as `rx_time` so the
-    /// reception→ingest latency (`ingest_time − rx_time`, SPEC §2.11) is real and
-    /// not ~0. The firmware stamps `MeshPacket.rxTime` (whole seconds since 1970)
-    /// when it hands the packet to the phone/MQTT; we prefer it. It is sometimes
-    /// omitted (sent as 0) — never carried over the radio link, only added on the
-    /// way to the phone — so when absent we fall back to our own frame-receipt
-    /// time, which collapses latency to 0 for that packet (documented, not a bug).
-    static func receiveTime(_ packet: MeshPacket, fallback: Instant) -> Instant {
-        guard packet.rxTime != 0 else { return fallback }
+    /// The node's *claimed* receive time, from the firmware-stamped `MeshPacket.rxTime`
+    /// (whole seconds since 1970, the node's own RTC) — kept ONLY so the descriptive
+    /// receive→publish latency (`ingest_time − nodeRxTime`, SPEC §2.11) stays real rather
+    /// than ~0. A skewed node clock makes this wildly wrong, which is exactly why it no
+    /// longer feeds `rxTime` (the canonical packet time). Omitted (sent as 0) → `nil`,
+    /// and latency for that packet is simply unavailable.
+    static func nodeClaimedTime(_ packet: MeshPacket) -> Instant? {
+        guard packet.rxTime != 0 else { return nil }
         return Instant(nanosecondsSinceEpoch: Int64(packet.rxTime) * 1_000_000_000)
     }
 }

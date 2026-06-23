@@ -21,6 +21,10 @@ public struct VCRControlState: Equatable, Sendable {
     public let isPlaying: Bool
     public let isLive: Bool
     public let speed: PlaybackSpeed
+    /// Packet id being replayed as a loop, nil for normal timeline playback.
+    public let focusedPacketID: UInt32?
+    /// Real seconds to wait after a focused packet finishes before restarting.
+    public let repeatDelaySeconds: Double
     /// A short label for the playhead time (e.g. "-3h12m", "LIVE").
     public let playheadLabel: String
 
@@ -30,6 +34,8 @@ public struct VCRControlState: Equatable, Sendable {
         isPlaying: Bool,
         isLive: Bool,
         speed: PlaybackSpeed,
+        focusedPacketID: UInt32? = nil,
+        repeatDelaySeconds: Double = 2,
         playheadLabel: String
     ) {
         self.buckets = buckets
@@ -37,6 +43,8 @@ public struct VCRControlState: Equatable, Sendable {
         self.isPlaying = isPlaying
         self.isLive = isLive
         self.speed = speed
+        self.focusedPacketID = focusedPacketID
+        self.repeatDelaySeconds = max(0, repeatDelaySeconds)
         self.playheadLabel = playheadLabel
     }
 }
@@ -46,6 +54,7 @@ public struct VCRControlActions {
     public var togglePlay: () -> Void
     public var scrub: (Double) -> Void
     public var setSpeed: (PlaybackSpeed) -> Void
+    public var setRepeatDelay: (Double) -> Void
     public var goLive: () -> Void
     /// Advance playback by the given real-seconds delta since the last frame. The
     /// view fires this once per frame while playing; the host forwards it to
@@ -56,12 +65,14 @@ public struct VCRControlActions {
         togglePlay: @escaping () -> Void = {},
         scrub: @escaping (Double) -> Void = { _ in },
         setSpeed: @escaping (PlaybackSpeed) -> Void = { _ in },
+        setRepeatDelay: @escaping (Double) -> Void = { _ in },
         goLive: @escaping () -> Void = {},
         tick: @escaping (Double) -> Void = { _ in }
     ) {
         self.togglePlay = togglePlay
         self.scrub = scrub
         self.setSpeed = setSpeed
+        self.setRepeatDelay = setRepeatDelay
         self.goLive = goLive
         self.tick = tick
     }
@@ -85,6 +96,9 @@ public struct VCRControlView: View {
             playPauseButton
             scrubber
             speedSelector
+            if state.focusedPacketID != nil {
+                repeatDelayControl
+            }
             liveButton
         }
         .padding(.horizontal, 16)
@@ -219,6 +233,43 @@ public struct VCRControlView: View {
                 .accessibilityLabel("Speed \(option.label)")
             }
         }
+    }
+
+    private var repeatDelayControl: some View {
+        HStack(spacing: 5) {
+            Button {
+                actions.setRepeatDelay(state.repeatDelaySeconds - 0.5)
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 20, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Decrease repeat delay")
+
+            VStack(spacing: 1) {
+                Text("LOOP")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.45))
+                Text(String(format: "%.1fs", state.repeatDelaySeconds))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .frame(width: 42)
+            }
+
+            Button {
+                actions.setRepeatDelay(state.repeatDelaySeconds + 0.5)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 20, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Increase repeat delay")
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
     }
 
     // MARK: Return to live

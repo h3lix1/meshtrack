@@ -35,6 +35,19 @@ public final class TimelineViewModel {
     public private(set) var speed: PlaybackSpeed = .one
     /// Live (tracking now) vs review (scrubbed into the past).
     public private(set) var mode: PlaybackMode = .live
+    /// Packet id currently replaying as a deterministic loop, nil for normal timeline playback.
+    public private(set) var focusedPacketID: UInt32?
+    /// Relay-byte ambiguity policy used for normal replay and focused packet loops.
+    public private(set) var relayGuessing: RelayGuessingPolicy = .nearestCandidate
+
+    /// Real seconds to pause after a focused packet's animation finishes before it restarts.
+    public var packetRepeatDelaySeconds: Double {
+        get { storedPacketRepeatDelaySeconds }
+        set { storedPacketRepeatDelaySeconds = Self.clampRepeatDelay(newValue) }
+    }
+
+    public static let minPacketRepeatDelaySeconds: Double = 0
+    public static let maxPacketRepeatDelaySeconds: Double = 10
 
     /// True when the playhead is scrubbed off "live" into the past (item 1). When this
     /// flips true the map should feed from this VM's reconstructed `traces`/`nodes`
@@ -53,6 +66,13 @@ public final class TimelineViewModel {
 
     private var observations: [TimelineObservation] = []
     private var positions: [Int64: GeoPoint] = [:]
+    /// CLIENT_MUTE nodes — never rebroadcast, so they are excluded from relay-byte guesses
+    /// during reconstruction (they can only be the source or addressed destination).
+    private var nonRelayNodes: Set<Int64> = []
+    private var focusedLoopElapsedSeconds: Double = 0
+    private var storedPacketRepeatDelaySeconds: Double = 2
+    private let focusedReplayHopDurationSeconds: Double = 1.2
+    private let focusedReplayTimingMode: TraceTimingMode = .sequential
 
     public init(
         store: MeshStore,
@@ -86,7 +106,9 @@ public final class TimelineViewModel {
     private func loadNodes() async throws {
         var built: [NetworkNode] = []
         var positionMap: [Int64: GeoPoint] = [:]
+        var muteNodes: Set<Int64> = []
         for record in try await store.allNodes() {
+            if NodeRole.isNonRelaying(rawRole: record.role) { muteNodes.insert(record.node_num) }
             let fixes = try await store.positionFixes(forNode: record.node_num)
             guard let latest = fixes.max(by: { $0.t < $1.t }) else { continue }
             let geo = GeoPoint(latitude: latest.lat, longitude: latest.lon)
@@ -101,11 +123,22 @@ public final class TimelineViewModel {
         }
         nodes = built
         positions = positionMap
+        nonRelayNodes = muteNodes
     }
 
     // MARK: Transport controls
 
     public func play() {
+        if focusedPacketID != nil {
+            guard focusedPacketCanReplay() else {
+                isPlaying = false
+                return
+            }
+            mode = .review
+            isPlaying = true
+            refresh()
+            return
+        }
         isPlaying = true
         if mode == .live {
             // Hitting play from live drops into review. The playhead is pinned at
@@ -131,14 +164,22 @@ public final class TimelineViewModel {
         refresh()
     }
 
+    public func setRelayGuessingPolicy(_ policy: RelayGuessingPolicy) {
+        guard relayGuessing != policy else { return }
+        relayGuessing = policy
+        refresh()
+    }
+
     /// Scrub the playhead to `fraction` (in [0,1]) across the window. Scrubbing
     /// always enters review mode; reaching the end re-enters live.
     public func scrub(toFraction fraction: Double) {
+        focusedPacketID = nil
         seek(to: window.instant(atFraction: fraction))
     }
 
     /// Move the playhead to an exact instant (clamped to the window).
     public func seek(to instant: Instant) {
+        focusedPacketID = nil
         let clamped = clampToWindow(instant)
         playhead = clamped
         mode = clamped >= window.end ? .live : .review
@@ -150,6 +191,8 @@ public final class TimelineViewModel {
     public func goLive() {
         mode = .live
         isPlaying = false
+        focusedPacketID = nil
+        focusedLoopElapsedSeconds = 0
         playhead = window.end
         refresh()
     }
@@ -161,6 +204,10 @@ public final class TimelineViewModel {
     /// end. The view's display-link / TimelineView drives this each frame.
     public func tick(delta: Double) {
         guard isPlaying, mode == .review, delta > 0 else { return }
+        if focusedPacketID != nil {
+            tickFocusedPacket(delta: delta)
+            return
+        }
         let advanced = playhead.adding(seconds: delta * speed.rawValue)
         if advanced >= window.end {
             goLive()
@@ -181,12 +228,17 @@ public final class TimelineViewModel {
             isPlaying: isPlaying,
             isLive: mode == .live,
             speed: speed,
+            focusedPacketID: focusedPacketID,
+            repeatDelaySeconds: packetRepeatDelaySeconds,
             playheadLabel: playheadLabel
         )
     }
 
     /// A short "time-ago" label for the playhead ("LIVE" at the window end).
     public var playheadLabel: String {
+        if let focusedPacketID {
+            return "PKT " + NodeID.hex(focusedPacketID).replacingOccurrences(of: "!", with: "#")
+        }
         if mode == .live { return "LIVE" }
         let secondsAgo = max(0, window.end.secondsSince(playhead))
         let hours = Int(secondsAgo) / 3600
@@ -198,11 +250,19 @@ public final class TimelineViewModel {
 
     /// Recompute the active traces + clock for the current playhead/speed.
     private func refresh() {
+        if let focusedPacketID {
+            let frame = focusedReplayFrame(packetID: focusedPacketID)
+            traces = frame.traces
+            clock = frame.clock
+            return
+        }
         let frame = reconstructor.frame(
             observations: observations,
             playhead: playhead,
             speed: speed,
-            positions: positions
+            positions: positions,
+            relayGuessing: relayGuessing,
+            nonRelayNodes: nonRelayNodes
         )
         traces = frame.traces
         clock = frame.clock
@@ -217,5 +277,136 @@ public final class TimelineViewModel {
     nonisolated static func displayName(_ record: NodeRecord) -> String {
         record.short_name ?? record.long_name ?? record.hexid
             ?? NodeID.hex(UInt32(truncatingIfNeeded: record.node_num))
+    }
+}
+
+public extension TimelineViewModel {
+    @discardableResult
+    func focusPacket(_ packetID: UInt32?, autoplay: Bool = false) -> Bool {
+        guard let packetID else {
+            focusedPacketID = nil
+            focusedLoopElapsedSeconds = 0
+            refresh()
+            return true
+        }
+        guard packetCanReplay(packetID) else {
+            focusedPacketID = nil
+            focusedLoopElapsedSeconds = 0
+            isPlaying = false
+            refresh()
+            return false
+        }
+        focusedPacketID = packetID
+        focusedLoopElapsedSeconds = 0
+        mode = .review
+        playhead = firstObservationTime(for: packetID) ?? playhead
+        isPlaying = autoplay
+        refresh()
+        return true
+    }
+
+    @discardableResult
+    func reloadAndFocusPacket(_ packetID: UInt32?, autoplay: Bool = true) async throws -> Bool {
+        try await reloadHistory()
+        return focusPacket(packetID, autoplay: autoplay)
+    }
+}
+
+private extension TimelineViewModel {
+    static func clampRepeatDelay(_ seconds: Double) -> Double {
+        guard seconds.isFinite else { return minPacketRepeatDelaySeconds }
+        return min(maxPacketRepeatDelaySeconds, max(minPacketRepeatDelaySeconds, seconds))
+    }
+
+    func reloadHistory() async throws {
+        let now = clockSource.now()
+        let since = now.adding(seconds: -spanSeconds)
+        observations = try await store.timelineObservations(since: since, until: now)
+        window = TimelineWindowBuilder.build(observations: observations, now: now, spanSeconds: spanSeconds)
+    }
+
+    func tickFocusedPacket(delta: Double) {
+        guard let packetID = focusedPacketID, packetCanReplay(packetID) else {
+            isPlaying = false
+            return
+        }
+        let animationDuration = focusedAnimationDuration(packetID: packetID)
+        guard animationDuration > 0 else {
+            isPlaying = false
+            return
+        }
+        let animationRealSeconds = animationDuration / max(speed.rawValue, .leastNonzeroMagnitude)
+        let loopDuration = animationRealSeconds + packetRepeatDelaySeconds
+        guard loopDuration > 0 else {
+            focusedLoopElapsedSeconds = 0
+            refresh()
+            return
+        }
+
+        focusedLoopElapsedSeconds += delta
+        while focusedLoopElapsedSeconds >= loopDuration {
+            focusedLoopElapsedSeconds -= loopDuration
+        }
+        playhead = firstObservationTime(for: packetID)?
+            .adding(seconds: focusedReplayClock(packetID: packetID))
+            ?? playhead
+        refresh()
+    }
+
+    func focusedReplayFrame(packetID: UInt32) -> ReplayFrame {
+        reconstructor.focusedPacketFrame(
+            observations: observations,
+            packetID: packetID,
+            clock: focusedReplayClock(packetID: packetID),
+            positions: positions,
+            relayGuessing: relayGuessing,
+            nonRelayNodes: nonRelayNodes
+        )
+    }
+
+    func focusedReplayClock(packetID: UInt32) -> Double {
+        let duration = focusedAnimationDuration(packetID: packetID)
+        guard duration > 0 else { return 0 }
+        let animationRealSeconds = duration / max(speed.rawValue, .leastNonzeroMagnitude)
+        if focusedLoopElapsedSeconds >= animationRealSeconds {
+            return duration
+        }
+        return min(duration, focusedLoopElapsedSeconds * speed.rawValue)
+    }
+
+    func focusedAnimationDuration(packetID: UInt32) -> Double {
+        let frame = reconstructor.focusedPacketFrame(
+            observations: observations,
+            packetID: packetID,
+            clock: 0,
+            positions: positions,
+            relayGuessing: relayGuessing,
+            nonRelayNodes: nonRelayNodes
+        )
+        // Use the packet's true hop count, not just the drawn edge indices: an
+        // undecomposable multi-hop path is drawn as a single first-hop segment (so the
+        // source never appears to re-send), yet its replay should still run for the full
+        // hop count rather than collapse to one hop.
+        let maxHop = frame.traces.map { max($0.maxHopIndex, $0.hops) }.max() ?? 0
+        return TraceTiming.journeyDuration(
+            edgeCount: maxHop,
+            hopDuration: focusedReplayHopDurationSeconds,
+            mode: focusedReplayTimingMode
+        )
+    }
+
+    func focusedPacketCanReplay() -> Bool {
+        focusedPacketID.map(packetCanReplay) ?? false
+    }
+
+    func packetCanReplay(_ packetID: UInt32) -> Bool {
+        !focusedReplayFrame(packetID: packetID).traces.isEmpty
+    }
+
+    func firstObservationTime(for packetID: UInt32) -> Instant? {
+        observations
+            .filter { $0.packetID == packetID }
+            .map(\.rxTime)
+            .min()
     }
 }

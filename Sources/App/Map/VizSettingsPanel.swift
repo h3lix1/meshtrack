@@ -22,18 +22,22 @@ public struct VizSettingsPanel: View {
     /// Tapping a legend row hands its packet id back to focus/toggle it; nil disables
     /// the interaction (e.g. preview/snapshot composition).
     private let onSelectPacket: ((UInt32) -> Void)?
+    /// Bound for the whole floating panel; the packet/receiver roster scrolls inside it.
+    private let maxHeight: CGFloat
 
     public init(
         settings: VizSettings,
         traces: [PacketTrace],
         relayCandidateCount: Int = 1,
         selectedPacketID: UInt32? = nil,
+        maxHeight: CGFloat = 520,
         onSelectPacket: ((UInt32) -> Void)? = nil
     ) {
         _settings = Bindable(settings)
         self.traces = traces
         self.relayCandidateCount = relayCandidateCount
         self.selectedPacketID = selectedPacketID
+        self.maxHeight = maxHeight
         self.onSelectPacket = onSelectPacket
     }
 
@@ -43,11 +47,11 @@ public struct VizSettingsPanel: View {
             Divider().overlay(Color.white.opacity(0.12))
             edgeKey
             Divider().overlay(Color.white.opacity(0.12))
-            legend
-            receivedBySection
+            scrollableRoster
         }
         .padding(14)
-        .frame(width: 240, alignment: .leading)
+        .frame(width: PanelLayout.width, alignment: .topLeading)
+        .frame(maxHeight: maxHeight, alignment: .topLeading)
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12), lineWidth: 1))
         .foregroundStyle(.white)
@@ -75,6 +79,22 @@ public struct VizSettingsPanel: View {
               let trace = traces.first(where: { $0.id == focused })
         else { return [] }
         return VizLegend.receivedBy(trace)
+    }
+
+    private var scrollableRoster: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                legend
+                receivedBySection
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: rosterMaxHeight, alignment: .top)
+        .scrollIndicators(.visible)
+    }
+
+    private var rosterMaxHeight: CGFloat {
+        max(PanelLayout.minRosterHeight, maxHeight - PanelLayout.fixedChromeHeight)
     }
 
     // MARK: Timing
@@ -109,6 +129,19 @@ public struct VizSettingsPanel: View {
                 }
             }
             .toggleStyle(.switch)
+            .controlSize(.small)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Relay guesses").font(.caption)
+                Picker("Relay guesses", selection: $settings.relayGuessingPolicy) {
+                    Text("Nearest").tag(RelayGuessingPolicy.nearestCandidate)
+                    Text("Unique").tag(RelayGuessingPolicy.unambiguousOnly)
+                    Text("All").tag(RelayGuessingPolicy.allCandidates)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(settings.relayGuessingDetail)
+                    .font(.system(size: 9)).foregroundStyle(.white.opacity(0.55))
+            }
             .controlSize(.small)
         }
     }
@@ -194,6 +227,12 @@ public struct VizSettingsPanel: View {
             row
         }
     }
+}
+
+private enum PanelLayout {
+    static let width: CGFloat = 240
+    static let fixedChromeHeight: CGFloat = 190
+    static let minRosterHeight: CGFloat = 96
 }
 
 /// The focused packet's "received by (reported)" roster (item 8). Lists every receiver we

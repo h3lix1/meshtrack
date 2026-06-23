@@ -68,6 +68,15 @@ struct NodeDirectoryViewModelTests {
     }
 
     @Test
+    func `only CLIENT_MUTE counts as a non-relaying role`() {
+        #expect(NodeRole.isNonRelaying(rawRole: "CLIENT_MUTE"))
+        #expect(NodeRole.isNonRelaying(rawRole: "client_mute")) // case-insensitive
+        #expect(!NodeRole.isNonRelaying(rawRole: "CLIENT"))
+        #expect(!NodeRole.isNonRelaying(rawRole: "ROUTER"))
+        #expect(!NodeRole.isNonRelaying(rawRole: nil))
+    }
+
+    @Test
     func `presentRoles lists only roles that have nodes, in canonical order`() async throws {
         let viewModel = try await NodeDirectoryViewModel(store: seededStore())
         try await viewModel.load()

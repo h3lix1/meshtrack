@@ -11,11 +11,14 @@ struct ReplayReconstructorTests {
     ]
 
     private func observation(
-        id: UInt32, gateway: Int64?, atSeconds seconds: Double
+        id: UInt32,
+        gateway: Int64?,
+        atSeconds seconds: Double,
+        relayNode: UInt8 = 0
     ) -> TimelineObservation {
         TimelineObservation(
             packetID: id, fromNode: 0x0000_0001, gatewayNode: gateway,
-            relayNode: 0, hopStart: 3, hopLimit: 1,
+            relayNode: relayNode, hopStart: 3, hopLimit: 1,
             rxTime: Instant.epoch.adding(seconds: seconds)
         )
     }
@@ -64,6 +67,77 @@ struct ReplayReconstructorTests {
         )
         #expect(frame.traces.count == 1)
         #expect(frame.traces.first?.edges.count == 2)
+    }
+
+    @Test
+    func `focused packet frame uses every reception for the selected packet only`() {
+        let engine = ReplayReconstructor()
+        let corpus = [
+            observation(id: 0xAA, gateway: 0x0000_00FF, atSeconds: 10),
+            observation(id: 0xBB, gateway: 0x0000_00FF, atSeconds: 11),
+            observation(id: 0xAA, gateway: 0x0000_00EE, atSeconds: 12)
+        ]
+        let frame = engine.focusedPacketFrame(
+            observations: corpus,
+            packetID: 0xAA,
+            clock: 1.25,
+            positions: positions
+        )
+        #expect(frame.clock == 1.25)
+        #expect(frame.traces.map(\.id) == [0xAA])
+        #expect(frame.traces.first?.edges.count == 2)
+    }
+
+    @Test
+    func `replay suppresses ambiguous relay guesses when requested`() {
+        let engine = ReplayReconstructor()
+        let ambiguousPositions = positions.merging([
+            0x0000_0011: GeoPoint(latitude: 37.2, longitude: -122.0),
+            0x0000_0111: GeoPoint(latitude: 37.25, longitude: -122.0)
+        ]) { _, new in new }
+        let corpus = [
+            observation(id: 0xAA, gateway: 0x0000_00FF, atSeconds: 10, relayNode: 0x11)
+        ]
+
+        let defaultFrame = engine.frame(
+            observations: corpus,
+            playhead: Instant.epoch.adding(seconds: 100),
+            speed: .one,
+            positions: ambiguousPositions
+        )
+        #expect(defaultFrame.traces.first?.edges.map(\.kind) == [.guessed, .observed])
+
+        let suppressedFrame = engine.frame(
+            observations: corpus,
+            playhead: Instant.epoch.adding(seconds: 100),
+            speed: .one,
+            positions: ambiguousPositions,
+            relayGuessing: .unambiguousOnly
+        )
+        #expect(suppressedFrame.traces.first?.edges.map(\.kind) == [.observed])
+
+        let allCandidatesFrame = engine.frame(
+            observations: corpus,
+            playhead: Instant.epoch.adding(seconds: 100),
+            speed: .one,
+            positions: ambiguousPositions,
+            relayGuessing: .allCandidates
+        )
+        let allCandidateTrace = allCandidatesFrame.traces.first
+        #expect(allCandidateTrace?.edges.map(\.kind) == [.guessed, .observed, .guessed, .observed])
+        #expect(allCandidateTrace?.receivers.count(where: { $0.kind == .relay }) == 2)
+    }
+
+    @Test
+    func `focused packet frame is empty for an unknown packet`() {
+        let engine = ReplayReconstructor()
+        let frame = engine.focusedPacketFrame(
+            observations: [observation(id: 0xAA, gateway: 0x0000_00FF, atSeconds: 10)],
+            packetID: 0xCC,
+            clock: 3,
+            positions: positions
+        )
+        #expect(frame == .empty)
     }
 
     @Test

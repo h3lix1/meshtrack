@@ -118,6 +118,15 @@ public enum NodeRole: String, Sendable, CaseIterable, Identifiable {
         }
         return .other
     }
+
+    /// Whether a node with this firmware role never rebroadcasts, so it can only ever be
+    /// the first hop (source) or last hop (addressed destination) of a packet — never an
+    /// intermediate relay. CLIENT_MUTE is the canonical such role; the trace builder uses
+    /// this to drop these nodes from relay-byte guess candidates. Note `infer` collapses
+    /// CLIENT_MUTE into `.client`, so this reads the raw firmware string directly.
+    public static func isNonRelaying(rawRole: String?) -> Bool {
+        rawRole?.uppercased() == "CLIENT_MUTE"
+    }
 }
 
 /// The role filter: a specific role, or "all roles".

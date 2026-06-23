@@ -37,6 +37,27 @@ struct NetworkViewModelTests {
         return store
     }
 
+    private func relayConflictStore() async throws -> MeshStore {
+        let store = try await seededStore()
+        for (nodeID, lat) in [(0x0000_0011, 37.2), (0x0000_0111, 37.25)] as [(Int64, Double)] {
+            try await store.upsertNode(NodeRecord(
+                node_num: nodeID,
+                hexid: NodeID.hex(UInt32(truncatingIfNeeded: nodeID)),
+                short_name: nil,
+                node_class: .mobile,
+                first_seen_at: 0,
+                last_heard_at: 0
+            ))
+            _ = try await store.appendPositionFix(PositionFixRecord(
+                node_num: nodeID,
+                t: 1,
+                lat: lat,
+                lon: -122.0
+            ))
+        }
+        return store
+    }
+
     @Test
     func `loadNodes builds positioned nodes and ignores those without a fix`() async throws {
         let model = try await NetworkViewModel(store: seededStore())
@@ -44,6 +65,46 @@ struct NetworkViewModelTests {
         #expect(model.nodes.count == 2) // NOFIX is ignored
         #expect(model.nodes.contains { $0.name == "GW" && $0.isGateway })
         #expect(!model.nodes.contains { $0.name == "NOFIX" })
+    }
+
+    @Test
+    func `a position fix within the jitter deadband does not move the node`() async throws {
+        // The slow refresh loop re-runs loadNodes() every few seconds. A stationary node's
+        // GPS fixes wander a few metres each report; without a deadband the marker would
+        // snap to the newest jittery fix every cycle — the disorienting "shake". A
+        // sub-deadband fix must leave the shown position unchanged.
+        let store = try await seededStore()
+        let model = NetworkViewModel(store: store)
+        try await model.loadNodes()
+        let original = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+
+        // ~2 m north of the seeded 37.0 — below the 5 m deadband. (1e-5° lat ≈ 1.11 m.)
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001, t: 2, lat: 37.0 + 1.8e-5, lon: -122.0
+        ))
+        try await model.loadNodes()
+
+        let after = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+        #expect(after == original) // jitter suppressed — the node stayed put
+    }
+
+    @Test
+    func `a position fix beyond the jitter deadband moves the node`() async throws {
+        // A genuine relocation (well beyond the deadband) must still update the position.
+        let store = try await seededStore()
+        let model = NetworkViewModel(store: store)
+        try await model.loadNodes()
+        let original = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+
+        // ~110 m north — far beyond the 5 m deadband.
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001, t: 2, lat: 37.001, lon: -122.0
+        ))
+        try await model.loadNodes()
+
+        let after = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+        #expect(after != original)
+        #expect(abs(after.latitude - 37.001) < 1e-9)
     }
 
     @Test
@@ -60,6 +121,31 @@ struct NetworkViewModelTests {
         await model.flushPendingTraces()
         #expect(model.traces.count == 1)
         #expect(model.traces.first?.id == 0xABCD)
+    }
+
+    @Test
+    func `relay guess policy rebuilds live traces and suppresses ambiguous relay candidates`() async throws {
+        let model = try await NetworkViewModel(store: relayConflictStore())
+        try await model.loadNodes()
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0xABCD, channel: 0,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 3, hopLimit: 1, relayNode: 0x11, gatewayID: 0x0000_00FF
+        ))
+        await model.flushPendingTraces()
+        #expect(model.traces.first?.edges.map(\.kind) == [.guessed, .observed])
+
+        model.setRelayGuessingPolicy(.unambiguousOnly)
+        await model.flushPendingTraces()
+        #expect(model.relayGuessing == .unambiguousOnly)
+        #expect(model.traces.first?.edges.map(\.kind) == [.observed])
+        #expect(model.traces.first?.receivers.contains { $0.kind == .relay } == false)
+
+        model.setRelayGuessingPolicy(.allCandidates)
+        await model.flushPendingTraces()
+        #expect(model.relayGuessing == .allCandidates)
+        #expect(model.traces.first?.edges.map(\.kind) == [.guessed, .observed, .guessed, .observed])
+        #expect(model.traces.first?.receivers.count(where: { $0.kind == .relay }) == 2)
     }
 
     @Test
