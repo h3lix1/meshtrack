@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Coverage floor gate. Measures line coverage over the testable library targets
-# (excludes the executable composition root and the SwiftUI App layer). Floor is
-# read from scoreboard.json and only ratchets up. Requires `swift test
-# --enable-code-coverage` to have run first (the `test` target does this).
+# (excludes the executable composition root and the SwiftUI App layer). Floor
+# defaults to 70%. Requires `swift test --enable-code-coverage` to have run first
+# (the `test` target does this).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FLOOR="$(python3 -c 'import json;print(json.load(open("scoreboard.json"))["gates"]["coverage_min_pct"])' 2>/dev/null || echo 70)"
+FLOOR=70
 
 BIN="$(swift build --show-bin-path 2>/dev/null || true)"
 PROFDATA="$(ls "$BIN"/codecov/*.profdata 2>/dev/null | head -1 || true)"

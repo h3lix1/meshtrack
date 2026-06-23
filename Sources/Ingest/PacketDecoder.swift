@@ -67,7 +67,11 @@ public struct PacketDecoder: Sendable {
             channel: packet.channel,
             port: MeshPort(portNumRawValue: Int(data.portnum.rawValue)),
             payload: [UInt8](data.payload),
+            // Our internal frame-receipt clock is the canonical packet time. The node's
+            // firmware RTC is too often skewed to trust for ordering/placement, so we keep
+            // it only as `nodeRxTime` for the descriptive receive→publish latency.
             rxTime: receivedAt,
+            nodeRxTime: Self.nodeClaimedTime(packet),
             rxRssi: packet.rxRssi != 0 ? Int(packet.rxRssi) : nil,
             rxSnr: packet.rxSnr != 0 ? Double(packet.rxSnr) : nil,
             hopStart: packet.hopStart != 0 ? UInt8(truncatingIfNeeded: packet.hopStart) : nil,
@@ -83,5 +87,16 @@ public struct PacketDecoder: Sendable {
     static func parseGatewayID(_ raw: String) -> UInt32? {
         guard raw.hasPrefix("!") else { return nil }
         return UInt32(raw.dropFirst(), radix: 16)
+    }
+
+    /// The node's *claimed* receive time, from the firmware-stamped `MeshPacket.rxTime`
+    /// (whole seconds since 1970, the node's own RTC) — kept ONLY so the descriptive
+    /// receive→publish latency (`ingest_time − nodeRxTime`, SPEC §2.11) stays real rather
+    /// than ~0. A skewed node clock makes this wildly wrong, which is exactly why it no
+    /// longer feeds `rxTime` (the canonical packet time). Omitted (sent as 0) → `nil`,
+    /// and latency for that packet is simply unavailable.
+    static func nodeClaimedTime(_ packet: MeshPacket) -> Instant? {
+        guard packet.rxTime != 0 else { return nil }
+        return Instant(nanosecondsSinceEpoch: Int64(packet.rxTime) * 1_000_000_000)
     }
 }

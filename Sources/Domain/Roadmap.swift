@@ -15,4 +15,4 @@
 //   • TemplateRenderer   (Phase 4, SPEC §2.7/§2.1) — naming DSL with hard byte
 //                         limits (short ≤ 4 bytes, long ≤ 39 bytes).
 //
-// See IMPLEMENTATION_PLAN.md for the molecular task list.
+// See SPEC.md for the behavioral contract.

@@ -24,6 +24,9 @@ only) parses to an empty suite.
       h_accuracy: 10
       count: 3
   silence_hours: 26          # optional: hours of silence to simulate (SPEC §2.2 stale)
+  managed: true              # optional (default true): node is managed (ADR 0008).
+                             #   managed: false → ownership-sensitive rules
+                             #   (stale/battery_below/voltage_below) never fire.
   expect_alerts:             # optional: the exact alerts asserted (by type + count)
     - { type: moved, count: 1 }
 ```

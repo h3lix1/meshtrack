@@ -58,7 +58,15 @@ public struct DecodedPacket: Sendable, Equatable {
     /// The decoded (post-decrypt) application payload bytes.
     public let payload: [UInt8]
     /// When we received it (our clock / replay time), not the node's claimed time.
+    /// This is the canonical packet time the rest of the app orders, buckets, and
+    /// animates on — the node's firmware RTC (`nodeRxTime`) is too often wrong to trust.
     public let rxTime: Instant
+    /// The node's *claimed* receive time (firmware `MeshPacket.rxTime`, whole seconds
+    /// from its own RTC), when present. Unreliable — a skewed node clock makes it wildly
+    /// wrong — so it is used ONLY for the descriptive receive→publish latency
+    /// (`ingest_time − nodeRxTime`, SPEC §2.11), never for ordering/placement. `nil` when
+    /// the firmware omitted it (sent 0).
+    public let nodeRxTime: Instant?
     public let rxRssi: Int?
     public let rxSnr: Double?
     public let hopStart: UInt8?
@@ -80,6 +88,7 @@ public struct DecodedPacket: Sendable, Equatable {
         port: MeshPort,
         payload: [UInt8],
         rxTime: Instant,
+        nodeRxTime: Instant? = nil,
         rxRssi: Int? = nil,
         rxSnr: Double? = nil,
         hopStart: UInt8? = nil,
@@ -96,6 +105,7 @@ public struct DecodedPacket: Sendable, Equatable {
         self.port = port
         self.payload = payload
         self.rxTime = rxTime
+        self.nodeRxTime = nodeRxTime
         self.rxRssi = rxRssi
         self.rxSnr = rxSnr
         self.hopStart = hopStart

@@ -4,37 +4,47 @@
 // rolling apply (AdminApplier / FleetApplier). Bespoke chip/switch controls so the
 // dark theme is consistent and the headless snapshot renders faithfully.
 
+import Domain
+import Provisioning
 import SwiftUI
 
 public struct NodeDetailView: View {
     public let node: NetworkNode
     public var onApply: (NodeConfigEdit) -> Void
+    /// Run an imperative node command (favorite / unfavorite / ignore / unignore)
+    /// over the admin path. The host wires it to a `MeshAdminChannel.send(_:)`.
+    public var onCommand: (NodeAdminCommand) -> Void
 
     @State private var name: String
     @State private var region: String
     @State private var role: String
     @State private var armed: Bool
+    @State private var isFavorite: Bool
 
-    private let regions = ["US", "EU_868", "EU_433", "ANZ", "CN", "JP", "IN", "KR"]
-    private let roles = ["CLIENT", "CLIENT_MUTE", "ROUTER", "ROUTER_CLIENT", "REPEATER", "TRACKER"]
+    private let regions = NodeConfigForm.regions
+    private let roles = NodeConfigForm.roles
 
     public init(
         node: NetworkNode,
         region: String = "US",
         role: String = "CLIENT",
+        isFavorite: Bool = false,
         armedForPreview: Bool = false,
-        onApply: @escaping (NodeConfigEdit) -> Void = { _ in }
+        onApply: @escaping (NodeConfigEdit) -> Void = { _ in },
+        onCommand: @escaping (NodeAdminCommand) -> Void = { _ in }
     ) {
         self.node = node
         self.onApply = onApply
+        self.onCommand = onCommand
         _name = State(initialValue: node.name)
         _region = State(initialValue: region)
         _role = State(initialValue: role)
         _armed = State(initialValue: armedForPreview)
+        _isFavorite = State(initialValue: isFavorite)
     }
 
     private var hexID: String {
-        String(format: "!%08x", UInt32(truncatingIfNeeded: node.id))
+        NodeID.hex(UInt32(truncatingIfNeeded: node.id))
     }
 
     public var body: some View {
@@ -101,7 +111,34 @@ public struct NodeDetailView: View {
             }
             labeled("Region") { ChipPicker(options: regions, selection: $region, enabled: armed) }
             labeled("Role") { ChipPicker(options: roles, selection: $role, enabled: armed) }
+            favoriteRow
         }
+    }
+
+    /// Remote favourite ☆ / unfavourite ★ — an imperative admin command, not a
+    /// config diff. Applies immediately over the admin path (no ARM gate needed; it
+    /// can't brick a node and is reversible).
+    private var favoriteRow: some View {
+        Button {
+            let target = UInt32(truncatingIfNeeded: node.id)
+            onCommand(isFavorite ? .unfavorite(nodeNum: target) : .favorite(nodeNum: target))
+            isFavorite.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                Text(isFavorite ? "Unfavorite node" : "Favorite node")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(
+                isFavorite ? Color.yellow.opacity(0.22) : .white.opacity(0.05),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(isFavorite ? .yellow : .clear, lineWidth: 1))
+            .foregroundStyle(isFavorite ? .yellow : .white.opacity(0.8))
+        }
+        .buttonStyle(.plain)
     }
 
     private func labeled(_ label: String, @ViewBuilder _ control: () -> some View) -> some View {
@@ -153,11 +190,52 @@ public struct NodeDetailView: View {
     }
 }
 
+/// One armed per-node config edit, on its way through the verified rolling-update
+/// pipeline (`ConfigDiff` → `AdminMessageMapping` → `AdminApplier`).
+///
+/// Originally a fixed `(name, region, role)`; now it carries the broad changed-field
+/// set in `fields`, keyed by `AdminConfigField.rawValue` (`"region"`, `"role"`,
+/// `"mqtt_enabled"`, …). The host turns `fields` into the desired config the diff
+/// compares against. `name` / `region` / `role` remain as convenience accessors over
+/// `fields` so existing call sites keep working unchanged.
+///
+/// Per-node override semantics (SPEC §2.7): a fleet `NodeTemplate` supplies the GROUP
+/// defaults — its `desiredConfig(for:)` is what a rollout applies across the targeted
+/// nodes. This `NodeConfigEdit` is the INDIVIDUAL override: an operator edits one node
+/// and applies on top, so the node's own value wins for the fields it changed while the
+/// rest of the template's defaults still stand. Because both paths flow through the same
+/// diff/apply pipeline, the override is just "apply the node edit after (or instead of)
+/// the template rollout" — the read-back verify then reflects the merged result.
 public struct NodeConfigEdit: Sendable, Equatable {
     public let nodeNum: Int64
+    /// Owner long name (the human-facing node name). Kept as a distinct field
+    /// because the directory/detail header edits it directly.
     public let name: String
-    public let region: String
-    public let role: String
+    /// The broad changed-field set, keyed by `AdminConfigField.rawValue`.
+    public let fields: [String: String]
+
+    /// Broad designated initializer: carry any changed-field set.
+    public init(nodeNum: Int64, name: String, fields: [String: String]) {
+        self.nodeNum = nodeNum
+        self.name = name
+        self.fields = fields
+    }
+
+    /// Back-compat convenience: the original `(name, region, role)` edit, folded into
+    /// `fields`. Existing call sites compile unchanged.
+    public init(nodeNum: Int64, name: String, region: String, role: String) {
+        self.init(nodeNum: nodeNum, name: name, fields: ["region": region, "role": role])
+    }
+
+    /// The LoRa region in `fields` (empty when not edited).
+    public var region: String {
+        fields["region"] ?? ""
+    }
+
+    /// The device role in `fields` (empty when not edited).
+    public var role: String {
+        fields["role"] ?? ""
+    }
 }
 
 private struct ChipPicker: View {

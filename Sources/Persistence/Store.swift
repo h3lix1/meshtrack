@@ -47,6 +47,28 @@ public struct MeshStore: Sendable {
         try await writer.read { db in try NodeRecord.fetchOne(db, key: nodeNum) }
     }
 
+    /// Atomically fetch-merge-upsert a node inside a SINGLE write transaction.
+    ///
+    /// `merge` receives the current row (or `fallback` when the node is new),
+    /// mutates it in place, and the result is saved within the same transaction.
+    /// Doing the read and the write under one lock prevents a concurrent
+    /// `setOwnership`/admin write from being clobbered by a stale full-row
+    /// snapshot read in an earlier transaction — the read-modify-write race that
+    /// a separate `fetchNode` + `upsertNode` would expose. Returns the saved row.
+    @discardableResult
+    public func updateNode(
+        nodeNum: Int64,
+        orInsert fallback: @Sendable @escaping () -> NodeRecord,
+        merge: @Sendable @escaping (inout NodeRecord) -> Void
+    ) async throws -> NodeRecord {
+        try await writer.write { db in
+            var node = try NodeRecord.fetchOne(db, key: nodeNum) ?? fallback()
+            merge(&node)
+            try node.save(db)
+            return node
+        }
+    }
+
     /// All nodes, most-recently-heard first (for the node list / dashboard).
     public func allNodes() async throws -> [NodeRecord] {
         try await writer.read { db in
@@ -68,6 +90,72 @@ public struct MeshStore: Sendable {
         }
     }
 
+    // MARK: Ownership (ADR 0008)
+
+    /// Set a node's ownership flags (single or bulk). Updating only the columns
+    /// that are provided (`nil` leaves a flag unchanged), so callers can flip
+    /// "mine" without touching "managed" and vice-versa. Throws
+    /// `StoreError.nodeNotFound` for an unknown node.
+    public func setOwnership(nodeNum: Int64, isMine: Bool? = nil, isManaged: Bool? = nil) async throws {
+        try await writer.write { db in
+            guard var node = try NodeRecord.fetchOne(db, key: nodeNum) else {
+                throw StoreError.nodeNotFound(nodeNum: nodeNum)
+            }
+            if let isMine { node.is_mine = isMine }
+            if let isManaged { node.is_managed = isManaged }
+            try node.update(db)
+        }
+    }
+
+    /// Apply ownership flags to many nodes at once (bulk-classify UI). Unknown
+    /// node_nums are skipped; returns the count actually updated.
+    @discardableResult
+    public func setOwnership(
+        nodeNums: [Int64],
+        isMine: Bool? = nil,
+        isManaged: Bool? = nil
+    ) async throws -> Int {
+        try await writer.write { db in
+            var updated = 0
+            for nodeNum in nodeNums {
+                guard var node = try NodeRecord.fetchOne(db, key: nodeNum) else { continue }
+                if let isMine { node.is_mine = isMine }
+                if let isManaged { node.is_managed = isManaged }
+                try node.update(db)
+                updated += 1
+            }
+            return updated
+        }
+    }
+
+    /// Whether a node is managed (gates ownership-sensitive rules). Unknown nodes
+    /// are unmanaged.
+    public func isManaged(nodeNum: Int64) async throws -> Bool {
+        try await writer.read { db in
+            try NodeRecord.fetchOne(db, key: nodeNum)?.is_managed ?? false
+        }
+    }
+
+    /// The node_nums of every managed node (the rule engine's eligibility set).
+    public func managedNodeNums() async throws -> [Int64] {
+        try await writer.read { db in
+            try Int64.fetchAll(
+                db,
+                sql: "SELECT node_num FROM \(Table.node) WHERE is_managed = 1"
+            )
+        }
+    }
+
+    /// Every node the operator marked as theirs ("My Nodes" filter, ADR 0008).
+    public func myNodes() async throws -> [NodeRecord] {
+        try await writer.read { db in
+            try NodeRecord
+                .filter(Column("is_mine") == true)
+                .order(Column("last_heard_at").desc)
+                .fetchAll(db)
+        }
+    }
+
     // MARK: Observations (provenance + dedup)
 
     /// Record one observation. Throws `StoreError.duplicate` if the
@@ -85,8 +173,54 @@ public struct MeshStore: Sendable {
         }
     }
 
+    // MARK: Messages (monitor-only, ADR 0006)
+
+    /// Append a decoded text message. Cross-run/reconnect idempotency is enforced
+    /// by the windowed `admitExtraction` ledger the pipeline consults BEFORE this
+    /// call (schema v6, Finding 5), not by a permanent unique index — so a legitimate
+    /// later message reusing the same `(packet_id, from_num)` after the dedup window
+    /// is recorded rather than silently dropped forever. Returns the new row id.
+    @discardableResult
+    public func recordMessage(_ message: MessageRecord) async throws -> Int64 {
+        try await writer.write { db in
+            var record = message
+            try record.insert(db)
+            return record.id ?? db.lastInsertedRowID
+        }
+    }
+
+    /// Messages on a channel, oldest-first (the Channels view feed). The `id`
+    /// tie-break makes ordering deterministic when several messages share an
+    /// `rx_time`, so the transcript does not flicker between loads (Finding 13).
+    public func messages(channel: Int64, limit: Int = 200) async throws -> [MessageRecord] {
+        try await writer.read { db in
+            try MessageRecord
+                .filter(Column("channel") == channel)
+                .order(Column("rx_time").desc, Column("id").desc)
+                .limit(limit)
+                .fetchAll(db)
+                .reversed()
+        }
+    }
+
+    /// The most-recent messages across all channels, newest-first. The `id`
+    /// tie-break keeps ordering stable for equal `rx_time` (Finding 13).
+    public func recentMessages(limit: Int = 200) async throws -> [MessageRecord] {
+        try await writer.read { db in
+            try MessageRecord
+                .order(Column("rx_time").desc, Column("id").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
     // MARK: Time-series
 
+    /// Append a telemetry sample. Re-delivery idempotency is enforced once per
+    /// packet by the windowed `admitExtraction` ledger the pipeline consults before
+    /// extracting (schema v6, Finding 5) — not by a permanent `(node_num, t, kind,
+    /// key)` unique index, which would also have dropped two genuinely-distinct
+    /// samples that share that coarse key. Returns the new row id.
     @discardableResult
     public func appendTelemetry(_ telemetry: TelemetryRecord) async throws -> Int64 {
         try await writer.write { db in
@@ -96,6 +230,11 @@ public struct MeshStore: Sendable {
         }
     }
 
+    /// Append a position fix. Re-delivery idempotency is enforced once per packet by
+    /// the windowed `admitExtraction` ledger the pipeline consults before extracting
+    /// (schema v6, Finding 5), not by a permanent `(node_num, t)` unique index that
+    /// would also drop two distinct fixes a node reported at the same instant.
+    /// Returns the new row id.
     @discardableResult
     public func appendPositionFix(_ fix: PositionFixRecord) async throws -> Int64 {
         try await writer.write { db in
@@ -105,18 +244,63 @@ public struct MeshStore: Sendable {
         }
     }
 
-    public func telemetry(forNode nodeNum: Int64) async throws -> [TelemetryRecord] {
-        try await writer.read { db in
-            try TelemetryRecord
-                .filter(Column("node_num") == nodeNum)
-                .order(Column("t"))
-                .fetchAll(db)
+    // MARK: Windowed extraction dedup (SPEC §2.4, schema v6)
+
+    /// Atomically admit (or reject) the once-only extraction of a packet, keyed by
+    /// its identity `(from_num, packet_id)`, against the sliding `windowSeconds`
+    /// window — the DURABLE companion to the pipeline's in-memory `DedupWindow`,
+    /// which is recreated each `run()` and so cannot span a reconnect.
+    ///
+    /// Returns `true` when this is the first sighting within the window (proceed to
+    /// extract telemetry/position/message) and `false` when the same identity was
+    /// extracted less than `windowSeconds` ago (skip — a re-delivery). A first
+    /// sighting OR an expired one records/slides the ledger row; expired rows are
+    /// pruned so the ledger stays bounded. This intentionally lets the SAME identity
+    /// recur after the window (legitimate packet-id reuse) — the bug the v5 permanent
+    /// unique index caused (Finding 5).
+    public func admitExtraction(
+        packetID: Int64,
+        fromNum: Int64,
+        at instant: Instant,
+        windowSeconds: Double = 600
+    ) async throws -> Bool {
+        let key = "\(fromNum):\(packetID)"
+        let now = instant.nanosecondsSinceEpoch
+        let windowNanos = Int64((windowSeconds * 1_000_000_000).rounded())
+        return try await writer.write { db in
+            // Prune everything older than the window relative to `now` (bounded size).
+            try db.execute(
+                sql: "DELETE FROM \(Table.dedupSeen) WHERE last_seen_at < ?",
+                arguments: [now - windowNanos]
+            )
+            let previous = try Int64.fetchOne(
+                db,
+                sql: "SELECT last_seen_at FROM \(Table.dedupSeen) WHERE key = ?",
+                arguments: [key]
+            )
+            if let previous, now - previous <= windowNanos {
+                // Seen within the window — a duplicate. Slide the window forward.
+                try db.execute(
+                    sql: "UPDATE \(Table.dedupSeen) SET last_seen_at = ? WHERE key = ?",
+                    arguments: [now, key]
+                )
+                return false
+            }
+            // First sighting (or the prior one expired): record/refresh and admit.
+            try db.execute(
+                sql: """
+                INSERT INTO \(Table.dedupSeen) (key, last_seen_at) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET last_seen_at = excluded.last_seen_at
+                """,
+                arguments: [key, now]
+            )
+            return true
         }
     }
 
-    public func positionFixes(forNode nodeNum: Int64) async throws -> [PositionFixRecord] {
+    public func telemetry(forNode nodeNum: Int64) async throws -> [TelemetryRecord] {
         try await writer.read { db in
-            try PositionFixRecord
+            try TelemetryRecord
                 .filter(Column("node_num") == nodeNum)
                 .order(Column("t"))
                 .fetchAll(db)

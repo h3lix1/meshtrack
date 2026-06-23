@@ -48,7 +48,7 @@ struct DecodePerfTests {
         let perSecond = Double(iterations) / max(seconds, 1e-9)
 
         // Generous floor (real throughput is ~100k+/sec); a regression below this
-        // signals something badly wrong. Budget tracked in scoreboard.json.
+        // signals something badly wrong.
         #expect(perSecond > 5000, "decode throughput \(Int(perSecond)) msgs/sec is below the 5000 budget")
     }
 }

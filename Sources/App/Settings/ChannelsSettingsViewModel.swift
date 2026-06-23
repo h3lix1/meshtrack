@@ -1,0 +1,372 @@
+// ChannelsSettingsViewModel — the Channels & Keys settings screen's presentation
+// logic (Phase 8, T-Channels). Manages the operator's MQTT + local channels and
+// their PSKs (SPEC §2.5; §10: MQTT uncapped, 7 local).
+//
+// The PSK bytes themselves never live in this view model and are never echoed back
+// as plaintext after entry — they flow straight through the `ChannelKeyManaging`
+// port into the local key store, and the UI only ever sees a "key set / no key" flag.
+//
+// This file owns its own port (`ChannelKeyManaging`) so the App library does not
+// depend on `Crypto`/`Persistence`: the lead adapts the real `DatabaseKeyStore` to it
+// at integration. An in-file `InMemoryChannelKeyManager` backs tests and the preview.
+
+import Domain
+import Foundation
+import Observation
+
+/// Whether a channel is carried over the MQTT broker or the locally-attached node.
+/// The local device firmware caps at 7 channels (SPEC §10); MQTT is broker-side and
+/// effectively unbounded — the operator may subscribe to as many channels as they
+/// hold keys for, so it carries no UI cap.
+public enum ChannelKind: String, Sendable, Equatable, CaseIterable, Codable {
+    case mqtt
+    case local
+
+    /// The maximum number of channels of this kind the config allows. The local
+    /// radio firmware is hard-capped at 7; MQTT is effectively unlimited
+    /// (`Int.max`), so its section shows a plain count rather than an "X / N" cap.
+    public var capacity: Int {
+        switch self {
+        case .mqtt: .max
+        case .local: 7
+        }
+    }
+
+    /// Whether this kind enforces a finite, user-visible capacity. MQTT does not.
+    public var hasFiniteCapacity: Bool {
+        capacity != .max
+    }
+
+    public var title: String {
+        switch self {
+        case .mqtt: "MQTT Channels"
+        case .local: "Local Channels"
+        }
+    }
+}
+
+/// One channel as shown in the settings list. Non-secret: it carries the channel's
+/// name, its Meshtastic channel hash (`MeshPacket.channel`), its kind, and only a
+/// *flag* for whether a PSK is held — never the PSK bytes.
+public struct ChannelEntry: Sendable, Equatable, Identifiable {
+    public var id: UInt32 {
+        hash
+    }
+
+    public let name: String
+    public let hash: UInt32
+    public let kind: ChannelKind
+    /// True when a PSK is held in the local key store for this channel. Drives the
+    /// "key set" vs "no key" status; the plaintext is never surfaced.
+    public let hasKey: Bool
+
+    public init(name: String, hash: UInt32, kind: ChannelKind, hasKey: Bool) {
+        self.name = name
+        self.hash = hash
+        self.kind = kind
+        self.hasKey = hasKey
+    }
+}
+
+/// Port: read/list/set/delete a `ChannelKey` per channel, plus the list of known
+/// channels. Kept in the App layer (not Crypto) so the library's dependency graph
+/// stays `Domain`/`Persistence`/`RuleEngine`/`Provisioning` only; the lead adapts
+/// the real `DatabaseKeyStore` (which already has `store`/`removeKey`/`key`) plus a
+/// channel registry to this protocol at integration.
+///
+/// Secrets contract (SPEC §2.5): implementations persist PSKs in the local app store
+/// and never log them. The view model passes `ChannelKey` straight through and never
+/// retains it. All methods are `async` so the port can be backed by the local key
+/// store and an asynchronous channel registry (`app_config`) without blocking the
+/// `@MainActor` view model.
+public protocol ChannelKeyManaging: Sendable {
+    /// Every channel the operator has configured, in stable order.
+    func channels() async throws -> [ChannelEntry]
+    /// Register (or replace) a channel by `name`/`hash`/`kind`. Does not set a key.
+    func addChannel(name: String, hash: UInt32, kind: ChannelKind) async throws
+    /// Remove a channel and any key held for it.
+    func removeChannel(hash: UInt32) async throws
+    /// Whether a PSK is currently held for `hash`.
+    func hasKey(forChannelHash hash: UInt32) async -> Bool
+    /// Store or rotate the PSK for `hash`. Throws to surface a precise failure
+    /// without ever including the secret bytes.
+    func setKey(_ key: ChannelKey, forChannelHash hash: UInt32) async throws
+    /// Remove the PSK for `hash`, leaving the channel registered but keyless.
+    func clearKey(forChannelHash hash: UInt32) async throws
+}
+
+/// Typed failures surfaced to the UI. None of these carry secret material.
+public enum ChannelsSettingsError: Error, Equatable, Sendable {
+    /// The kind is already at its SPEC §10 capacity (20 MQTT / 7 local).
+    case capacityReached(ChannelKind)
+    /// The channel name was empty after trimming.
+    case emptyName
+    /// A channel with the derived/entered hash already exists.
+    case duplicateChannel
+    /// The entered channel hash was not a byte value (hex/decimal in `0...255`).
+    case invalidChannelHash
+    /// The supplied PSK text was not valid base64 / a known shortcut.
+    case invalidKey
+    /// The underlying key store failed (e.g. a database write error). Carries a
+    /// redacted description only — never the secret.
+    case storeFailed(String)
+}
+
+@MainActor
+@Observable
+public final class ChannelsSettingsViewModel {
+    /// MQTT channels (capped at 20, SPEC §10).
+    public private(set) var mqttChannels: [ChannelEntry] = []
+    /// Local-device channels (capped at 7, SPEC §10).
+    public private(set) var localChannels: [ChannelEntry] = []
+    /// The last error to surface in the UI, cleared on the next successful action.
+    public private(set) var lastError: ChannelsSettingsError?
+
+    @ObservationIgnored private let keys: any ChannelKeyManaging
+    /// Set once we've seeded (or attempted to seed) the out-of-the-box default
+    /// channel, so a subsequent `load()` over an empty registry never re-seeds —
+    /// in particular after the operator deletes the default channel this session.
+    @ObservationIgnored private var didSeedDefault = false
+    /// Hashes the operator pinned to an explicit observed wire value (via `hashText`)
+    /// this session. Those are ground truth from the wire, so setting a custom PSK
+    /// must NOT re-derive/move them (Finding 15) — only name-derived channels migrate.
+    @ObservationIgnored private var pinnedHashes: Set<UInt32> = []
+
+    /// The channel seeded on first run so the app decodes public traffic out of the
+    /// box: the public **MediumFast** channel keyed with the well-known `"AQ=="`
+    /// default PSK (SPEC §1, §10). MQTT-kind so it rides the broker.
+    public static let defaultChannelName = "MediumFast"
+    public static let defaultChannelKind: ChannelKind = .mqtt
+
+    public init(keys: any ChannelKeyManaging) {
+        self.keys = keys
+    }
+
+    /// Load (or refresh) the channel list from the port. Call this from `.task` /
+    /// `.onAppear`. Failures surface in `lastError` rather than throwing to the UI.
+    ///
+    /// On the very first load over an empty registry this seeds a default
+    /// MediumFast channel keyed with the default PSK so the app works out of the
+    /// box. The seed runs at most once per session (`didSeedDefault`), so deleting
+    /// the default channel does not bring it back on the next refresh.
+    public func load() async {
+        await reload()
+        await seedDefaultChannelIfNeeded()
+    }
+
+    // MARK: - Derived state
+
+    /// Whether another channel of `kind` may be added (under the SPEC §10 cap).
+    public func canAdd(_ kind: ChannelKind) -> Bool {
+        channels(for: kind).count < kind.capacity
+    }
+
+    /// Capacity label for a section header. Finite kinds show "3 / 7"; the
+    /// uncapped MQTT kind shows a plain count ("3 channels") with no cap.
+    public func capacityLabel(for kind: ChannelKind) -> String {
+        let count = channels(for: kind).count
+        guard kind.hasFiniteCapacity else {
+            return count == 1 ? "1 channel" : "\(count) channels"
+        }
+        return "\(count) / \(kind.capacity)"
+    }
+
+    private func channels(for kind: ChannelKind) -> [ChannelEntry] {
+        switch kind {
+        case .mqtt: mqttChannels
+        case .local: localChannels
+        }
+    }
+
+    /// A live preview of the on-wire hash the add flow will derive for `name`,
+    /// using the default PSK (a fresh channel is keyless until a key is rotated in,
+    /// so it decodes default traffic). Returns `nil` for an empty/whitespace name so
+    /// the UI can hide the preview until the operator has typed something. This is
+    /// the same value `addChannel` computes when no explicit hash is entered, so the
+    /// preview never disagrees with what actually gets added.
+    public func derivedHash(forName name: String) -> UInt32? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+    }
+
+    // MARK: - Mutations
+
+    /// Add a channel by `name`, optionally with an explicit on-wire hash.
+    ///
+    /// When `hashText` is empty the hash is *derived* from the name with the default
+    /// PSK, so a fresh channel decodes default traffic until a key is rotated in.
+    /// When `hashText` is non-empty it is parsed (hex or decimal byte), letting the
+    /// operator match a channel they have already observed on the wire. The channel
+    /// starts keyless (`hasKey == false`) until a PSK is set.
+    public func addChannel(name: String, hashText: String = "", kind: ChannelKind) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            lastError = .emptyName
+            return
+        }
+        guard canAdd(kind) else {
+            lastError = .capacityReached(kind)
+            return
+        }
+        let hash: UInt32
+        let isExplicit: Bool
+        if hashText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hash = ChannelKeyMath.channelHash(name: trimmed, psk: ChannelKeyMath.defaultPSK)
+            isExplicit = false
+        } else {
+            do {
+                hash = try ChannelKeyMath.parseChannelHash(hashText)
+                isExplicit = true
+            } catch let error as ChannelsSettingsError {
+                lastError = error
+                return
+            } catch {
+                lastError = .invalidChannelHash
+                return
+            }
+        }
+        guard !channelExists(hash: hash) else {
+            lastError = .duplicateChannel
+            return
+        }
+        await perform { try await keys.addChannel(name: trimmed, hash: hash, kind: kind) }
+        // Remember operator-pinned hashes so a later custom PSK does not re-derive
+        // them off the wire value they were observed at.
+        if isExplicit, lastError == nil {
+            pinnedHashes.insert(hash)
+        }
+    }
+
+    /// Set or rotate the PSK for `hash` from user-entered text. Accepts base64 or
+    /// the `"AQ=="` default-key shortcut. The plaintext never returns to the UI.
+    ///
+    /// The on-wire Meshtastic channel hash is derived from BOTH the channel name AND
+    /// the PSK (`xorHash(name) ^ xorHash(psk)`), so a channel created by name alone
+    /// is registered under the *default*-PSK hash. Storing a custom PSK there would
+    /// leave the key filed under a hash the radios never put on the wire — live
+    /// decode would miss it (Finding 15). So when a channel was auto-derived under
+    /// the default PSK, applying a *different* PSK re-keys it under the correct,
+    /// custom-PSK-derived hash. Channels the operator pinned to an explicit observed
+    /// hash are left where they are: that hash is ground truth from the wire, and the
+    /// name⊕psk fold cannot be assumed to reproduce it.
+    public func setKey(forChannelHash hash: UInt32, pskText: String) async {
+        let psk: [UInt8]
+        do {
+            psk = try ChannelKeyMath.parsePSK(pskText)
+        } catch let error as ChannelsSettingsError {
+            lastError = error
+            return
+        } catch {
+            lastError = .invalidKey
+            return
+        }
+        await store(ChannelKey(psk: psk), forChannelHash: rekeyedHash(forChannelHash: hash, psk: psk))
+    }
+
+    /// The hash a channel should live under once `psk` is applied to it.
+    ///
+    /// For a name-derived channel the correct on-wire hash is `channelHash(name,
+    /// psk)`: a channel created by name alone sits under the *default*-PSK hash, but
+    /// the radios derive the hash from the channel's *actual* PSK, so applying a
+    /// custom PSK migrates the channel to the recomputed hash (registered under the
+    /// new hash, the stale row removed) so the subsequent `setKey` files the PSK
+    /// where live traffic will look for it. This also re-derives correctly on every
+    /// rotation. Returns `hash` unchanged for the default PSK (the recomputed hash
+    /// matches) and for operator-pinned explicit hashes, which are ground truth from
+    /// the wire and must not move.
+    private func rekeyedHash(forChannelHash hash: UInt32, psk: [UInt8]) async -> UInt32 {
+        // Operator-pinned explicit hashes are the observed wire value — never re-derive.
+        guard !pinnedHashes.contains(hash) else { return hash }
+        guard let entry = entry(forChannelHash: hash) else { return hash }
+        let customDerived = ChannelKeyMath.channelHash(name: entry.name, psk: psk)
+        guard customDerived != hash else { return hash }
+        // The new hash must be free; if it collides with an existing channel, keep
+        // the key under the current hash rather than clobbering an unrelated row.
+        guard !channelExists(hash: customDerived) else { return hash }
+        do {
+            try await keys.addChannel(name: entry.name, hash: customDerived, kind: entry.kind)
+            try await keys.removeChannel(hash: hash)
+            await reload()
+            return customDerived
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+            return hash
+        }
+    }
+
+    private func entry(forChannelHash hash: UInt32) -> ChannelEntry? {
+        mqttChannels.first { $0.hash == hash } ?? localChannels.first { $0.hash == hash }
+    }
+
+    /// Apply the well-known default PSK to `hash` (the "use default PSK" toggle /
+    /// shortcut). Equivalent to entering `"AQ=="`.
+    public func useDefaultKey(forChannelHash hash: UInt32) async {
+        await store(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
+    }
+
+    /// Remove the PSK for `hash`, leaving the channel registered but keyless.
+    public func clearKey(forChannelHash hash: UInt32) async {
+        await perform { try await keys.clearKey(forChannelHash: hash) }
+    }
+
+    /// Remove a channel entirely (and any key held for it).
+    public func removeChannel(hash: UInt32) async {
+        await perform { try await keys.removeChannel(hash: hash) }
+    }
+
+    // MARK: - Helpers
+
+    private func store(_ key: ChannelKey, forChannelHash hash: UInt32) async {
+        await perform { try await keys.setKey(key, forChannelHash: hash) }
+    }
+
+    /// Run a port mutation, then refresh. On failure, surface a redacted
+    /// `storeFailed` — `String(describing:)` of our typed errors carries no secret.
+    private func perform(_ mutation: () async throws -> Void) async {
+        do {
+            try await mutation()
+            lastError = nil
+            await reload()
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+        }
+    }
+
+    private func channelExists(hash: UInt32) -> Bool {
+        mqttChannels.contains { $0.hash == hash } || localChannels.contains { $0.hash == hash }
+    }
+
+    /// First-run seeding: when the registry is empty (and we have not already seeded
+    /// this session) register the default MediumFast channel and key it with the
+    /// default PSK, so a fresh install decodes public traffic immediately. Idempotent
+    /// — guarded by `didSeedDefault` so it never re-runs, and a no-op when the
+    /// operator already has any channels.
+    private func seedDefaultChannelIfNeeded() async {
+        guard !didSeedDefault else { return }
+        didSeedDefault = true
+        guard mqttChannels.isEmpty, localChannels.isEmpty else { return }
+
+        let name = Self.defaultChannelName
+        let kind = Self.defaultChannelKind
+        let hash = ChannelKeyMath.channelHash(name: name, psk: ChannelKeyMath.defaultPSK)
+        do {
+            try await keys.addChannel(name: name, hash: hash, kind: kind)
+            try await keys.setKey(ChannelKey(psk: ChannelKeyMath.defaultPSK), forChannelHash: hash)
+            lastError = nil
+            await reload()
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+        }
+    }
+
+    private func reload() async {
+        do {
+            let all = try await keys.channels()
+            mqttChannels = all.filter { $0.kind == .mqtt }
+            localChannels = all.filter { $0.kind == .local }
+        } catch {
+            lastError = .storeFailed(String(describing: error))
+        }
+    }
+}

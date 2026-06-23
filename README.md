@@ -7,17 +7,16 @@ nodes on a map, arms them for movement, and provisions them from templates — w
 an alerting engine for movement, silence, and battery.
 
 Built test-first behind a hexagonal architecture so the core is deterministic and
-CI-testable headlessly. See **[SPEC.md](SPEC.md)** for the contract,
-**[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** for the task queue, and
-**[AGENTS.md](AGENTS.md)** for the engineering guardrails and build-loop contract.
+CI-testable headlessly. See **[SPEC.md](SPEC.md)** for the contract and
+**[AGENTS.md](AGENTS.md)** for the engineering guardrails.
 
 ## Quickstart
 
 ```bash
-make bootstrap   # install dev tooling (swiftformat, swiftlint, muter)
-make verify      # run the full gate suite — the only validator the loop trusts
+make bootstrap   # install dev tooling (swiftformat, swiftlint)
+make verify      # run the full gate suite
 make run         # run the meshtrackd collector
-make loop        # run the autonomous Ralph build loop
+make app         # build a double-clickable Meshtrack.app
 ```
 
 Requires macOS 26 / Swift 6.2 (Xcode 26).
@@ -35,11 +34,10 @@ Requires macOS 26 / Swift 6.2 (Xcode 26).
 | `Sources/Scenario` | Acceptance harness: scenario DSL parser + runner. |
 | `Sources/App` | SwiftUI viewer/controller. |
 | `Sources/meshtrackd` | Headless collector (composition root + LaunchAgent). |
-| `scripts/` | Gate scripts + the Ralph loop driver. |
-| `docs/adr/` | Architecture decision records. |
+| `scripts/` | Gate scripts (coverage, perf, secrets, protobuf codegen). |
 
 ## Architecture
 
 Hexagonal / ports-and-adapters. `Domain` is pure and deterministic; all time
 enters through the `Clock` port. The collector and UI are split so liveness/battery
-alerting runs 24/7 over a shared store. See [docs/adr/](docs/adr/).
+alerting runs 24/7 over a shared store.

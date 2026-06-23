@@ -52,15 +52,31 @@ public struct AlertCondition: Sendable, Equatable {
 
 public enum RuleEvaluator {
     /// The liveness + battery/voltage conditions that hold for `snapshot` now.
+    ///
+    /// - Parameter management: the node's ownership classification (SPEC §2.10,
+    ///   ADR 0008). **Ownership-sensitive rules — `stale`, `battery_below`,
+    ///   `voltage_below` — evaluate only when the node is managed**, so we never
+    ///   raise battery/silence alerts for strangers' nodes. The node → class →
+    ///   global config hierarchy is unchanged: this gate is applied *after*
+    ///   resolution, never altering it. **Required, with no default**: omitting a
+    ///   node's ownership must be a compile error, never a silent "treat as
+    ///   managed" that fires stale/battery alerts for unclassified strangers
+    ///   (ADR 0008 — Domain defaults a fresh node to ``NodeManagement/unowned``).
     public static func conditions(
         for snapshot: NodeSnapshot,
         rules: RuleSet,
-        now: Instant
+        now: Instant,
+        management: NodeManagement
     ) -> [AlertCondition] {
         var conditions: [AlertCondition] = []
-        if let condition = staleCondition(snapshot, rules: rules, now: now) { conditions.append(condition) }
-        if let condition = batteryCondition(snapshot, rules: rules) { conditions.append(condition) }
-        if let condition = voltageCondition(snapshot, rules: rules) { conditions.append(condition) }
+        // Ownership-sensitive rules: skipped entirely for unmanaged nodes.
+        if management.evaluatesOwnershipRules {
+            if let condition = staleCondition(snapshot, rules: rules, now: now) {
+                conditions.append(condition)
+            }
+            if let condition = batteryCondition(snapshot, rules: rules) { conditions.append(condition) }
+            if let condition = voltageCondition(snapshot, rules: rules) { conditions.append(condition) }
+        }
         return conditions
     }
 

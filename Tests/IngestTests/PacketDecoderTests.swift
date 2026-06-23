@@ -73,6 +73,33 @@ struct PacketDecoderTests {
     }
 
     @Test
+    func `rxTime uses our receipt clock, keeping the node's claimed time separate`() throws {
+        // Firmware stamps its own RTC (100s); we received the frame later, at 105s.
+        let bytes = try envelope { packet in
+            packet.decoded = dataMessage(port: .telemetryApp, payload: [0x01])
+            packet.rxTime = 100
+        }
+        let decoder = PacketDecoder(keyStore: FakeKeyStore(), decryptor: FixedDecryptor(plaintext: []))
+        let packet = try #require(try decoder.decode(serviceEnvelope: bytes, receivedAt: at(105)))
+        // The canonical packet time ignores the (often-skewed) firmware clock …
+        #expect(packet.rxTime == at(105))
+        // … while the node's claimed time is preserved for descriptive latency only.
+        #expect(packet.nodeRxTime == at(100))
+    }
+
+    @Test
+    func `nodeRxTime is nil when the firmware omits its receive time`() throws {
+        let bytes = try envelope { packet in
+            packet.decoded = dataMessage(port: .telemetryApp, payload: [0x01])
+            // packet.rxTime left at 0 (omitted)
+        }
+        let decoder = PacketDecoder(keyStore: FakeKeyStore(), decryptor: FixedDecryptor(plaintext: []))
+        let packet = try #require(try decoder.decode(serviceEnvelope: bytes, receivedAt: at(7)))
+        #expect(packet.rxTime == at(7))
+        #expect(packet.nodeRxTime == nil)
+    }
+
+    @Test
     func `carries relay-node + next-hop + gateway id for trace reconstruction`() throws {
         let bytes = try envelope { packet in
             packet.decoded = dataMessage(port: .telemetryApp, payload: [0x01])

@@ -30,4 +30,6 @@ jobs:
 
       # CI installs everything and enforces every gate (no skips).
       - name: make verify
+        env:
+          CI: "true"
         run: make verify

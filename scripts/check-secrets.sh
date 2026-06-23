@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Secret scan. Uses gitleaks when present, otherwise a built-in pattern scan.
-# Secrets (PSKs, admin keys, MQTT creds) belong in Keychain, never in the repo.
+# Secrets (PSKs, admin keys, MQTT creds) belong in the app's local store at runtime,
+# never committed to the repo.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
