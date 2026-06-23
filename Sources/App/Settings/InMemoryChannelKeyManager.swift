@@ -1,13 +1,13 @@
 // InMemoryChannelKeyManager — the test/preview backing for the Channels & Keys
 // screen's `ChannelKeyManaging` port. Split out of `ChannelsSettingsViewModel`
 // so the production view-model file stays focused on presentation logic; the live
-// path is the lead's Keychain-backed adapter, not this fake.
+// path is the local SQLite-backed adapter, not this fake.
 
 import Domain
 
 /// In-memory `ChannelKeyManaging` for tests and the preview. Holds channel
-/// metadata and PSK bytes in process memory only — no Keychain, no logging. The
-/// production path is the lead's `KeychainKeyStore` adapter.
+/// metadata and PSK bytes in process memory only — no durable store, no logging. The
+/// production path is the `LocalChannelManager` over `DatabaseKeyStore`.
 ///
 /// Implemented as an `actor` so its mutable state is isolated without locks and it
 /// satisfies the `async` `ChannelKeyManaging` port directly.

@@ -1,14 +1,14 @@
 // ChannelsSettingsViewModel — the Channels & Keys settings screen's presentation
 // logic (Phase 8, T-Channels). Manages the operator's MQTT + local channels and
-// their PSKs (SPEC §2.5: PSKs are secrets → Keychain; §10/ADR 0009: MQTT uncapped, 7 local).
+// their PSKs (SPEC §2.5; §10: MQTT uncapped, 7 local).
 //
 // The PSK bytes themselves never live in this view model and are never echoed back
 // as plaintext after entry — they flow straight through the `ChannelKeyManaging`
-// port into the Keychain, and the UI only ever sees a "key set / no key" flag.
+// port into the local key store, and the UI only ever sees a "key set / no key" flag.
 //
 // This file owns its own port (`ChannelKeyManaging`) so the App library does not
-// depend on `Crypto`: the lead adapts the real `KeychainKeyStore` to it at
-// integration. An in-file `InMemoryChannelKeyManager` backs tests and the preview.
+// depend on `Crypto`/`Persistence`: the lead adapts the real `DatabaseKeyStore` to it
+// at integration. An in-file `InMemoryChannelKeyManager` backs tests and the preview.
 
 import Domain
 import Foundation
@@ -56,7 +56,7 @@ public struct ChannelEntry: Sendable, Equatable, Identifiable {
     public let name: String
     public let hash: UInt32
     public let kind: ChannelKind
-    /// True when a PSK is held in the Keychain for this channel. Drives the
+    /// True when a PSK is held in the local key store for this channel. Drives the
     /// "key set" vs "no key" status; the plaintext is never surfaced.
     public let hasKey: Bool
 
@@ -71,16 +71,14 @@ public struct ChannelEntry: Sendable, Equatable, Identifiable {
 /// Port: read/list/set/delete a `ChannelKey` per channel, plus the list of known
 /// channels. Kept in the App layer (not Crypto) so the library's dependency graph
 /// stays `Domain`/`Persistence`/`RuleEngine`/`Provisioning` only; the lead adapts
-/// the real `KeychainKeyStore` (which already has `store`/`removeKey`/`key`) plus a
+/// the real `DatabaseKeyStore` (which already has `store`/`removeKey`/`key`) plus a
 /// channel registry to this protocol at integration.
 ///
-/// Secrets contract (SPEC §2.5): implementations persist PSKs in the Keychain only,
-/// never the DB, and never log them. The view model passes `ChannelKey` straight
-/// through and never retains it.
-/// All methods are `async` so the port can be backed by the Keychain and an
-/// asynchronous channel registry (`app_config`) without blocking the `@MainActor`
-/// view model — the previous synchronous shape is exactly what kept this tab
-/// from being wired to the real `KeychainKeyStore`.
+/// Secrets contract (SPEC §2.5): implementations persist PSKs in the local app store
+/// and never log them. The view model passes `ChannelKey` straight through and never
+/// retains it. All methods are `async` so the port can be backed by the local key
+/// store and an asynchronous channel registry (`app_config`) without blocking the
+/// `@MainActor` view model.
 public protocol ChannelKeyManaging: Sendable {
     /// Every channel the operator has configured, in stable order.
     func channels() async throws -> [ChannelEntry]
@@ -109,8 +107,8 @@ public enum ChannelsSettingsError: Error, Equatable, Sendable {
     case invalidChannelHash
     /// The supplied PSK text was not valid base64 / a known shortcut.
     case invalidKey
-    /// The underlying key store failed (e.g. Keychain error). Carries a redacted
-    /// description only — never the secret.
+    /// The underlying key store failed (e.g. a database write error). Carries a
+    /// redacted description only — never the secret.
     case storeFailed(String)
 }
 

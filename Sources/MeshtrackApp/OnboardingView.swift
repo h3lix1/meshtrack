@@ -65,7 +65,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Connect a broker to go live. Your credentials stay in the Keychain "
+            Text("Connect a broker to go live. Your credentials stay on this Mac "
                 + "and are never logged.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)

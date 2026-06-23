@@ -32,11 +32,15 @@ import SwiftUI
 @main
 struct MeshtrackApp: App {
     /// The shared on-disk store: the `ConfigGateway` (settings persist across
-    /// launches) AND the live-ingest store. Secrets never touch it — the broker
-    /// password lives in the Keychain via `CredentialStore` (SPEC §2.5).
+    /// launches), the `CredentialStore`/`KeyStore` (broker password + channel PSKs,
+    /// stored locally in `app_config` — these are already-public secrets), AND the
+    /// live-ingest store.
     private let store: MeshStore
     private let configGateway: any ConfigGateway
     private let credentialStore: any CredentialStore
+    /// The on-device channel-PSK store, shared between the Channels & Keys screen and
+    /// the live decoder so a key registered in Settings decodes without a relaunch.
+    private let channelKeyStore: DatabaseKeyStore
     /// The persisted data-source selection (MQTT broker vs locally-attached node).
     /// Non-secret; backed by the shared `MeshStore` `app_config` table so it lives in
     /// the same durable store as the rest of the config (Finding 23). Concrete type so
@@ -71,10 +75,12 @@ struct MeshtrackApp: App {
         let store = Self.openStore()
         self.store = store
         let gateway: any ConfigGateway = store // MeshStore conforms to ConfigGateway
-        let credentials: any CredentialStore = KeychainCredentialStore()
+        let credentials: any CredentialStore = DatabaseCredentialStore(store)
+        let channelKeys = DatabaseKeyStore(store)
         let dataSources = MeshStoreDataSourceStore(store: store)
         configGateway = gateway
         credentialStore = credentials
+        channelKeyStore = channelKeys
         dataSourceStore = dataSources
 
         // Register the Settings tabs EAGERLY, before the Settings window first
@@ -87,6 +93,7 @@ struct MeshtrackApp: App {
             on: model,
             ports: ConfigPorts(gateway: gateway, credentials: credentials, dataSources: dataSources),
             store: store,
+            channelKeys: channelKeys,
             themeController: themeController,
             revision: revision
         )
@@ -128,6 +135,7 @@ struct MeshtrackApp: App {
                         store: store,
                         gateway: configGateway,
                         credentials: credentialStore,
+                        channelKeys: channelKeyStore,
                         dataSources: dataSourceStore,
                         revision: configRevision,
                         openConnectionSettings: openConnectionSettings
@@ -184,6 +192,7 @@ struct MeshtrackApp: App {
         on model: SettingsModel,
         ports: ConfigPorts,
         store: MeshStore,
+        channelKeys: DatabaseKeyStore,
         themeController: ThemeController,
         revision: LiveConfigRevision
     ) {
@@ -198,7 +207,7 @@ struct MeshtrackApp: App {
         }
         model.register(.channels) {
             AnyView(ChannelsSettingsView(viewModel: ChannelsSettingsViewModel(
-                keys: KeychainChannelManager(store: store)
+                keys: LocalChannelManager(keys: channelKeys, store: store)
             )))
         }
         model.register(.general) {
@@ -219,10 +228,10 @@ struct MeshtrackApp: App {
     }
 }
 
-/// The non-secret configuration ports the settings screens + live wiring program
-/// against, bundled so they pass as one argument: the `ConfigGateway` (broker config /
-/// app settings), the `CredentialStore` (the broker password, in Keychain), and the
-/// `DataSourceStore` (the MQTT-vs-local-node selection, in UserDefaults).
+/// The configuration ports the settings screens + live wiring program against,
+/// bundled so they pass as one argument: the `ConfigGateway` (broker config / app
+/// settings), the `CredentialStore` (the broker password, in the local app_config
+/// store), and the `DataSourceStore` (the MQTT-vs-local-node selection, in UserDefaults).
 struct ConfigPorts {
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
@@ -249,6 +258,9 @@ struct ContentView: View {
     let store: MeshStore
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
+    /// The shared on-device channel-PSK store, handed to the live coordinator so its
+    /// decoder reads the same keys the Channels & Keys screen writes.
+    let channelKeys: DatabaseKeyStore
     /// Concrete so the view can `hydrate()` the persisted selection from `app_config`
     /// before resolving the live source (Finding 23).
     let dataSources: MeshStoreDataSourceStore
@@ -329,7 +341,8 @@ struct ContentView: View {
         let settings = await (try? gateway.loadAppSettings()) ?? .default
         let live = coordinator ?? LiveCoordinator(
             store: store,
-            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+            refreshInterval: .seconds(settings.refreshIntervalSeconds),
+            channelKeyStore: channelKeys
         )
         coordinator = live
         let allowAutoStart = LiveStartupPolicy.shouldConnectOnLaunch(
@@ -358,7 +371,8 @@ struct ContentView: View {
         ) != nil
         let live = coordinator ?? LiveCoordinator(
             store: store,
-            refreshInterval: .seconds(settings.refreshIntervalSeconds)
+            refreshInterval: .seconds(settings.refreshIntervalSeconds),
+            channelKeyStore: channelKeys
         )
         coordinator = live
         await live.connect(gateway: gateway, credentials: credentials, dataSourceStore: dataSources)
@@ -366,8 +380,8 @@ struct ContentView: View {
     }
 
     /// One-time bootstrap: if nothing is saved yet but the legacy `MESHTRACK_MQTT_*`
-    /// env fallback is present, persist it into the store (+ Keychain) so the saved-
-    /// config path takes over uniformly — handy for `meshtrackd`/CI/one-shot smokes.
+    /// env fallback is present, persist it into the local store (config + password) so
+    /// the saved-config path takes over uniformly — handy for `meshtrackd`/CI/smokes.
     @MainActor private func seedFromEnvIfNeeded() async {
         guard await (try? gateway.loadBrokerConfig()) == nil,
               let env = LiveBrokerSettings.fromEnvironment() else { return }

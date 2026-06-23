@@ -35,7 +35,7 @@ struct PlaceholderSettingsTab: View {
             "Broker host, port, TLS, credentials, and subscribe topics. "
                 + "Saving a connectable broker takes the app live."
         case .channels:
-            "Channels and PSKs (Keychain-stored). Up to 20 MQTT / 7 local channels."
+            "Channels and PSKs (stored locally). Up to 20 MQTT / 7 local channels."
         case .general:
             "Refresh cadence, units, retention, notifications, launch-at-login, auto-connect."
         case .alerts:
@@ -56,7 +56,7 @@ struct AboutSettingsTab: View {
             Text("Native macOS monitoring + control for Meshtastic fleets.")
                 .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
-            Text("Credentials and channel keys live in the Keychain and are never logged.")
+            Text("Credentials and channel keys are stored locally on this Mac and never logged.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
         }

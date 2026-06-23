@@ -4,9 +4,9 @@ import Testing
 
 @Suite("ChannelKeyResolver — custom PSK by hash, default-PSK fallback")
 struct ChannelKeyResolverTests {
-    /// A stand-in for the live Keychain channel registry: holds per-channel PSKs
-    /// keyed by channel hash, exactly the shape `KeychainKeyStore` presents to the
-    /// resolver. Returns `nil` for an unregistered hash so the fallback engages.
+    /// A stand-in for the live channel registry: holds per-channel PSKs keyed by
+    /// channel hash, exactly the shape `DatabaseKeyStore` presents to the resolver.
+    /// Returns `nil` for an unregistered hash so the fallback engages.
     private struct RegistryFake: KeyStore {
         let keysByHash: [UInt32: ChannelKey]
         func key(forChannelHash channelHash: UInt32) -> ChannelKey? {

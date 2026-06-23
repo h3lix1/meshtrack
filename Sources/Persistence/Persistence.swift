@@ -4,8 +4,9 @@
 // This module is the `Store` adapter in the hexagonal architecture: the outer
 // ring owns SQLite/GRDB, the Domain stays pure. Timestamps cross the boundary
 // as `Domain.Instant` (Int64 nanoseconds since the Unix epoch) and are persisted
-// verbatim as `INTEGER`. Secrets (channel PSKs, admin keys, MQTT creds) live in
-// Keychain and are NEVER stored here (SPEC §2.5).
+// verbatim as `INTEGER`. The already-public channel PSKs and MQTT password are kept
+// locally in the `app_config` table (`DatabaseKeyStore` / `DatabaseCredentialStore`),
+// not the system Keychain; they are never logged.
 //
 // Public surface:
 //   - `MeshStore`             — the actor-safe store API later phases use.

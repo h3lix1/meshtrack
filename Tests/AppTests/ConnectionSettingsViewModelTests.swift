@@ -3,10 +3,10 @@ import Domain
 import Synchronization
 import Testing
 
-@Suite("ConnectionSettingsViewModel (broker config + Keychain seam)")
+@Suite("ConnectionSettingsViewModel (broker config + credential seam)")
 @MainActor
 struct ConnectionSettingsViewModelTests {
-    /// A seeded secret + its Keychain coordinates.
+    /// A seeded secret + its host/username coordinates.
     private struct SeedPassword {
         let password: String
         let host: String

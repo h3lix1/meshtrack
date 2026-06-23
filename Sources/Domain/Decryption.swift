@@ -1,9 +1,10 @@
 // Decryption + key-management seam (Phase 1, SPEC §2.5). Ports only — the AES
-// implementation and Keychain access live in the `Crypto` adapter; Domain stays
-// pure (no CryptoKit, no Foundation). Secrets never persist to the DB.
+// implementation lives in the `Crypto` adapter and the durable key store in
+// `Persistence`; Domain stays pure (no CryptoKit, no Foundation).
 
 /// A channel pre-shared key. 16 bytes → AES-128, 32 bytes → AES-256. Held only
-/// in memory here; the durable copy lives in Keychain (SPEC §2.5).
+/// in memory here; the durable copy lives in the local `app_config` store
+/// (`DatabaseKeyStore`).
 public struct ChannelKey: Sendable, Equatable {
     public let psk: [UInt8]
 
@@ -12,9 +13,9 @@ public struct ChannelKey: Sendable, Equatable {
     }
 }
 
-/// Port: resolves the channel key for a packet. Production is Keychain-backed
-/// (`KeychainKeyStore`); tests use an in-memory fake. Holds up to 20 MQTT / 7
-/// local channel keys (SPEC §10).
+/// Port: resolves the channel key for a packet. Production is the local
+/// SQLite-backed `DatabaseKeyStore`; tests use an in-memory fake. Holds up to
+/// 20 MQTT / 7 local channel keys (SPEC §10).
 public protocol KeyStore: Sendable {
     /// The key for a Meshtastic channel hash (`MeshPacket.channel`), if held.
     func key(forChannelHash channelHash: UInt32) -> ChannelKey?

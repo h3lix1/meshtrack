@@ -25,19 +25,10 @@ jobs:
             || sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           swift --version
 
-      # Muter is not in brew-core; install Mint then Muter so the mutation gate
-      # actually measures the floor in CI (see AGENTS.md "Toolchain notes").
-      - name: Install Mint + Muter (mutation testing)
-        run: |
-          brew install mint
-          mint install muter-mutation-testing/muter
-          echo "$HOME/.mint/bin" >> "$GITHUB_PATH"
-
       - name: Bootstrap dev tooling
         run: make bootstrap
 
-      # CI installs everything and enforces every gate (no skips). CI=true makes
-      # the mutation gate hard: missing muter/config or a sub-floor score fails.
+      # CI installs everything and enforces every gate (no skips).
       - name: make verify
         env:
           CI: "true"

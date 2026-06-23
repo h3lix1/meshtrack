@@ -17,7 +17,7 @@ public struct TemplateDraft: Sendable, Equatable {
     public var role: String
     public var shortNameDSL: String
     public var longNameDSL: String
-    /// Comma-separated channel names (PSKs live in the Keychain, never here).
+    /// Comma-separated channel names (PSKs live in the local key store, never here).
     public var channels: String
     /// Position broadcast precision in bits; empty = leave unset.
     public var positionPrecision: String

@@ -1,9 +1,8 @@
 // ConnectionSettingsViewModel — presentation logic for the Connection settings
 // screen (Phase 8, SPEC §2.5 / §10). This is the proper UI that replaces the
 // `MESHTRACK_MQTT_*` environment variables: the broker host/port/TLS/topics and a
-// (non-secret) username persist via `ConfigGateway`; the password is a secret and
-// flows only through `CredentialStore` (Keychain) — never into `BrokerConfig`,
-// never logged.
+// (non-secret) username persist via `ConfigGateway`; the password flows only through
+// `CredentialStore` (the local app store) — never into `BrokerConfig`, never logged.
 //
 // A testable `@MainActor @Observable` view model over the two injected ports plus a
 // `test` closure. The real MQTT probe lives in `Transport`, which `App` cannot
@@ -261,7 +260,7 @@ public final class ConnectionSettingsViewModel {
 // module); this file owns only the credential-store fake below.
 
 /// In-memory `CredentialStore` for tests and previews. Keyed by host + username so
-/// multiple brokers/accounts coexist, exactly like the Keychain adapter.
+/// multiple brokers/accounts coexist, exactly like the local `DatabaseCredentialStore`.
 public final class InMemoryCredentialStore: CredentialStore {
     private let passwords = Mutex<[String: String]>([:])
 

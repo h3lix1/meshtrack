@@ -1,7 +1,7 @@
 // Template model (SPEC §2.7). A reusable provisioning template: region (always
-// set — legal), role, channels (PSKs live in Keychain, never here), position
-// config, naming DSL, and an optional firmware variant. Pure; rendering validates
-// the byte limits before anything is applied.
+// set — legal), role, channels (PSKs live in the local key store, never here),
+// position config, naming DSL, and an optional firmware variant. Pure; rendering
+// validates the byte limits before anything is applied.
 
 public struct RenderedNames: Sendable, Equatable {
     public let shortName: String?

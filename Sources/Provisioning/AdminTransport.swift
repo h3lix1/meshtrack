@@ -21,7 +21,7 @@ public enum AdminAuthority: Sendable, Equatable {
     /// The directly-attached radio over USB or BLE — no admin key needed.
     case local
     /// A remote node reached with an installed PKI admin pubkey. The key itself
-    /// lives in the Keychain; this carries only its identifier, never key bytes.
+    /// lives in the local app store; this carries only its identifier, never key bytes.
     case remotePKI(adminKeyID: String)
     /// A remote node reached over the legacy shared admin channel.
     case remoteLegacyChannel(channelName: String)

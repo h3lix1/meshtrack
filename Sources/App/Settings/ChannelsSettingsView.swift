@@ -5,7 +5,7 @@
 // row only ever shows "Key set" vs "No key" (SPEC §2.5).
 //
 // The view is store-free: the lead injects a `ChannelsSettingsViewModel` whose
-// `ChannelKeyManaging` is the real Keychain adapter at integration.
+// `ChannelKeyManaging` is the real local-store adapter at integration.
 
 import Domain
 import SwiftUI
@@ -38,8 +38,8 @@ public struct ChannelsSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Channels & Keys").font(.title.bold()).foregroundStyle(.white)
             Text(
-                "Channel PSKs are stored in the macOS Keychain — never in the database or "
-                    + "logs. Enter or rotate a key to decode that channel's traffic."
+                "Channel PSKs are stored locally on this Mac — never in logs. Enter or "
+                    + "rotate a key to decode that channel's traffic."
             )
             .font(.system(size: 12)).foregroundStyle(.secondary)
         }
@@ -58,7 +58,7 @@ public struct ChannelsSettingsView: View {
         case .invalidKey:
             "Enter a valid base64 PSK (16 or 32 bytes) or \"AQ==\" for the default key."
         case .storeFailed:
-            "Couldn't update the Keychain. Try again."
+            "Couldn't save the key. Try again."
         }
     }
 }

@@ -2,8 +2,8 @@
 import Domain
 import Testing
 
-/// Tests for the in-memory `KeyStore` fake. The Keychain adapter is deliberately
-/// not unit-tested (no keychain in headless/CI runs — see KeychainKeyStore.swift).
+/// Tests for the in-memory `KeyStore` fake. The durable adapter (`DatabaseKeyStore`)
+/// is covered by its own Persistence tests; this exercises the in-process fake.
 @Suite("InMemoryKeyStore")
 struct InMemoryKeyStoreTests {
     @Test
