@@ -21,6 +21,27 @@ make app         # build a double-clickable Meshtrack.app
 
 Requires macOS 26 / Swift 6.2 (Xcode 26).
 
+## Releases
+
+Pushing a version tag builds a signed, notarized macOS app zip and attaches it to
+the GitHub Release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow requires these repository secrets:
+
+| Secret | Value |
+|---|---|
+| `MACOS_CERTIFICATE_P12_BASE64` | Base64-encoded Developer ID Application `.p12`. |
+| `MACOS_CERTIFICATE_PASSWORD` | Password for the `.p12`. |
+| `APPLE_ID` | Apple Developer account email for notarization. |
+| `APPLE_TEAM_ID` | Apple Developer Team ID. |
+| `APPLE_APP_PASSWORD` | App-specific password for notarization. |
+| `MACOS_SIGN_IDENTITY` | Optional exact codesign identity name. |
+
 ## Layout
 
 | Path | What |

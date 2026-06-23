@@ -1,0 +1,117 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos-app:
+    runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Meshtrack targets macOS 26 / Swift 6.2. Prefer Xcode 26 when the runner has it.
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.app 2>/dev/null \
+            || sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
+
+      - name: Validate signing secrets
+        run: |
+          set -euo pipefail
+          for name in \
+            MACOS_CERTIFICATE_P12_BASE64 \
+            MACOS_CERTIFICATE_PASSWORD \
+            APPLE_ID \
+            APPLE_TEAM_ID \
+            APPLE_APP_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub secret: $name" >&2
+              exit 2
+            fi
+          done
+
+      - name: Import Developer ID certificate
+        run: |
+          set -euo pipefail
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/meshtrack-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          if [[ -z "${MACOS_SIGN_IDENTITY:-}" ]]; then
+            MACOS_SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+              | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' \
+              | head -1)"
+          fi
+
+          if [[ -z "$MACOS_SIGN_IDENTITY" ]]; then
+            echo "No Developer ID Application signing identity found in imported certificate" >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" >&2
+            exit 2
+          fi
+
+          echo "MESHTRACK_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized app
+        env:
+          MESHTRACK_REQUIRE_SIGNING: "true"
+          TAG_NAME: ${{ github.ref_name }}
+        run: bash scripts/package-macos-release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          ZIP="dist/Meshtrack-${TAG_NAME}-macOS.zip"
+          SHA="${ZIP}.sha256"
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$ZIP" "$SHA" --clobber
+            gh release edit "$TAG_NAME" --title "$TAG_NAME" --notes-file dist/release-notes.md
+          else
+            gh release create "$TAG_NAME" "$ZIP" "$SHA" \
+              --title "$TAG_NAME" \
+              --notes-file dist/release-notes.md
+          fi
