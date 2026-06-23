@@ -1,6 +1,7 @@
 // NodesView — a grid of node cards (name, hex id, battery gauge, hops). Renders
 // over the live node list; here driven by sample data for snapshots.
 
+import Domain
 import SwiftUI
 
 public struct NodesView: View {
@@ -29,7 +30,7 @@ struct NodeCard: View {
     let node: NetworkNode
 
     private var hexID: String {
-        String(format: "!%08x", UInt32(truncatingIfNeeded: node.id))
+        NodeID.hex(UInt32(truncatingIfNeeded: node.id))
     }
 
     private var batteryColor: Color {

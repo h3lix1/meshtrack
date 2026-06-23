@@ -25,7 +25,104 @@ public enum MeshtrackMigrator {
             try createTelemetryRollup(db, named: Table.telemetryHourly)
             try createTelemetryRollup(db, named: Table.telemetryDaily)
         }
+        // Phase 7: node ownership (ADR 0008), monitor-only messaging (ADR 0006),
+        // and reception→publish latency provenance (SPEC §2.11).
+        migrator.registerMigration("v3") { db in
+            try addNodeOwnership(db)
+            try addObservationIngestTime(db)
+            try createMessage(db)
+        }
+        // Phase 8: configuration moves out of env vars into the shared store
+        // (SPEC §2.5/§10). App config (broker connection, app settings) is
+        // JSON-encoded into a simple key-value table; the broker password and
+        // channel PSKs live in the same table (`CredentialStore` / `KeyStore`).
+        migrator.registerMigration("v4") { db in
+            try createAppConfig(db)
+        }
+        // Phase 8 hardening: make app-payload extraction idempotent at the STORE
+        // layer (Finding 2). The pipeline's in-memory `DedupWindow` is recreated
+        // every `run()` (per reconnect/config change) and observation dedup is
+        // gateway-scoped, so a packet re-delivered via a different gateway after a
+        // reconnect could insert a duplicate message/telemetry/position row. A
+        // unique index on each table's natural key — combined with `INSERT OR
+        // IGNORE` in the store — makes "count once" durable across process/run
+        // boundaries rather than relying on the volatile window.
+        migrator.registerMigration("v5") { db in
+            try dedupeExtractionTables(db)
+            try addExtractionUniqueIndexes(db)
+        }
+        // Phase 9 (Finding 5): the v5 PERMANENT unique indexes silently drop EVERY
+        // future row sharing a coarse natural key forever — violating the SPEC §2.4
+        // sliding-window dedup contract. Legitimate packet-id reuse after the 600s
+        // window, or two genuinely-distinct fixes/samples that happen to share the
+        // coarse key, are lost permanently. v6 replaces the permanent index with a
+        // BOUNDED, window-correct dedup ledger: drop the unique indexes (the v1
+        // non-unique query indexes already cover reads) and add `dedup_seen`, a
+        // small last-seen ledger consulted against the 600s window. Cross-run/reconnect
+        // idempotency is preserved; expiry lets a key recur after the window.
+        migrator.registerMigration("v6") { db in
+            try dropExtractionUniqueIndexes(db)
+            try createDedupSeen(db)
+        }
+        // Phase 10 (items 11–13): durable per-node / per-port mesh-traffic counters
+        // backing the Port-numbers + Largest-offenders analytics screens, so the
+        // offenders ranking survives across sessions. The builder lives in its own
+        // file (`Migrations+TrafficStats.swift`); appended here, never editing v1–v6.
+        registerTrafficStats(&migrator)
         return migrator
+    }
+
+    /// `app_config` — key-value store for non-secret app configuration (Phase 8).
+    /// `ConfigGateway` JSON-encodes `BrokerConfig`/`AppSettings` into rows under
+    /// stable keys (`"broker"`, `"app_settings"`). Never holds secrets — the DB
+    /// must never store plaintext secrets (SPEC §2.5).
+    private static func createAppConfig(_ db: Database) throws {
+        try db.create(table: Table.appConfig) { t in
+            t.primaryKey("key", .text)
+            t.column("value", .text).notNull()
+        }
+    }
+
+    /// `node` ownership flags (ADR 0008). `is_mine` drives the "My Nodes" filter
+    /// (visibility); `is_managed` gates ownership-sensitive rules (battery/voltage/
+    /// stale). Both default false so pre-v3 rows stay unmanaged/unowned.
+    private static func addNodeOwnership(_ db: Database) throws {
+        try db.alter(table: Table.node) { t in
+            t.add(column: "is_mine", .boolean).notNull().defaults(to: false)
+            t.add(column: "is_managed", .boolean).notNull().defaults(to: false)
+        }
+    }
+
+    /// `observation.ingest_time` — our `Clock` wall-clock at frame receipt
+    /// (SPEC §2.11). Nullable for back-compat: pre-v3 rows have no ingest time, so
+    /// latency (`ingest_time − rx_time`) is simply unknown for them.
+    private static func addObservationIngestTime(_ db: Database) throws {
+        try db.alter(table: Table.observation) { t in
+            t.add(column: "ingest_time", .integer)
+        }
+    }
+
+    /// `message` — decoded `TEXT_MESSAGE_APP` payloads for the read-only Channels
+    /// view (ADR 0006). Append-only; the pipeline counts once per dedup key like
+    /// telemetry/position. Indexed for per-channel and recency queries.
+    private static func createMessage(_ db: Database) throws {
+        try db.create(table: Table.message) { t in
+            t.autoIncrementedPrimaryKey("id")
+            t.column("packet_id", .integer).notNull()
+            t.column("from_num", .integer).notNull()
+            t.column("to_num", .integer).notNull()
+            t.column("channel", .integer).notNull()
+            t.column("channel_name", .text)
+            t.column("body", .text).notNull()
+            t.column("rx_time", .integer).notNull()
+            t.column("is_dm", .boolean).notNull().defaults(to: false)
+        }
+        try db.create(
+            index: "idx_message_channel_time",
+            on: Table.message,
+            columns: ["channel", "rx_time"]
+        )
+        try db.create(index: "idx_message_time", on: Table.message, columns: ["rx_time"])
     }
 
     /// Downsampled telemetry rollup table (hourly/daily): one row per
@@ -190,5 +287,94 @@ public enum MeshtrackMigrator {
             t.column("config_json", .text)
             t.column("firmware_variant", .text)
         }
+    }
+}
+
+// MARK: - v5 idempotent-extraction helpers (Phase 8, Finding 2)
+
+extension MeshtrackMigrator {
+    /// Collapse any pre-v5 duplicate extraction rows down to one per natural key
+    /// so the new unique indexes can be created without violating existing data.
+    /// Keeps the lowest `id` (earliest insert) per group; deletes the rest. A
+    /// fresh database has nothing to dedupe, so these run as cheap no-ops.
+    static func dedupeExtractionTables(_ db: Database) throws {
+        // message: one row per (packet_id, from_num) — the same logical message.
+        try db.execute(sql: """
+        DELETE FROM \(Table.message) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.message) GROUP BY packet_id, from_num
+        )
+        """)
+        // telemetry: one row per (node_num, t, kind, key) — one sample.
+        try db.execute(sql: """
+        DELETE FROM \(Table.telemetry) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.telemetry) GROUP BY node_num, t, kind, key
+        )
+        """)
+        // position_fix: one row per (node_num, t) — one fix at an instant.
+        try db.execute(sql: """
+        DELETE FROM \(Table.positionFix) WHERE id NOT IN (
+            SELECT MIN(id) FROM \(Table.positionFix) GROUP BY node_num, t
+        )
+        """)
+    }
+
+    /// Unique indexes on the extraction tables' natural keys. With the store's
+    /// `INSERT OR IGNORE`, a re-delivered packet (e.g. via a different gateway
+    /// after a reconnect) is silently dropped instead of duplicating a row.
+    static func addExtractionUniqueIndexes(_ db: Database) throws {
+        try db.create(
+            index: "idx_message_packet_from",
+            on: Table.message,
+            columns: ["packet_id", "from_num"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_telemetry_natural_key",
+            on: Table.telemetry,
+            columns: ["node_num", "t", "kind", "key"],
+            options: [.unique]
+        )
+        try db.create(
+            index: "idx_position_fix_natural_key",
+            on: Table.positionFix,
+            columns: ["node_num", "t"],
+            options: [.unique]
+        )
+    }
+}
+
+// MARK: - v6 windowed-dedup ledger (Phase 9, Finding 5)
+
+extension MeshtrackMigrator {
+    /// Remove the v5 PERMANENT unique indexes. They enforced a coarse natural key
+    /// for all time, so `INSERT OR IGNORE` dropped legitimate later rows (packet-id
+    /// reuse past the window, or distinct samples/fixes that share the coarse key).
+    /// The v1 non-unique indexes (`idx_message_channel_time`, `idx_telemetry_*`,
+    /// `idx_position_fix_node_time`) already serve every read, so dropping these
+    /// costs no query speed. `IF EXISTS` keeps the drop idempotent.
+    static func dropExtractionUniqueIndexes(_ db: Database) throws {
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_message_packet_from")
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_telemetry_natural_key")
+        try db.execute(sql: "DROP INDEX IF EXISTS idx_position_fix_natural_key")
+    }
+
+    /// `dedup_seen` — the bounded, window-correct extraction dedup ledger (SPEC
+    /// §2.4). One row per packet identity (`<from>:<packet_id>`) carrying the last
+    /// time we extracted it. The store admits an extraction only when the key is
+    /// absent or last seen MORE than the dedup window ago, then records/slides the
+    /// row and prunes expired keys — so a reconnect re-delivery within the window
+    /// is deduped (durably, across `run()` boundaries the in-memory window cannot
+    /// span) yet the same key recurring after the window records a fresh extraction.
+    static func createDedupSeen(_ db: Database) throws {
+        try db.create(table: Table.dedupSeen) { t in
+            t.primaryKey("key", .text)
+            t.column("last_seen_at", .integer).notNull()
+        }
+        // Bounded-size pruning deletes by age; index the time column for it.
+        try db.create(
+            index: "idx_dedup_seen_last_seen",
+            on: Table.dedupSeen,
+            columns: ["last_seen_at"]
+        )
     }
 }

@@ -59,8 +59,10 @@ public struct NetworkMapView: View {
 
     // MARK: Traces
 
-    private func edgeProgress(_ trace: PacketTrace, _ edgeIndex: Int) -> Double {
-        let elapsed = clock - trace.startedAt - Double(edgeIndex) * hopDuration
+    /// Progress for edges at hop number `hopIndex` (1-based), so every edge of a hop
+    /// reveals together as the wavefront expands ring-by-ring (item 2).
+    private func edgeProgress(_ trace: PacketTrace, _ hopIndex: Int) -> Double {
+        let elapsed = clock - trace.startedAt - Double(max(0, hopIndex - 1)) * hopDuration
         return min(1, max(0, elapsed / hopDuration))
     }
 
@@ -70,8 +72,8 @@ public struct NetworkMapView: View {
         projection: GeoProjection
     ) {
         let color = trace.color
-        for (index, edge) in trace.edges.enumerated() {
-            let progress = edgeProgress(trace, index)
+        for edge in trace.edges {
+            let progress = edgeProgress(trace, edge.hopIndex)
             guard progress > 0 else { continue }
             let start = projection.point(for: edge.from)
             let end = projection.point(for: edge.to)
@@ -118,10 +120,9 @@ public struct NetworkMapView: View {
     }
 
     private func badgePoint(_ trace: PacketTrace, projection: GeoProjection) -> CGPoint? {
-        for index in stride(from: trace.edges.count - 1, through: 0, by: -1) {
-            let progress = edgeProgress(trace, index)
+        for edge in trace.edges.reversed() {
+            let progress = edgeProgress(trace, edge.hopIndex)
             guard progress > 0 else { continue }
-            let edge = trace.edges[index]
             return lerp(projection.point(for: edge.from), projection.point(for: edge.to), progress)
         }
         return nil

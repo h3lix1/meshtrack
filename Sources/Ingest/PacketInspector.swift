@@ -73,7 +73,7 @@ public enum PacketInspector {
     }
 
     private static func hexID(_ value: UInt32) -> String {
-        "!" + String(format: "%08x", value)
+        NodeID.hex(value)
     }
 
     private static func portName(_ port: MeshPort) -> String {

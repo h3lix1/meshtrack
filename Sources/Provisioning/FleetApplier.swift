@@ -62,6 +62,11 @@ public struct FleetApplier: Sendable {
 
     /// Roll `template` out across `members` sequentially, verifying each node took
     /// the change before moving on. Halts on the first failure when `haltOnFailure`.
+    ///
+    /// Cooperatively cancellable: an aborting caller cancels the surrounding task,
+    /// and we check `Task.isCancelled` before each node's apply and before each
+    /// progress callback. So an abort during node N applies leaves node N+1 untouched
+    /// and fires no post-abort progress — the UI never mutates a row after the stop.
     @discardableResult
     public func rollOut(
         template: NodeTemplate,
@@ -71,8 +76,12 @@ public struct FleetApplier: Sendable {
     ) async -> FleetRolloutResult {
         var outcomes: [NodeRolloutOutcome] = []
         for member in members {
+            // Stop before starting the next node's apply if we've been aborted.
+            if Task.isCancelled { break }
             let outcome = await apply(template: template, to: member)
             outcomes.append(outcome)
+            // Don't report (or mutate the UI for) a node finished after an abort.
+            if Task.isCancelled { break }
             await onProgress(outcome)
             if case .failed = outcome.status, haltOnFailure { break }
         }

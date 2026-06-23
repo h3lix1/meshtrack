@@ -5,14 +5,14 @@
 // CocoaMQTT client + delegate are non-Sendable, so they're confined to a
 // queue-backed MQTTSession (@unchecked Sendable). Network I/O is best-effort and
 // not unit-tested (excluded from the coverage metric); the tested logic is
-// MeshtasticTopic. Credentials come from the caller (Keychain), never the repo.
+// MeshtasticTopic. Credentials come from the caller (the local app store), never the repo.
 
 import CocoaMQTT
 import Domain
 import Foundation
 
 /// Connection settings for `MQTTAdapter`. `username`/`password` are supplied by
-/// the caller from Keychain and never persisted to the repo or DB.
+/// the caller from the local app store and never persisted to the repo.
 public struct MQTTConfig: Sendable {
     public var host: String
     public var port: UInt16

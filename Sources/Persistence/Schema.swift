@@ -20,6 +20,17 @@ public enum Table {
     public static let alertRule = "alert_rule"
     public static let alert = "alert"
     public static let template = "template"
+    /// Monitor-only decoded text messages (schema v3, SPEC §1 amended / ADR 0006).
+    public static let message = "message"
+    /// Key-value store for app configuration (schema v4, Phase 8, SPEC §2.5/§10):
+    /// broker/app settings plus the already-public broker password and channel PSKs
+    /// (`DatabaseCredentialStore` / `DatabaseKeyStore`).
+    public static let appConfig = "app_config"
+    /// Bounded sliding-window extraction-dedup ledger (schema v6, Phase 9,
+    /// Finding 5). One last-seen row per packet identity, checked against the 600s
+    /// window so dedup is durable across runs but does not drop legitimate later
+    /// rows the way the v5 permanent unique indexes did (SPEC §2.4).
+    public static let dedupSeen = "dedup_seen"
 }
 
 /// Node classification (SPEC §2.1) — the canonical type lives in Domain; persisted
@@ -74,4 +85,7 @@ public enum StoreError: Error, Equatable, Sendable {
     /// A unique constraint (e.g. the observation dedup index) rejected a write.
     /// `details` carries the underlying SQLite message for diagnostics.
     case duplicate(details: String)
+    /// Encoded JSON could not be read back as UTF-8 before persisting. Should never
+    /// happen for `JSONEncoder` output, but surfaced instead of force-unwrapping.
+    case encodingFailed(details: String)
 }

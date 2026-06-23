@@ -43,6 +43,11 @@ public struct AdminApplier: Sendable {
     /// Apply a (confirmed) plan, then read back and verify the node now matches.
     /// A no-op plan applies nothing. Throws `ApplyError.verificationFailed` if the
     /// read-back still differs.
+    ///
+    /// Validation lives here, in the shared orchestration, so EVERY `AdminChannel`
+    /// adapter inherits it: a malformed template (unknown region/role, non-numeric
+    /// precision) is rejected before any adapter persists or transmits it, rather
+    /// than each sibling re-implementing the guard.
     @discardableResult
     public func apply(
         _ plan: ApplyPlan,
@@ -50,6 +55,7 @@ public struct AdminApplier: Sendable {
         context: NamingContext
     ) async throws -> ApplyPlan {
         guard !plan.isNoOp else { return plan }
+        try AdminMessageMapping.validate(plan.changes)
         try await channel.apply(plan.changes)
         let readBack = try await computePlan(template: template, context: context)
         guard readBack.isNoOp else { throw ApplyError.verificationFailed(remaining: readBack.changes) }

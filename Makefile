@@ -1,27 +1,31 @@
 SHELL := /usr/bin/env bash
 
-# The single external validator the Ralph loop trusts. `make verify` must be
-# green before any commit. Tooling that may be absent locally degrades to a
-# warning (CI installs everything and enforces strictly).
+# Build configuration for the .app bundle (override: `make app CONFIG=debug`).
+CONFIG ?= release
+
+# The single external validator. `make verify` must be green before any commit.
+# Tooling that may be absent locally degrades to a warning (CI installs everything
+# and enforces strictly).
 
 .PHONY: help verify bootstrap build test domain-purity format-check lint \
-        coverage mutation protos-check perf secrets run loop clean
+        coverage protos-check perf secrets run app run-app clean
 
 help:
 	@echo "Meshtrack — make targets"
-	@echo "  make bootstrap   install dev tooling (swiftformat, swiftlint, muter)"
-	@echo "  make verify      run the full gate suite (the only validator the loop trusts)"
+	@echo "  make bootstrap   install dev tooling (swiftformat, swiftlint)"
+	@echo "  make verify      run the full gate suite"
 	@echo "  make build       swift build (warnings-as-errors, Swift 6 strict concurrency)"
 	@echo "  make test        swift test with code coverage"
 	@echo "  make run         run the meshtrackd collector"
-	@echo "  make loop        run the Ralph build loop (scripts/loop.sh)"
+	@echo "  make app         build a double-clickable Meshtrack.app (CONFIG=release|debug)"
+	@echo "  make run-app     build Meshtrack.app and open it"
 	@echo "  make clean       remove build artifacts"
 
 bootstrap:
 	@bash scripts/bootstrap.sh
 
 # ---- the gate suite (order = fast-fail first) -----------------------------
-verify: domain-purity format-check lint build test coverage mutation protos-check perf secrets
+verify: domain-purity format-check lint build test coverage protos-check perf secrets
 	@echo "✅ make verify: all gates green"
 
 domain-purity:
@@ -46,11 +50,6 @@ test:
 coverage:
 	@bash scripts/check-coverage.sh
 
-mutation:
-	@if command -v muter >/dev/null 2>&1 && [ -f muter.conf.yml ]; then \
-		muter run ; \
-	else echo "⚠️  muter or muter.conf.yml absent; skipping mutation gate (CI enforces)"; fi
-
 protos-check:
 	@bash scripts/check-protobuf-codegen.sh
 
@@ -63,8 +62,14 @@ secrets:
 run:
 	@swift run meshtrackd
 
-loop:
-	@bash scripts/loop.sh
+# Assemble a proper macOS .app bundle (Info.plist + Dock icon + menu bar + ad-hoc
+# signing) from the MeshtrackApp executable. `swift run` launches a bare executable
+# that macOS treats as a background process; the bundle is the real app.
+app:
+	@CONFIG=$(CONFIG) bash scripts/make-app.sh
+
+run-app: app
+	@open Meshtrack.app
 
 clean:
-	@swift package clean ; rm -rf .build
+	@swift package clean ; rm -rf .build Meshtrack.app

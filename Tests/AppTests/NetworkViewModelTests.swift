@@ -1,5 +1,6 @@
 @testable import App
 import Domain
+import Foundation
 import Persistence
 import Testing
 
@@ -36,6 +37,27 @@ struct NetworkViewModelTests {
         return store
     }
 
+    private func relayConflictStore() async throws -> MeshStore {
+        let store = try await seededStore()
+        for (nodeID, lat) in [(0x0000_0011, 37.2), (0x0000_0111, 37.25)] as [(Int64, Double)] {
+            try await store.upsertNode(NodeRecord(
+                node_num: nodeID,
+                hexid: NodeID.hex(UInt32(truncatingIfNeeded: nodeID)),
+                short_name: nil,
+                node_class: .mobile,
+                first_seen_at: 0,
+                last_heard_at: 0
+            ))
+            _ = try await store.appendPositionFix(PositionFixRecord(
+                node_num: nodeID,
+                t: 1,
+                lat: lat,
+                lon: -122.0
+            ))
+        }
+        return store
+    }
+
     @Test
     func `loadNodes builds positioned nodes and ignores those without a fix`() async throws {
         let model = try await NetworkViewModel(store: seededStore())
@@ -43,6 +65,46 @@ struct NetworkViewModelTests {
         #expect(model.nodes.count == 2) // NOFIX is ignored
         #expect(model.nodes.contains { $0.name == "GW" && $0.isGateway })
         #expect(!model.nodes.contains { $0.name == "NOFIX" })
+    }
+
+    @Test
+    func `a position fix within the jitter deadband does not move the node`() async throws {
+        // The slow refresh loop re-runs loadNodes() every few seconds. A stationary node's
+        // GPS fixes wander a few metres each report; without a deadband the marker would
+        // snap to the newest jittery fix every cycle — the disorienting "shake". A
+        // sub-deadband fix must leave the shown position unchanged.
+        let store = try await seededStore()
+        let model = NetworkViewModel(store: store)
+        try await model.loadNodes()
+        let original = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+
+        // ~2 m north of the seeded 37.0 — below the 5 m deadband. (1e-5° lat ≈ 1.11 m.)
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001, t: 2, lat: 37.0 + 1.8e-5, lon: -122.0
+        ))
+        try await model.loadNodes()
+
+        let after = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+        #expect(after == original) // jitter suppressed — the node stayed put
+    }
+
+    @Test
+    func `a position fix beyond the jitter deadband moves the node`() async throws {
+        // A genuine relocation (well beyond the deadband) must still update the position.
+        let store = try await seededStore()
+        let model = NetworkViewModel(store: store)
+        try await model.loadNodes()
+        let original = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+
+        // ~110 m north — far beyond the 5 m deadband.
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001, t: 2, lat: 37.001, lon: -122.0
+        ))
+        try await model.loadNodes()
+
+        let after = try #require(model.nodes.first { $0.id == 0x0000_0001 }?.position)
+        #expect(after != original)
+        #expect(abs(after.latitude - 37.001) < 1e-9)
     }
 
     @Test
@@ -55,7 +117,180 @@ struct NetworkViewModelTests {
             port: .telemetry, payload: [], rxTime: .epoch,
             hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
         ))
+        // The trace rebuild is coalesced; settle it before asserting (Phase 10).
+        await model.flushPendingTraces()
         #expect(model.traces.count == 1)
         #expect(model.traces.first?.id == 0xABCD)
+    }
+
+    @Test
+    func `relay guess policy rebuilds live traces and suppresses ambiguous relay candidates`() async throws {
+        let model = try await NetworkViewModel(store: relayConflictStore())
+        try await model.loadNodes()
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0xABCD, channel: 0,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 3, hopLimit: 1, relayNode: 0x11, gatewayID: 0x0000_00FF
+        ))
+        await model.flushPendingTraces()
+        #expect(model.traces.first?.edges.map(\.kind) == [.guessed, .observed])
+
+        model.setRelayGuessingPolicy(.unambiguousOnly)
+        await model.flushPendingTraces()
+        #expect(model.relayGuessing == .unambiguousOnly)
+        #expect(model.traces.first?.edges.map(\.kind) == [.observed])
+        #expect(model.traces.first?.receivers.contains { $0.kind == .relay } == false)
+
+        model.setRelayGuessingPolicy(.allCandidates)
+        await model.flushPendingTraces()
+        #expect(model.relayGuessing == .allCandidates)
+        #expect(model.traces.first?.edges.map(\.kind) == [.guessed, .observed, .guessed, .observed])
+        #expect(model.traces.first?.receivers.count(where: { $0.kind == .relay }) == 2)
+    }
+
+    @Test
+    func `ingesting records the source node's channel preset`() async throws {
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        // The preset stamp on the source node is SYNCHRONOUS (no flush needed); only the
+        // trace rebuild is coalesced.
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0xABCD,
+            channel: ChannelPreset.longFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+        #expect(model.presetByNode[0x0000_0001] == .longFast)
+        #expect(model.nodes.first { $0.id == 0x0000_0001 }?.preset == .longFast)
+        #expect(model.availablePresets == [.longFast])
+    }
+
+    @Test
+    func `a trace keeps its original channel after the source retransmits elsewhere (Finding 20)`(
+    ) async throws {
+        // Finding 20: traces must filter on the channel they ARRIVED on, not the source
+        // node's *current* preset. Two packets from node 1 — first on LongFast, then on
+        // MediumFast — so the node's live preset flips to MediumFast. The first trace must
+        // still belong to the LongFast filter, not move to MediumFast with the node.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0x1111,
+            channel: ChannelPreset.longFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+        model.ingest(DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: 0x2222,
+            channel: ChannelPreset.mediumFast.channelHash,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        ))
+        await model.flushPendingTraces()
+
+        // The source node's LIVE preset is now MediumFast (latest transmission)…
+        #expect(model.presetByNode[0x0000_0001] == .mediumFast)
+        // …but each trace carries its OWN immutable arrival channel.
+        let longTrace = model.traces.first { $0.id == 0x1111 }
+        let mediumTrace = model.traces.first { $0.id == 0x2222 }
+        #expect(longTrace?.preset == .longFast)
+        #expect(mediumTrace?.preset == .mediumFast)
+
+        // Filtering proves the old trace did NOT migrate to the node's new channel.
+        let onLong = ChannelFilter.filterTraces(model.traces, nodes: model.nodes, selection: .longFast)
+        let onMedium = ChannelFilter.filterTraces(model.traces, nodes: model.nodes, selection: .mediumFast)
+        #expect(onLong.map(\.id) == [0x1111])
+        #expect(onMedium.map(\.id) == [0x2222])
+    }
+
+    // MARK: Coalesced rebuild (Phase 10)
+
+    private func packet(id: UInt32) -> DecodedPacket {
+        DecodedPacket(
+            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: id, channel: 0,
+            port: .telemetry, payload: [], rxTime: .epoch,
+            hopStart: 2, hopLimit: 1, gatewayID: 0x0000_00FF
+        )
+    }
+
+    @Test
+    func `a burst of packets coalesces to one rebuild but yields every trace`() async throws {
+        // Phase 10: ingest no longer rebuilds traces inline. A burst of packets inside the
+        // coalesce window must collapse to a single rebuild, yet once it settles the
+        // published traces must be EXACTLY what eager per-packet rebuilding produced —
+        // one trace per distinct packet id.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+
+        let ids: [UInt32] = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17]
+        for id in ids {
+            model.ingest(packet(id: id))
+        }
+        await model.flushPendingTraces()
+
+        #expect(model.traces.map(\.id).sorted() == ids.sorted())
+    }
+
+    @Test
+    func `flushPendingTraces is idempotent and settles to the same traces`() async throws {
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        model.ingest(packet(id: 0xABCD))
+
+        await model.flushPendingTraces()
+        let first = model.traces.map(\.id)
+        await model.flushPendingTraces() // second flush with nothing pending — a no-op
+        #expect(model.traces.map(\.id) == first)
+        #expect(first == [0xABCD])
+    }
+
+    @Test
+    func `coalesced ingest matches eager rebuilds packet-for-packet`() async throws {
+        // Equivalence guard: feeding the same packets one-at-a-time (flushing between
+        // each, i.e. the old eager behaviour) and as a single burst (one coalesced flush)
+        // must produce identical published traces — order, ids, and edge counts.
+        let ids: [UInt32] = [0x01, 0x02, 0x03, 0x04, 0x05]
+
+        let eager = try await NetworkViewModel(store: seededStore())
+        try await eager.loadNodes()
+        for id in ids {
+            eager.ingest(packet(id: id))
+            await eager.flushPendingTraces()
+        }
+
+        let coalesced = try await NetworkViewModel(store: seededStore())
+        try await coalesced.loadNodes()
+        for id in ids {
+            coalesced.ingest(packet(id: id))
+        }
+        await coalesced.flushPendingTraces()
+
+        #expect(eager.traces.map(\.id) == coalesced.traces.map(\.id))
+        #expect(eager.traces.map(\.edges.count) == coalesced.traces.map(\.edges.count))
+    }
+
+    @Test
+    func `ingest microbenchmark stays within budget (catches gross regressions)`() async throws {
+        // Mirrors DecodePerfTests: a generous floor so a per-packet O(n) regression (the
+        // old `nodes.map` on every packet + inline full rebuild) trips the wire. We time
+        // the SYNCHRONOUS ingest cost — the expensive rebuild is coalesced out of it.
+        let model = try await NetworkViewModel(store: seededStore())
+        try await model.loadNodes()
+        let iterations = 20000
+
+        let elapsed = ContinuousClock().measure {
+            for i in 0 ..< iterations {
+                model.ingest(packet(id: UInt32(i)))
+            }
+        }
+        await model.flushPendingTraces()
+
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+        let perSecond = Double(iterations) / max(seconds, 1e-9)
+        #expect(
+            perSecond > 20000,
+            "ingest throughput \(Int(perSecond)) packets/sec is below the 20000 budget"
+        )
     }
 }

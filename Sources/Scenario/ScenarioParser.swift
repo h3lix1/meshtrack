@@ -54,6 +54,11 @@ public struct ScenarioParser: Sendable {
         let arm = try parseArm(mapping, node: node)
         let fixes = try parseFixes(mapping, node: node)
         let silenceHours = try optionalDouble(mapping, key: "silence_hours", node: node)
+        // ADR 0008: omitted `managed` defaults to UNMANAGED, matching Domain's
+        // `.unowned` default for a freshly-observed node — an unclassified node
+        // never fires a false battery/silence alert. Declare `managed: true` to
+        // assert an owned node's stale/battery alerts.
+        let isManaged = try optionalBool(mapping, key: "managed", node: node) ?? false
         let expected = try parseExpectedAlerts(mapping, node: node)
 
         return Scenario(
@@ -62,6 +67,7 @@ public struct ScenarioParser: Sendable {
             arm: arm,
             fixes: fixes,
             silenceHours: silenceHours,
+            isManaged: isManaged,
             expectedAlerts: expected
         )
     }
@@ -201,9 +207,13 @@ public struct ScenarioParser: Sendable {
             return ExpectedAlert(type: type, count: count)
         }
     }
+}
 
-    // MARK: - Generic value helpers
+// MARK: - Generic value helpers
 
+/// Value-coercion utilities shared across the typed parse steps. Kept in an
+/// extension so the core parser body stays focused (and within lint limits).
+extension ScenarioParser {
     /// Yams may hand back `[String: Any]` or `[AnyHashable: Any]`; normalise to
     /// `[String: Any]` (dropping any non-string keys, which the schema never uses).
     private static func asMapping(_ value: Any) -> [String: Any]? {
@@ -280,6 +290,18 @@ public struct ScenarioParser: Sendable {
     ) throws -> Int? {
         guard mapping[key] != nil else { return nil }
         return try requireInt(mapping, key: key, node: node)
+    }
+
+    private static func optionalBool(
+        _ mapping: [String: Any],
+        key: String,
+        node: String
+    ) throws -> Bool? {
+        guard let raw = mapping[key] else { return nil }
+        guard let value = raw as? Bool else {
+            throw ScenarioParseError.wrongType(key: key, node: node, expected: "boolean")
+        }
+        return value
     }
 
     /// Accept `Int` and `Double` scalars as a `Double`. Yams types integral

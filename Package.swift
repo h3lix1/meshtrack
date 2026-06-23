@@ -10,7 +10,7 @@ let strict: [SwiftSetting] = [
 let package = Package(
     name: "Meshtrack",
     platforms: [
-        .macOS("26.0")
+        .macOS("26.6")
     ],
     products: [
         .executable(name: "meshtrackd", targets: ["meshtrackd"]),
@@ -98,7 +98,7 @@ let package = Package(
         // ---- UI + composition roots --------------------------------------------
         .target(
             name: "App",
-            dependencies: ["Domain", "Persistence", "RuleEngine"],
+            dependencies: ["Domain", "Persistence", "RuleEngine", "Provisioning"],
             swiftSettings: strict
         ),
         .executableTarget(
@@ -116,7 +116,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "MeshtrackApp",
-            dependencies: ["App"],
+            dependencies: [
+                "App", "Ingest", "Transport", "Persistence", "Crypto",
+                "RuleEngine", "Provisioning", "Domain", "MeshProtos"
+            ],
             swiftSettings: strict
         ),
 
@@ -127,7 +130,7 @@ let package = Package(
         .testTarget(name: "RuleEngineTests", dependencies: ["RuleEngine", "Domain"], swiftSettings: strict),
         .testTarget(
             name: "ProvisioningTests",
-            dependencies: ["Provisioning", "Domain"],
+            dependencies: ["Provisioning", "Domain", "MeshProtos"],
             swiftSettings: strict
         ),
         .testTarget(name: "ScenarioTests", dependencies: ["Scenario"], swiftSettings: strict),

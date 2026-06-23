@@ -6,22 +6,26 @@ renders nodes on a map, lets you *arm* nodes for movement, and provisions/update
 nodes from reusable templates — with an alerting engine for movement, silence,
 and battery.
 
-This file is the contract the build loop optimizes against. Behavior is defined
-here; the plan (`IMPLEMENTATION_PLAN.md`) sequences it; `AGENTS.md` constrains how
-it is built. When code and SPEC disagree, SPEC wins (or SPEC is wrong — fix it in
-the same change with an ADR).
+This file is the contract the project is built against. Behavior is defined here;
+`AGENTS.md` constrains how it is built. When code and SPEC disagree, SPEC wins (or
+SPEC is wrong — fix it in the same change).
 
 ---
 
 ## 1. Vision & non-goals
 
 **Vision.** Native macOS monitoring + control for Meshtastic fleets: first-class
-notifications, MapKit, Swift Charts, Keychain, LaunchAgent background execution,
+notifications, MapKit, Swift Charts, LaunchAgent background execution,
 code-signed distribution.
 
 **Non-goals (v1).** Cross-platform builds; a public/multi-user server;
-chat/messaging UX (we monitor; we do not replace the official client for
-conversations); routing/topology optimization. Keep the surface small and correct.
+*two-way* chat (we do not replace the official client for sending conversations);
+routing/topology optimization. Keep the surface small and correct.
+
+> **Amended in Phase 7 (ADR 0006):** **monitor-only** messaging *is* in scope —
+> we decode and display channel/DM text read-only (sender, mentions, timestamps).
+> There is no send path. This stays true to "we monitor"; it does not make us a
+> chat client.
 
 ---
 
@@ -75,8 +79,9 @@ conversations); routing/topology optimization. Keep the surface small and correc
   on, decoded messages are not republished — without the PSK you get nothing useful.
 - JSON topic `msh/REGION/2/json/...` is convenience only and may be disabled; do
   not depend on it.
-- All secrets (channel PSKs, admin keys, MQTT creds) live in **Keychain**. The DB
-  never stores plaintext secrets.
+- Channel PSKs and the MQTT broker password — already-public values for the public
+  brokers this targets — are stored in the app's **local SQLite store** (`app_config`),
+  not the system Keychain, and are never written to logs.
 
 ### 2.6 Alert engine (data-driven)
 - Rules are typed records, not code branches: `moved`, `returned`, `geofence_exit`,
@@ -118,6 +123,25 @@ conversations); routing/topology optimization. Keep the surface small and correc
   the public broker (zero-hop policy). Encryption choices on amateur allocations
   are the operator's responsibility — surface settings, don't make legal decisions.
 
+### 2.10 Node ownership: "mine" & managed vs unmanaged (Phase 7, ADR 0008)
+- `is_mine` marks a node as part of the operator's fleet. It drives the **"My
+  Nodes"** filter across every view; it changes *visibility*, not alerting.
+- `is_managed` marks a node we actually administer (we own its battery / hold an
+  admin key). **Ownership-sensitive rules — `battery_below`, `voltage_below`,
+  `stale` — evaluate only for managed nodes.** Unmanaged nodes are observed
+  read-only: they appear, chart, and trace, but never raise battery/silence alerts
+  (no false alarms for strangers' nodes). Movement/geofence and `new_node_seen`
+  remain global. Both flags default false; either is user-settable (single or bulk),
+  and `is_managed` may be inferred when we successfully admin a node.
+
+### 2.11 Reception→publish latency (Phase 7)
+- For every observation, record **both** the mesh `rx_time` and our **`ingest_time`**
+  (wall-clock at frame receipt, via the `Clock` port). The gateway's
+  receive→MQTT-publish latency is `ingest_time − rx_time`. Surface it in the packet
+  inspector, as map-edge tooltips, and in latency analytics. Latency is descriptive
+  telemetry, never an alert input (clock skew between nodes makes it unreliable for
+  thresholds).
+
 ---
 
 ## 3. Architecture
@@ -137,7 +161,16 @@ suite deterministic and the loop convergent.
 Ports: `Clock`, `MeshTransport`, `Store`, `Notifier`, `Flasher`, `KeyStore`,
 `AdminChannel`. Adapters live in the outer ring (e.g. `MQTTAdapter`, `SerialAdapter`,
 `BLEAdapter`, `ReplayAdapter`, `GRDBStore`, `UNNotifier`, `EsptoolFlasher`,
-`UF2Flasher`, `KeychainKeyStore`).
+`UF2Flasher`, `DatabaseKeyStore`).
+
+**App layer (Phase 7).** The `App` library stays snapshot-pure (imports `Domain`,
+`Persistence`, `RuleEngine`, `Provisioning` only); every section is a testable
+`@MainActor @Observable` view model over the store. Live MQTT wiring lives in the
+`MeshtrackApp` executable composition root, not the library. **MapKit caveat
+(ADR 0007):** `MKMapView` cannot render under the headless `ImageRenderer` snapshot
+gate, so the live map is an `MKMapView` substrate with a SwiftUI `Canvas` trace
+overlay; snapshots/CI render the deterministic Canvas-only map, and the trace
+geometry is unit-tested independent of MapKit.
 
 ---
 
@@ -158,7 +191,7 @@ Ports: `Clock`, `MeshTransport`, `Store`, `Notifier`, `Flasher`, `KeyStore`,
 | Notifications | UserNotifications (+ ntfy/webhook/email behind a port) |
 | Flashing | esptool (ESP32) + UF2/DFU (nRF52/RP2040), behind `Flasher`, feature-flagged |
 | Background | launchd LaunchAgent (`meshtrackd`) |
-| Secrets | Keychain |
+| Config / secrets | Local SQLite (`app_config`) |
 
 ---
 
@@ -215,21 +248,23 @@ Hardware-in-the-loop (gated, nightly/manual): real T-Beam + Mosquitto-in-Docker.
 **`make verify` (single external validator).** swiftformat --lint + swiftlint
 --strict (custom rule: ban `Date()` in Domain) · build warnings-as-errors, Swift 6
 strict concurrency · unit + property + fuzz + replay + snapshot tests · coverage
-floor (start 70%, ratchet up — never down) · mutation testing (min score) ·
-reproducible protobuf-codegen check (git diff empty) · performance budgets · secret
-scan + dependency/license audit.
+floor (start 70%, ratchet up — never down) · reproducible protobuf-codegen check
+(git diff empty) · performance budgets · secret scan + dependency/license audit.
 
-**Scoreboard.** Track and ratchet in `scoreboard.json`: coverage %, mutation score,
-ingestion msgs/sec, p95 query latency, open TODO/FIXME count, doc coverage. CI fails
-on regression.
+**Metrics.** `make verify` enforces the coverage floor (only ratchets up) plus
+performance budgets for ingestion msgs/sec and p95 query latency. CI fails on
+regression.
 
 ---
 
 ## 10. Resolved decisions (was: open questions)
 
-1. **Broker:** Public broker (`mqtt.meshtastic.org`). Honor zero-hop uplink policy.
-2. **Channels/PSKs:** Configurable in-app; up to **20** channels for MQTT, **7** for
-   the local device. Entered/rotated in-app; stored in Keychain.
+1. **Broker:** Defaults to the public Bay Area broker (`mqtt.bayme.sh:1883`, user
+   `meshdev` with the community-published password). Configurable in-app. Honor the
+   zero-hop uplink policy.
+2. **Channels/PSKs:** Configurable in-app; **MQTT channels are uncapped**, **7** for
+   the local device (firmware slot limit). Entered/rotated in-app; stored in the
+   local SQLite store (supersedes the earlier "20 MQTT" cap).
 3. **Remote admin:** Support **both** PKI admin key (per node) and legacy admin
    channel.
 4. **Deployment:** **Single-Mac.** Shared GRDB store (WAL) + XPC between

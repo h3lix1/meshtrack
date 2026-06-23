@@ -3,6 +3,7 @@
 // the centerpiece screen. `clock` is fixed for snapshots; LiveNetworkMap drives it
 // continuously in the running app.
 
+import Domain
 import SwiftUI
 
 public struct DashboardView: View {
@@ -76,7 +77,7 @@ public struct DashboardView: View {
                     HStack(spacing: 8) {
                         Circle().fill(trace.color).frame(width: 8, height: 8)
                             .shadow(color: trace.color, radius: 3)
-                        Text(String(format: "!%08x", trace.id)).font(.system(size: 11, design: .monospaced))
+                        Text(NodeID.hex(trace.id)).font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.85))
                         Text("\(trace.hops) hops").font(.system(size: 10)).foregroundStyle(.secondary)
                     }

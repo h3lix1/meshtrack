@@ -27,6 +27,11 @@ public struct NodeRecord: Codable, FetchableRecord, PersistableRecord, Sendable 
     public var role: String?
     public var first_seen_at: Int64
     public var last_heard_at: Int64
+    /// Part of the operator's fleet — drives the "My Nodes" filter (ADR 0008).
+    public var is_mine: Bool
+    /// We administer it (own its battery / hold an admin key). Gates
+    /// ownership-sensitive rules (battery/voltage/stale) (ADR 0008).
+    public var is_managed: Bool
 
     public init(
         node_num: Int64,
@@ -37,7 +42,9 @@ public struct NodeRecord: Codable, FetchableRecord, PersistableRecord, Sendable 
         hw_model: String? = nil,
         role: String? = nil,
         first_seen_at: Int64,
-        last_heard_at: Int64
+        last_heard_at: Int64,
+        is_mine: Bool = false,
+        is_managed: Bool = false
     ) {
         self.node_num = node_num
         self.hexid = hexid
@@ -48,6 +55,8 @@ public struct NodeRecord: Codable, FetchableRecord, PersistableRecord, Sendable 
         self.role = role
         self.first_seen_at = first_seen_at
         self.last_heard_at = last_heard_at
+        self.is_mine = is_mine
+        self.is_managed = is_managed
     }
 }
 
@@ -89,6 +98,9 @@ public struct ObservationRecord: Codable, FetchableRecord, MutablePersistableRec
     public var rx_snr: Double?
     public var hop_start: Int?
     public var hop_limit: Int?
+    /// Our `Clock` wall-clock at frame receipt (ns since epoch). Nullable for
+    /// pre-v3 rows; latency = `ingest_time − rx_time` (SPEC §2.11).
+    public var ingest_time: Int64?
 
     public init(
         id: Int64? = nil,
@@ -100,7 +112,8 @@ public struct ObservationRecord: Codable, FetchableRecord, MutablePersistableRec
         rx_rssi: Int? = nil,
         rx_snr: Double? = nil,
         hop_start: Int? = nil,
-        hop_limit: Int? = nil
+        hop_limit: Int? = nil,
+        ingest_time: Int64? = nil
     ) {
         self.id = id
         self.node_num = node_num
@@ -112,6 +125,7 @@ public struct ObservationRecord: Codable, FetchableRecord, MutablePersistableRec
         self.rx_snr = rx_snr
         self.hop_start = hop_start
         self.hop_limit = hop_limit
+        self.ingest_time = ingest_time
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {
