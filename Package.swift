@@ -10,7 +10,12 @@ let strict: [SwiftSetting] = [
 let package = Package(
     name: "Meshtrack",
     platforms: [
-        .macOS("26.6")
+        // macOS 26 is the floor (the app is built on macOS 26 SwiftUI/MapKit APIs),
+        // but pin the .0 baseline — NOT a specific point release. A higher minor (e.g.
+        // 26.6) bakes that exact version into every binary's load command, so the test
+        // bundle then refuses to load on any earlier 26.x (incl. CI runners), failing
+        // with "built for macOS 26.6 which is newer than running OS".
+        .macOS("26.0")
     ],
     products: [
         .executable(name: "meshtrackd", targets: ["meshtrackd"]),
