@@ -7,3 +7,9 @@
 --commas inline
 --self remove
 --stripunusedargs closure-only
+
+# wrapMultilineStatementBraces wraps the `{` of a multiline `if`/`guard` onto its
+# own line, which directly contradicts SwiftLint's `opening_brace` rule (brace must
+# stay on the declaration line). Disable it so both gates can be green; the codebase
+# keeps the same-line brace style SwiftLint enforces.
+--disable wrapMultilineStatementBraces

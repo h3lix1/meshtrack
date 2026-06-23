@@ -160,7 +160,6 @@
         /// The animated trace overlay, on its demand-driven schedule (idles when nothing
         /// is animating). Extracted from `body` to keep the view-builder expression within
         /// the Swift type-checker's budget.
-        @ViewBuilder
         private func traceOverlay(_ derived: DerivedView) -> some View {
             TimelineView(traceAnimationSchedule(for: derived.visibleTraces)) { timeline in
                 let renderClock = clockOverride ?? timeline.date.timeIntervalSinceReferenceDate
@@ -181,7 +180,6 @@
 
         /// The floating channel-filter + viz-settings panel, extracted from `body` for the
         /// same type-checker reason.
-        @ViewBuilder
         private func controlsPanel(_ derived: DerivedView, panelMaxHeight: CGFloat) -> some View {
             VStack(alignment: .trailing, spacing: 12) {
                 ChannelFilterControl(filter: channelFilter, presets: availablePresets)

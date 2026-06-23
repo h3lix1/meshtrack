@@ -85,4 +85,7 @@ public enum StoreError: Error, Equatable, Sendable {
     /// A unique constraint (e.g. the observation dedup index) rejected a write.
     /// `details` carries the underlying SQLite message for diagnostics.
     case duplicate(details: String)
+    /// Encoded JSON could not be read back as UTF-8 before persisting. Should never
+    /// happen for `JSONEncoder` output, but surfaced instead of force-unwrapping.
+    case encodingFailed(details: String)
 }

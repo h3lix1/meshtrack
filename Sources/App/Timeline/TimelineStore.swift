@@ -31,8 +31,10 @@ public extension MeshStore {
         let untilNanos = until.nanosecondsSinceEpoch
         let rows: [ObservationRecord] = try await writer.read { db in
             try ObservationRecord
-                .filter(sql: "COALESCE(ingest_time, rx_time) BETWEEN ? AND ?",
-                        arguments: [sinceNanos, untilNanos])
+                .filter(
+                    sql: "COALESCE(ingest_time, rx_time) BETWEEN ? AND ?",
+                    arguments: [sinceNanos, untilNanos]
+                )
                 .order(sql: "COALESCE(ingest_time, rx_time)")
                 .fetchAll(db)
         }

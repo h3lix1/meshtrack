@@ -89,14 +89,13 @@ struct MeshtrackApp: App {
         let themeController = ThemeController()
         let revision = LiveConfigRevision()
         let model = SettingsModel()
-        Self.registerTabs(
-            on: model,
+        Self.registerTabs(on: model, dependencies: SettingsTabDependencies(
             ports: ConfigPorts(gateway: gateway, credentials: credentials, dataSources: dataSources),
             store: store,
             channelKeys: channelKeys,
             themeController: themeController,
             revision: revision
-        )
+        ))
         _settingsModel = State(initialValue: model)
         _themeController = State(initialValue: themeController)
         _configRevision = State(initialValue: revision)
@@ -188,32 +187,25 @@ struct MeshtrackApp: App {
     /// from `init` so the registry is fully populated before the Settings window
     /// first renders (the initially-selected tab then shows its content immediately).
     @MainActor
-    private static func registerTabs(
-        on model: SettingsModel,
-        ports: ConfigPorts,
-        store: MeshStore,
-        channelKeys: DatabaseKeyStore,
-        themeController: ThemeController,
-        revision: LiveConfigRevision
-    ) {
+    private static func registerTabs(on model: SettingsModel, dependencies deps: SettingsTabDependencies) {
         model.register(.connection) {
             AnyView(ConnectionSettingsView(viewModel: ConnectionSettingsViewModel(
-                gateway: ports.gateway,
-                credentials: ports.credentials,
+                gateway: deps.ports.gateway,
+                credentials: deps.ports.credentials,
                 test: { await probeBrokerConnection($0, password: $1) },
-                dataSourceStore: ports.dataSources,
-                revision: revision
+                dataSourceStore: deps.ports.dataSources,
+                revision: deps.revision
             )))
         }
         model.register(.channels) {
             AnyView(ChannelsSettingsView(viewModel: ChannelsSettingsViewModel(
-                keys: LocalChannelManager(keys: channelKeys, store: store)
+                keys: LocalChannelManager(keys: deps.channelKeys, store: deps.store)
             )))
         }
         model.register(.general) {
             AnyView(GeneralSettingsView(viewModel: GeneralSettingsViewModel(
-                gateway: ports.gateway,
-                onThemeSelected: { themeController.apply($0) }
+                gateway: deps.ports.gateway,
+                onThemeSelected: { deps.themeController.apply($0) }
             )))
         }
         model.register(.alerts) {
@@ -221,7 +213,7 @@ struct MeshtrackApp: App {
             // stale-threshold HOURS become canonical SECONDS on save (and back on load),
             // matching what the rule engine evaluates (Finding 11).
             AnyView(AlertsConfigView(viewModel: AlertsConfigViewModel(
-                rules: HoursToSecondsAlertRuleStore(wrapping: MeshStoreAlertRuleStore(store: store))
+                rules: HoursToSecondsAlertRuleStore(wrapping: MeshStoreAlertRuleStore(store: deps.store))
             )))
         }
         model.register(.about) { AnyView(AboutSettingsTab()) }
@@ -236,6 +228,18 @@ struct ConfigPorts {
     let gateway: any ConfigGateway
     let credentials: any CredentialStore
     let dataSources: any DataSourceStore
+}
+
+/// Everything `registerTabs` needs to build each Settings tab's view model, bundled
+/// so the registrar takes one dependency argument instead of six (`ConfigPorts` keeps
+/// the broker/credential/data-source trio together within it).
+@MainActor
+struct SettingsTabDependencies {
+    let ports: ConfigPorts
+    let store: MeshStore
+    let channelKeys: DatabaseKeyStore
+    let themeController: ThemeController
+    let revision: LiveConfigRevision
 }
 
 /// Holds cross-window navigation state: which Settings tab to show, and whether

@@ -6,3 +6,4 @@ disabled_rules:
   - force_cast
   - identifier_name
   - function_parameter_count   # test fixture builders take many params
+  - type_body_length           # a @Suite legitimately groups many @Test cases

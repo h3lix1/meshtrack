@@ -77,7 +77,9 @@ public final class DatabaseKeyStore: KeyStore {
         let raw = Dictionary(uniqueKeysWithValues: keys.map {
             (String($0.key), Data($0.value.psk).base64EncodedString())
         })
-        let json = try String(decoding: JSONEncoder().encode(raw), as: UTF8.self)
+        guard let json = try String(bytes: JSONEncoder().encode(raw), encoding: .utf8) else {
+            throw StoreError.encodingFailed(details: "channel keys JSON was not valid UTF-8")
+        }
         try writer.write { db in
             try db.execute(
                 sql: """

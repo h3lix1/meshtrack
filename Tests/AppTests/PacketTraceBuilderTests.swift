@@ -246,11 +246,13 @@ struct PacketTraceBuilderTests {
             relayNode: 0, hopStart: 3, hopLimit: 1, rxTime: .epoch
         )
 
-        let trace = try #require(PacketTraceBuilder.build(receptions: [reception], positions: positions).first)
+        let trace = try #require(PacketTraceBuilder.build(receptions: [reception], positions: positions)
+            .first)
 
         #expect(trace.edges.map(\.from) == [positions[source]])
         #expect(trace.edges.map(\.to) == [positions[gateway]])
-        #expect(trace.edges.map(\.hopIndex) == [1]) // an undecomposable 2-hop path, drawn as one first-hop segment
+        #expect(trace.edges
+            .map(\.hopIndex) == [1]) // an undecomposable 2-hop path, drawn as one first-hop segment
         #expect(trace.hops == 2) // the true hop count is still reported on the badge
     }
 

@@ -108,8 +108,14 @@ extension PacketTraceBuilder {
             }
             .min { lhs, rhs in
                 if lhs.hop != rhs.hop { return lhs.hop > rhs.hop } // prefer the closest preceding hop
-                let lhsDistance = Haversine.distanceMeters(from: lhs.anchor.position, to: context.gatewayPosition)
-                let rhsDistance = Haversine.distanceMeters(from: rhs.anchor.position, to: context.gatewayPosition)
+                let lhsDistance = Haversine.distanceMeters(
+                    from: lhs.anchor.position,
+                    to: context.gatewayPosition
+                )
+                let rhsDistance = Haversine.distanceMeters(
+                    from: rhs.anchor.position,
+                    to: context.gatewayPosition
+                )
                 if lhsDistance == rhsDistance { return lhs.anchor.nodeID < rhs.anchor.nodeID }
                 return lhsDistance < rhsDistance
             }?.anchor
