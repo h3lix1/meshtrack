@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Resources/AppIcon.png" alt="Meshtrack logo" width="128">
+</p>
+
 # Meshtrack
 
 A macOS-native command-and-monitoring app for Meshtastic fleets: a headless

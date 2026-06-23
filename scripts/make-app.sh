@@ -24,6 +24,7 @@ BUILD_VERSION="${MESHTRACK_BUILD:-$(git rev-list --count HEAD 2>/dev/null || ech
 MIN_MACOS_VERSION="${MESHTRACK_MIN_MACOS_VERSION:-26.0}"
 SIGN_IDENTITY="${MESHTRACK_SIGN_IDENTITY:-}"
 APP="${APP_OUTPUT:-$APP_NAME.app}"
+APP_ICON="Resources/AppIcon.icns"
 
 echo "==> building $EXE ($CONFIG)"
 swift build -c "$CONFIG" --product "$EXE"
@@ -33,6 +34,7 @@ echo "==> assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/$EXE" "$APP/Contents/MacOS/$EXE"
+cp "$APP_ICON" "$APP/Contents/Resources/AppIcon.icns"
 
 # SwiftPM resource bundles (e.g. SwiftProtobuf's privacy manifest) sit next to the
 # binary; copy them where Bundle.module resolves inside an .app.
@@ -53,6 +55,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
 	<key>CFBundleVersion</key><string>$BUILD_VERSION</string>
 	<key>LSMinimumSystemVersion</key><string>$MIN_MACOS_VERSION</string>
