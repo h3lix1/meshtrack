@@ -31,7 +31,8 @@ public struct OffendersSection: View {
                 OffendersView(
                     rows: viewModel.rows,
                     totalReceptions: viewModel.totalReceptions,
-                    onSelect: { viewModel.select(nodeNum: $0) }
+                    onSelect: { viewModel.select(nodeNum: $0) },
+                    onReset: { viewModel.reset() }
                 )
             }
         }
@@ -50,11 +51,18 @@ public struct OffendersView: View {
     public let rows: [OffenderRow]
     public let totalReceptions: Int
     private let onSelect: ((UInt32) -> Void)?
+    private let onReset: (() -> Void)?
 
-    public init(rows: [OffenderRow], totalReceptions: Int, onSelect: ((UInt32) -> Void)? = nil) {
+    public init(
+        rows: [OffenderRow],
+        totalReceptions: Int,
+        onSelect: ((UInt32) -> Void)? = nil,
+        onReset: (() -> Void)? = nil
+    ) {
         self.rows = rows
         self.totalReceptions = totalReceptions
         self.onSelect = onSelect
+        self.onReset = onReset
     }
 
     public var body: some View {
@@ -95,7 +103,13 @@ public struct OffendersView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Largest Offenders").font(.system(size: 22, weight: .bold))
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Largest Offenders").font(.system(size: 22, weight: .bold))
+                Spacer(minLength: 0)
+                if onReset != nil {
+                    resetButton
+                }
+            }
             Text("Nodes ranked by mesh-traffic burden — flood receptions, packets "
                 + "originated, spread across gateways, and chattiness per minute.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -109,6 +123,29 @@ public struct OffendersView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary).padding(.top, 2)
             }
         }
+    }
+
+    /// A subtle bordered pill that wipes both the session aggregate and the durable
+    /// all-time ranking. A bespoke tappable view (not a stock `Button`) so it snapshots
+    /// deterministically, mirroring `OffenderRowView`'s `.onTapGesture` affordance.
+    /// Only rendered when `onReset != nil`, so nil callers (snapshots/previews) are
+    /// unaffected.
+    private var resetButton: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.counterclockwise").font(.system(size: 10, weight: .semibold))
+            Text("Reset metrics").font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(
+            Capsule().fill(.white.opacity(0.06))
+        )
+        .overlay(
+            Capsule().stroke(.white.opacity(0.18), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { onReset?() }
     }
 
     private func metric(_ label: String, _ value: String) -> some View {

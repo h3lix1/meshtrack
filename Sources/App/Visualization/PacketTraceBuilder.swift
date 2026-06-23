@@ -2,7 +2,9 @@
 // per-gateway receptions (SPEC §1). The previous hop is GUESSED from the
 // relay-node hint (last byte of the relayer's node id, MeshPacket.relay_node):
 // match nodes whose id ends in that byte and pick the one nearest the receiving
-// gateway. Pure + tested.
+// gateway by default. Callers can request unambiguous-only guessing to avoid drawing
+// a misleading guessed next hop when several known nodes share that byte, or an
+// all-candidates diagnostic mode that draws every colliding relay candidate. Pure + tested.
 //
 // Receivers (item 8): the trace carries every node we have EVIDENCE received the packet,
 // each tagged with the hop at which it heard it. That is:
@@ -70,43 +72,96 @@ public struct PacketReception: Sendable, Equatable {
     }
 }
 
+public enum RelayGuessingPolicy: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
+    /// Preserve the original behavior: when several known nodes share the relay byte,
+    /// pick the candidate nearest the reporting gateway.
+    case nearestCandidate
+    /// Draw a guessed relay only when the relay byte identifies exactly one known node.
+    /// Ambiguous bytes fall back to the direct source→gateway edge and do not add a
+    /// guessed relay receiver.
+    case unambiguousOnly
+    /// Diagnostic mode: draw every known relay candidate whose node id ends with the
+    /// reported relay byte, even when that makes the graph intentionally noisy.
+    case allCandidates
+
+    public var id: Self {
+        self
+    }
+}
+
 public enum PacketTraceBuilder {
     public static func build(
         receptions: [PacketReception],
         positions: [Int64: GeoPoint],
-        startedAt: Double = 0
+        startedAt: Double = 0,
+        relayGuessing: RelayGuessingPolicy = .nearestCandidate,
+        nonRelayNodes: Set<Int64> = []
     ) -> [PacketTrace] {
         Dictionary(grouping: receptions, by: \.packetID)
-            .compactMap { trace(receptions: $0.value, positions: positions, startedAt: startedAt) }
+            .compactMap {
+                trace(
+                    receptions: $0.value,
+                    positions: positions,
+                    startedAt: startedAt,
+                    relayGuessing: relayGuessing,
+                    nonRelayNodes: nonRelayNodes
+                )
+            }
             .sorted { $0.id < $1.id }
     }
 
     private static func trace(
         receptions: [PacketReception],
         positions: [Int64: GeoPoint],
-        startedAt: Double
+        startedAt: Double,
+        relayGuessing: RelayGuessingPolicy,
+        nonRelayNodes: Set<Int64>
     ) -> PacketTrace? {
         guard let first = receptions.first, let sourcePosition = positions[first.fromNode] else { return nil }
         let source = first.fromNode
         var edges: [TraceEdge] = []
-        var receivers = ReceiverSet()
+        var receivers = PacketTraceReceiverSet()
 
-        for reception in receptions {
-            // Record EVERY distinct gateway that reported this packet id (item 8 §2) — even
-            // one whose position is unknown, so it surfaces in the textual list rather than
-            // being silently dropped. Edges still need a position, so legs draw only when we
-            // can place both ends.
-            recordGateway(reception, into: &receivers, positions: positions)
-            guard let gatewayPosition = receivers.positionedGateway(reception, positions),
-                  receivers.markEdgesBuilt(for: reception) else { continue }
+        var knownArrivals: Set<PacketRouteArrival> = []
+        for reception in receptions.sortedByRouteOrder() {
+            guard let gatewayPosition = receivers.positionedGateway(reception, positions) else {
+                recordGateway(reception, into: &receivers, positions: positions, heardFrom: nil)
+                continue
+            }
+            guard receivers.markEdgesBuilt(for: reception) else { continue }
             let leg = journey(
-                reception, source: source, sourcePosition: sourcePosition,
-                gatewayPosition: gatewayPosition, positions: positions
+                reception,
+                context: PacketTraceJourneyContext(
+                    source: source,
+                    sourcePosition: sourcePosition,
+                    gatewayPosition: gatewayPosition,
+                    positions: positions,
+                    relayGuessing: relayGuessing,
+                    knownArrivals: knownArrivals,
+                    nonRelayNodes: nonRelayNodes
+                )
             )
             edges += leg.edges
-            if let relay = leg.relay {
+            knownArrivals.formUnion(leg.arrivals)
+            // Record EVERY distinct gateway that reported this packet id (item 8 §2) — even
+            // one whose position is unknown, so it surfaces in the textual list rather than
+            // being silently dropped. The receiver keeps its resolved previous-hop/router
+            // anchor so "Show all receivers" can fan out from the correct hop.
+            recordGateway(
+                reception,
+                into: &receivers,
+                positions: positions,
+                heardFrom: leg.receiverAnchor
+            )
+            for relay in leg.relays {
                 // The relay heard the packet one hop before the gateway it fed.
-                receivers.record(relay, hop: max(1, reception.cappedHops - 1), kind: .relay, positions)
+                receivers.record(
+                    relay.nodeID,
+                    hop: relay.hop,
+                    kind: .relay,
+                    positions,
+                    heardFrom: relay.heardFrom
+                )
             }
         }
         recordDestination(receptions, source: source, into: &receivers, positions: positions)
@@ -122,11 +177,18 @@ public enum PacketTraceBuilder {
     /// known position → listed). Dedup keeps the lowest hop seen for the node.
     private static func recordGateway(
         _ reception: PacketReception,
-        into receivers: inout ReceiverSet,
-        positions: [Int64: GeoPoint]
+        into receivers: inout PacketTraceReceiverSet,
+        positions: [Int64: GeoPoint],
+        heardFrom: PacketReceiverAnchor?
     ) {
         guard let gateway = reception.gatewayNode else { return }
-        receivers.record(gateway, hop: reception.cappedHops, kind: .gateway, positions)
+        receivers.record(
+            gateway,
+            hop: reception.cappedHops,
+            kind: .gateway,
+            positions,
+            heardFrom: heardFrom
+        )
     }
 
     /// Record the packet's addressed destination as its last-hop recipient (item 8 §1),
@@ -136,108 +198,11 @@ public enum PacketTraceBuilder {
     private static func recordDestination(
         _ receptions: [PacketReception],
         source: Int64,
-        into receivers: inout ReceiverSet,
+        into receivers: inout PacketTraceReceiverSet,
         positions: [Int64: GeoPoint]
     ) {
         guard let destination = receptions.lazy.compactMap(\.destinationNode).first else { return }
         let maxHop = max(1, receptions.map(\.hops).max() ?? 1)
         receivers.record(destination, hop: maxHop, kind: .destination, positions, force: true)
-    }
-
-    /// Accumulates the receiver set for one packet: positioned (drawable) receivers deduped
-    /// by node keeping the lowest hop, plus the unpositioned ones we can only list, plus the
-    /// gateways we've already drawn legs for (so a re-reception doesn't double-draw).
-    private struct ReceiverSet {
-        private var positionedByID: [Int64: TraceReceiver] = [:]
-        private var unpositionedByID: [Int64: UnpositionedReceiver] = [:]
-        private var edgesBuilt: Set<Int64> = []
-
-        /// The first time we see a positioned gateway, claim it for leg-building so the same
-        /// gateway reported twice doesn't draw duplicate edges.
-        mutating func markEdgesBuilt(for reception: PacketReception) -> Bool {
-            guard let gateway = reception.gatewayNode else { return false }
-            return edgesBuilt.insert(gateway).inserted
-        }
-
-        func positionedGateway(_ reception: PacketReception, _ positions: [Int64: GeoPoint]) -> GeoPoint? {
-            reception.gatewayNode.flatMap { positions[$0] }
-        }
-
-        /// Insert/merge a receiver. With a known position it goes in the drawable set; without
-        /// one it goes in the listed set. `force` lets the destination override a node already
-        /// recorded at a lower hop (it is genuinely the furthest/last hop, item 8).
-        mutating func record(
-            _ nodeID: Int64, hop: Int, kind: TraceReceiver.Kind,
-            _ positions: [Int64: GeoPoint], force: Bool = false
-        ) {
-            if let position = positions[nodeID] {
-                if let existing = positionedByID[nodeID], !force, existing.hop <= hop { return }
-                positionedByID[nodeID] = TraceReceiver(
-                    nodeID: nodeID, position: position, hop: hop, kind: kind
-                )
-            } else {
-                if let existing = unpositionedByID[nodeID], !force, existing.hop <= hop { return }
-                unpositionedByID[nodeID] = UnpositionedReceiver(nodeID: nodeID, hop: hop, kind: kind)
-            }
-        }
-
-        func positioned() -> [TraceReceiver] {
-            positionedByID.values.sorted { $0.nodeID < $1.nodeID }
-        }
-
-        func unpositioned() -> [UnpositionedReceiver] {
-            unpositionedByID.values.sorted { $0.nodeID < $1.nodeID }
-        }
-    }
-
-    /// One leg of the journey plus the relay node it routed through (nil when direct).
-    private struct Leg {
-        let edges: [TraceEdge]
-        let relay: Int64?
-    }
-
-    private static func journey(
-        _ reception: PacketReception, source: Int64, sourcePosition start: GeoPoint,
-        gatewayPosition gateway: GeoPoint, positions: [Int64: GeoPoint]
-    ) -> Leg {
-        let gatewayHop = max(1, reception.hops)
-        var excluding: Set<Int64> = [source]
-        if let gatewayNode = reception.gatewayNode { excluding.insert(gatewayNode) }
-        let relay = reception.relayNode == 0 ? nil
-            : guessRelay(
-                relayByte: reception.relayNode, excluding: excluding, positions: positions, near: gateway
-            )
-        guard let relay, let relayPosition = positions[relay] else {
-            return Leg(
-                edges: [TraceEdge(from: start, to: gateway, kind: .observed, hopIndex: gatewayHop)],
-                relay: nil
-            )
-        }
-        let relayHop = max(1, gatewayHop - 1)
-        return Leg(
-            edges: [
-                TraceEdge(from: start, to: relayPosition, kind: .guessed, hopIndex: relayHop),
-                TraceEdge(from: relayPosition, to: gateway, kind: .observed, hopIndex: gatewayHop)
-            ],
-            relay: relay
-        )
-    }
-
-    /// Guess the relayer: a node whose id ends in `relayByte`, nearest to `near`.
-    static func guessRelay(
-        relayByte: UInt8, excluding: Set<Int64>, positions: [Int64: GeoPoint], near: GeoPoint
-    ) -> Int64? {
-        positions.keys
-            .filter { UInt8(truncatingIfNeeded: $0) == relayByte && !excluding.contains($0) }
-            .min { distance($0, to: near, positions) < distance($1, to: near, positions) }
-    }
-
-    private static func distance(
-        _ node: Int64,
-        to reference: GeoPoint,
-        _ positions: [Int64: GeoPoint]
-    ) -> Double {
-        guard let point = positions[node] else { return .infinity }
-        return Haversine.distanceMeters(from: point, to: reference)
     }
 }

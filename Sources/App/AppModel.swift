@@ -23,6 +23,11 @@ public final class AppModel {
     public var nodes: [NetworkNode]
     /// Animated packet traces for the Network section.
     public var traces: [PacketTrace]
+    /// Synthetic replay clock for VCR review frames. nil means the map should use
+    /// its live animation clock.
+    public var replayClock: Double?
+    /// Packet currently focused from the map legend / replay controls.
+    public var focusedPacketID: UInt32?
     /// Whether the Network section animates a live `MKMapView`-style screen
     /// (`true`) or renders the deterministic Canvas-only map (`false`, snapshots).
     public var live: Bool
@@ -37,6 +42,9 @@ public final class AppModel {
     /// "Open analytics" / "Apply config" actions) can route the operator to another
     /// section instead of doing nothing. `nil` until the shell wires it.
     @ObservationIgnored public var onNavigate: ((AppSection) -> Void)?
+    /// Network-map packet focus hook. The live shell wires this to the timeline so
+    /// clicking a packet can start/stop deterministic packet replay.
+    @ObservationIgnored public var onPacketFocusChange: ((UInt32?) -> Void)?
 
     /// Section → content-view provider. Resolved by `view(for:)`. Seeded with the
     /// built-in sections; feature streams override/extend via `register(_:_:)`.
@@ -56,6 +64,8 @@ public final class AppModel {
     ) {
         self.nodes = nodes
         self.traces = traces
+        replayClock = nil
+        focusedPacketID = nil
         self.live = live
         registerDefaults()
     }

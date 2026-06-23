@@ -31,6 +31,10 @@ public final class NetworkViewModel {
     /// The channel preset each node's live packets last arrived on, by node id (Task 4).
     public private(set) var presetByNode: [Int64: ChannelPreset] = [:]
 
+    /// How live traces should treat relay-byte guesses when several nodes share the
+    /// same last-byte/router value.
+    public private(set) var relayGuessing: RelayGuessingPolicy = .nearestCandidate
+
     /// The channel preset each WINDOWED packet arrived on, by packet id, captured
     /// immutably at ingest (Finding 20). Unlike `presetByNode` this is never rewritten
     /// when the source node later transmits elsewhere, so each trace keeps the channel it
@@ -42,6 +46,10 @@ public final class NetworkViewModel {
     private var nodeIndexByID: [Int64: Int] = [:]
 
     private var positions: [Int64: GeoPoint] = [:]
+    /// Nodes whose firmware role is CLIENT_MUTE — they never rebroadcast, so the trace
+    /// builder excludes them from relay-byte guesses (they can only be the source or the
+    /// addressed destination, never an intermediate relay).
+    private var nonRelayNodes: Set<Int64> = []
     private var collector: LivePacketTraceCollector
     private let store: MeshStore
 
@@ -87,11 +95,16 @@ public final class NetworkViewModel {
 
         var built: [NetworkNode] = []
         var positionMap: [Int64: GeoPoint] = [:]
+        var muteNodes: Set<Int64> = []
         built.reserveCapacity(records.count)
         positionMap.reserveCapacity(records.count)
         for record in records {
+            if NodeRole.isNonRelaying(rawRole: record.role) { muteNodes.insert(record.node_num) }
             guard let latest = fixes[record.node_num] else { continue }
-            let geo = GeoPoint(latitude: latest.lat, longitude: latest.lon)
+            let geo = stabilizedPosition(
+                for: record.node_num,
+                fix: GeoPoint(latitude: latest.lat, longitude: latest.lon)
+            )
             positionMap[record.node_num] = geo
             built.append(NetworkNode(
                 id: record.node_num,
@@ -104,7 +117,25 @@ public final class NetworkViewModel {
         }
         setNodes(built)
         positions = positionMap
+        nonRelayNodes = muteNodes
         traces = rebuiltTraces()
+    }
+
+    /// Below this, a fresh position fix is treated as GPS jitter and the node keeps the
+    /// position it is already showing. The slow refresh loop re-runs `loadNodes()` every
+    /// few seconds; without this deadband each pass snapped every marker (and its Canvas
+    /// glow) to the newest jittery fix, so the whole map visibly "shook" once per cycle.
+    /// Tunable: larger suppresses more jitter but delays showing small real moves.
+    static let positionDeadbandMeters: Double = 5
+
+    /// The position to show for a node given its newest fix: the previously-shown position
+    /// when the fix only moved within the jitter deadband (so a stationary node stops
+    /// twitching), otherwise the new fix. New nodes (no prior position) take the fix as-is.
+    private func stabilizedPosition(for nodeID: Int64, fix: GeoPoint) -> GeoPoint {
+        guard let index = nodeIndexByID[nodeID] else { return fix }
+        let current = nodes[index].position
+        let moved = Haversine.distanceMeters(from: current, to: fix)
+        return moved < Self.positionDeadbandMeters ? current : fix
     }
 
     /// Feed one decoded packet into the live trace animation.
@@ -124,6 +155,14 @@ public final class NetworkViewModel {
     public func ingest(_ packet: DecodedPacket) {
         collector.ingest(packet, arrivalClock: Self.animationClockNow())
         recordChannel(packet)
+        scheduleTraceRebuild()
+    }
+
+    /// Rebuild live traces with the selected relay-guessing policy. Used by the map
+    /// settings toggle that suppresses ambiguous guessed next hops.
+    public func setRelayGuessingPolicy(_ policy: RelayGuessingPolicy) {
+        guard relayGuessing != policy else { return }
+        relayGuessing = policy
         scheduleTraceRebuild()
     }
 
@@ -183,8 +222,14 @@ public final class NetworkViewModel {
     private func flushTraceRebuild() async {
         let collectorSnapshot = collector
         let positionsSnapshot = positions
+        let relayGuessing = relayGuessing
+        let nonRelayNodes = nonRelayNodes
         let built = await Task.detached {
-            collectorSnapshot.traces(positions: positionsSnapshot)
+            collectorSnapshot.traces(
+                positions: positionsSnapshot,
+                relayGuessing: relayGuessing,
+                nonRelayNodes: nonRelayNodes
+            )
         }.value
         traces = stamped(built)
     }
@@ -192,7 +237,11 @@ public final class NetworkViewModel {
     /// Rebuild the live traces from the collector synchronously (the load path, where the
     /// caller is already off the hot per-packet loop and wants the result immediately).
     private func rebuiltTraces() -> [PacketTrace] {
-        stamped(collector.traces(positions: positions))
+        stamped(collector.traces(
+            positions: positions,
+            relayGuessing: relayGuessing,
+            nonRelayNodes: nonRelayNodes
+        ))
     }
 
     /// Stamp each freshly-built trace with the channel it arrived on (Finding 20) and

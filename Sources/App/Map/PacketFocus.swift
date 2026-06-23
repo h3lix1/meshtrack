@@ -51,6 +51,23 @@ public enum PacketFocus {
         return traces.filter { $0.id == selectedPacketID }
     }
 
+    /// Merge the cached focused trace back into a live trace window after the collector
+    /// evicts it. This keeps the focused packet visible/highlightable until the operator
+    /// explicitly clears focus, while still letting normal live windows retire unselected
+    /// packets.
+    public static func pinSelectedTrace(
+        _ traces: [PacketTrace],
+        selectedPacketID: UInt32?,
+        pinnedTrace: PacketTrace?
+    ) -> [PacketTrace] {
+        guard let selectedPacketID,
+              let pinnedTrace,
+              pinnedTrace.id == selectedPacketID
+        else { return traces }
+        guard !traces.contains(where: { $0.id == selectedPacketID }) else { return traces }
+        return traces + [pinnedTrace]
+    }
+
     /// True when the given packet id is what's currently focused — for highlighting the
     /// legend row and toggling focus off on a repeat tap.
     public static func isFocused(_ id: UInt32, selectedPacketID: UInt32?) -> Bool {

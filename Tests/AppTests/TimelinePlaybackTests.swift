@@ -59,6 +59,7 @@ struct TimelinePlaybackTests {
     func `a sequence of frame ticks while playing advances the playhead fraction`() async throws {
         let viewModel = try await model(seededStore())
         try await viewModel.load()
+        #expect(viewModel.focusedPacketID == nil)
         viewModel.play() // from live → review at window.start, fraction ~0
         let startFraction = viewModel.controlState.playheadFraction
 
@@ -72,6 +73,61 @@ struct TimelinePlaybackTests {
         #expect(viewModel.controlState.playheadFraction > startFraction)
         #expect(viewModel.playhead > viewModel.window.start)
         #expect(viewModel.playhead < viewModel.window.end)
+    }
+
+    @Test
+    func `focused packet replay loops the full packet animation until paused`() async throws {
+        let viewModel = try await model(seededStore(count: 1, endOffset: 600))
+        try await viewModel.load()
+        let didFocus = viewModel.focusPacket(0xA0, autoplay: true)
+
+        #expect(didFocus)
+        #expect(viewModel.focusedPacketID == 0xA0)
+        #expect(viewModel.mode == .review)
+        #expect(viewModel.isPlaying)
+        #expect(viewModel.traces.map(\.id) == [0xA0])
+        #expect(viewModel.clock == 0)
+
+        viewModel.tick(delta: 1)
+        #expect(abs(viewModel.clock - 1) < 1e-9)
+
+        // This fixture's direct edge is hop 2, so the default sequential animation
+        // completes at 2.4s. During the configured delay the frame stays complete.
+        viewModel.tick(delta: 2)
+        #expect(abs(viewModel.clock - 2.4) < 1e-9)
+
+        viewModel.pause()
+        viewModel.tick(delta: 10)
+        #expect(abs(viewModel.clock - 2.4) < 1e-9)
+    }
+
+    @Test
+    func `focused packet repeat delay is configurable in real seconds`() async throws {
+        let viewModel = try await model(seededStore(count: 1, endOffset: 600))
+        try await viewModel.load()
+        viewModel.packetRepeatDelaySeconds = 4
+        #expect(viewModel.focusPacket(0xA0, autoplay: true))
+
+        viewModel.tick(delta: 5.9) // 2.4s animation + 3.5s of the 4s delay
+        #expect(abs(viewModel.clock - 2.4) < 1e-9)
+
+        viewModel.tick(delta: 0.6) // crosses 2.4 + 4.0 and restarts 0.1s into the loop
+        #expect(abs(viewModel.clock - 0.1) < 1e-9)
+    }
+
+    @Test
+    func `focusing an unknown packet does not enter a blank playback state`() async throws {
+        let viewModel = try await model(seededStore(count: 1, endOffset: 600))
+        try await viewModel.load()
+        let liveTraceCount = viewModel.traces.count
+
+        let didFocus = viewModel.focusPacket(0xDEAD_BEEF, autoplay: true)
+
+        #expect(!didFocus)
+        #expect(viewModel.focusedPacketID == nil)
+        #expect(viewModel.mode == .live)
+        #expect(!viewModel.isPlaying)
+        #expect(viewModel.traces.count == liveTraceCount)
     }
 
     @Test

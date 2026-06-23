@@ -181,6 +181,15 @@ public extension MeshStore {
         }
     }
 
+    /// Wipe the durable all-time node ranking (the offenders source) so it starts
+    /// fresh. Scoped to `node_traffic_stat` ONLY — `port_traffic_stat` (the separate
+    /// Ports screen) is left untouched.
+    func clearNodeTraffic() async throws {
+        try await writer.write { db in
+            try db.execute(sql: "DELETE FROM \(TrafficStatsTable.nodeTraffic)")
+        }
+    }
+
     // MARK: Shared single-row upserts (used by the bulk path)
 
     private static func upsertNode(_ record: NodeTrafficStatRecord, into db: Database) throws {

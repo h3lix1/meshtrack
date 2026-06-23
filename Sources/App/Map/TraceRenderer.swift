@@ -51,15 +51,43 @@ public struct TraceRenderer {
         focusedPacketID == id
     }
 
+    // MARK: Viewport culling (opt-in)
+
+    /// A generous margin around the visible bounds so blurred glows, labels and comet
+    /// trails that bleed in from just off-screen are NOT clipped. Used by the opt-in
+    /// culling paths only; when `cullingBounds` is nil these helpers are never consulted.
+    static let cullingMargin: CGFloat = 80
+
+    /// True if `point` lies within `bounds` expanded by `margin` on every side.
+    static func isPointVisible(_ point: CGPoint, in bounds: CGRect, margin: CGFloat) -> Bool {
+        bounds.insetBy(dx: -margin, dy: -margin).contains(point)
+    }
+
+    /// True if the segment a→b's bounding box intersects `bounds` expanded by `margin`.
+    /// Conservative: keeps any edge that crosses or merely touches the viewport so we
+    /// never drop a line that is partially on-screen.
+    static func isSegmentVisible(
+        from a: CGPoint, to b: CGPoint, in bounds: CGRect, margin: CGFloat
+    ) -> Bool {
+        let box = CGRect(
+            x: min(a.x, b.x),
+            y: min(a.y, b.y),
+            width: abs(a.x - b.x),
+            height: abs(a.y - b.y)
+        )
+        return bounds.insetBy(dx: -margin, dy: -margin).intersects(box)
+    }
+
     // MARK: Traces
 
     public func drawTraces(
         _ traces: [PacketTrace],
         in context: inout GraphicsContext,
-        projection: some TraceProjection
+        projection: some TraceProjection,
+        cullingBounds: CGRect? = nil
     ) {
         for trace in traces {
-            drawTrace(trace, in: &context, projection: projection)
+            drawTrace(trace, in: &context, projection: projection, cullingBounds: cullingBounds)
         }
     }
 
@@ -76,18 +104,22 @@ public struct TraceRenderer {
     private func drawTrace(
         _ trace: PacketTrace,
         in context: inout GraphicsContext,
-        projection: some TraceProjection
+        projection: some TraceProjection,
+        cullingBounds: CGRect? = nil
     ) {
         let color = trace.color
         let focused = isFocused(trace.id)
         for edge in trace.edges {
             let fraction = progress(trace, edge)
             guard fraction > 0 else { continue }
-            let segment = Segment(
-                start: projection.point(for: edge.from),
-                end: projection.point(for: edge.to),
-                fraction: fraction
-            )
+            let start = projection.point(for: edge.from)
+            let end = projection.point(for: edge.to)
+            // Skip an edge whose projected span lies wholly off-screen (opt-in only).
+            if let bounds = cullingBounds,
+               !Self.isSegmentVisible(from: start, to: end, in: bounds, margin: Self.cullingMargin) {
+                continue
+            }
+            let segment = Segment(start: start, end: end, fraction: fraction)
             drawEdge(edge, segment: segment, color: color, in: &context)
             // When this packet is focused, label EACH hop with its hop number along the
             // path (item 3) — not just the final/max hop badge below.
@@ -102,12 +134,18 @@ public struct TraceRenderer {
             drawReceivers(trace, in: &context, projection: projection)
         }
         if detail == .full, let badge = badgePoint(trace, projection: projection) {
-            drawBadge(
-                "\(trace.hops)\u{2009}hop\(trace.hops == 1 ? "" : "s")",
-                at: badge,
-                color: color,
-                in: context
-            )
+            // Gate the hop badge on visibility when culling is opted in.
+            let badgeVisible = cullingBounds.map {
+                Self.isPointVisible(badge, in: $0, margin: Self.cullingMargin)
+            } ?? true
+            if badgeVisible {
+                drawBadge(
+                    "\(trace.hops)\u{2009}hop\(trace.hops == 1 ? "" : "s")",
+                    at: badge,
+                    color: color,
+                    in: context
+                )
+            }
         }
     }
 
@@ -205,7 +243,7 @@ public struct TraceRenderer {
 
     /// A small "n" hop chip drawn at an edge midpoint when a packet is focused (item 3),
     /// so the operator reads hop 1, 2, 3 … along the path rather than only the final hop.
-    private func drawHopTick(_ hop: Int, at point: CGPoint, color: Color, in context: GraphicsContext) {
+    func drawHopTick(_ hop: Int, at point: CGPoint, color: Color, in context: GraphicsContext) {
         let radius: CGFloat = 8
         let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
         context.fill(circle(at: point, radius: radius), with: .color(.black.opacity(0.75)))
@@ -214,57 +252,6 @@ public struct TraceRenderer {
             Text("\(hop)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
         )
         context.draw(label, at: CGPoint(x: rect.midX, y: rect.midY))
-    }
-
-    /// Mark every node we have evidence received the focused packet — gateways, guessed
-    /// relays, and the addressed destination — each ringed and tagged with its reception
-    /// hop (item 6/8). The destination is styled distinctly (item 8). Only the rings whose
-    /// hop the wavefront has already reached are shown, so they appear in step with the
-    /// expanding animation. (Receivers without a known position can't be drawn — those are
-    /// listed textually in the legend instead, see VizLegend.receivedBy.)
-    private func drawReceivers(
-        _ trace: PacketTrace,
-        in context: inout GraphicsContext,
-        projection: some TraceProjection
-    ) {
-        for receiver in trace.receivers {
-            // Reveal a receiver once the wavefront has reached its hop ring.
-            let reached = TraceTiming.edgeProgress(
-                clock: clock, startedAt: trace.startedAt, hopIndex: receiver.hop,
-                hopDuration: hopDuration, mode: mode
-            )
-            guard reached > 0 else { continue }
-            drawReceiverRing(receiver, color: trace.color, projection: projection, in: &context)
-        }
-    }
-
-    /// Draw one receiver's ring + hop tick. The destination gets a distinct double-ring +
-    /// solid emphasis so the operator reads it as the addressed last-hop recipient (item 8);
-    /// gateways get a solid ring, guessed relays a dashed one.
-    private func drawReceiverRing(
-        _ receiver: TraceReceiver,
-        color: Color,
-        projection: some TraceProjection,
-        in context: inout GraphicsContext
-    ) {
-        let center = projection.point(for: receiver.position)
-        let ringRadius: CGFloat = receiver.isDestination ? 16 : (receiver.isGateway ? 14 : 11)
-        let dash: [CGFloat] = receiver.kind == .relay ? [3, 3] : []
-        context.stroke(
-            circle(at: center, radius: ringRadius),
-            with: .color(color.opacity(0.9)),
-            style: StrokeStyle(lineWidth: receiver.isDestination ? 3 : 2, dash: dash)
-        )
-        if receiver.isDestination {
-            // A second inner ring marks the addressed final recipient apart from gateways.
-            context.stroke(circle(at: center, radius: ringRadius - 4), with: .color(color), lineWidth: 1.5)
-        }
-        drawHopTick(
-            receiver.hop,
-            at: CGPoint(x: center.x, y: center.y - ringRadius - 8),
-            color: color,
-            in: context
-        )
     }
 
     private func drawBadge(_ text: String, at point: CGPoint, color: Color, in context: GraphicsContext) {

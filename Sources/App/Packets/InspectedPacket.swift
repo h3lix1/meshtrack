@@ -167,9 +167,13 @@ public struct InspectedPacket: Identifiable, Sendable, Equatable {
 
     // MARK: Latency (receive→publish)
 
-    /// Receive→publish latency for this packet, when an ingest time is known.
+    /// Receive→publish latency for this packet, when an ingest time is known. Measured
+    /// against the node's CLAIMED (firmware) time — the only reception timestamp that
+    /// reflects when the radio actually heard the packet; `packet.rxTime` is now our own
+    /// frame-receipt clock, against which latency would always collapse to ~0. Falls back
+    /// to that when the firmware omitted its time (latency then ~0, as documented).
     public var latency: ReceptionLatency? {
-        ReceptionLatency.between(rxTime: packet.rxTime, ingestTime: ingestTime)
+        ReceptionLatency.between(rxTime: packet.nodeRxTime ?? packet.rxTime, ingestTime: ingestTime)
     }
 
     /// Raw latency in milliseconds (rounded), when an ingest time is known. Signed

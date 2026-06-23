@@ -14,8 +14,15 @@ struct VCRControlStateTests {
             node_num: 0x0000_00FF, hexid: "!000000ff", short_name: "GW",
             node_class: .gateway, first_seen_at: 0, last_heard_at: 0
         ))
+        try await store.upsertNode(NodeRecord(
+            node_num: 0x0000_0001, hexid: "!00000001", short_name: "SRC",
+            node_class: .mobile, first_seen_at: 0, last_heard_at: 0
+        ))
         _ = try await store.appendPositionFix(PositionFixRecord(
             node_num: 0x0000_00FF, t: 1, lat: 37.5, lon: -122.0
+        ))
+        _ = try await store.appendPositionFix(PositionFixRecord(
+            node_num: 0x0000_0001, t: 1, lat: 37.0, lon: -122.0
         ))
         try await store.recordObservation(ObservationRecord(
             node_num: 0x0000_0001, packet_id: 0xAA, transport: .mqtt, gateway_id: "!000000ff",
@@ -53,5 +60,28 @@ struct VCRControlStateTests {
         let viewModel = try await loadedModel()
         viewModel.seek(to: viewModel.window.end.adding(seconds: -(45 * 60)))
         #expect(viewModel.controlState.playheadLabel == "-45m")
+    }
+
+    @Test
+    func `focused packet state exposes loop id and delay`() async throws {
+        let viewModel = try await loadedModel()
+        #expect(viewModel.focusPacket(0xAA, autoplay: true))
+        viewModel.packetRepeatDelaySeconds = 3.5
+
+        let state = viewModel.controlState
+        #expect(!state.isLive)
+        #expect(state.isPlaying)
+        #expect(state.focusedPacketID == 0xAA)
+        #expect(state.repeatDelaySeconds == 3.5)
+        #expect(state.playheadLabel == "PKT #000000aa")
+    }
+
+    @Test
+    func `repeat delay clamps to the model bounds`() async throws {
+        let viewModel = try await loadedModel()
+        viewModel.packetRepeatDelaySeconds = -5
+        #expect(viewModel.packetRepeatDelaySeconds == TimelineViewModel.minPacketRepeatDelaySeconds)
+        viewModel.packetRepeatDelaySeconds = 99
+        #expect(viewModel.packetRepeatDelaySeconds == TimelineViewModel.maxPacketRepeatDelaySeconds)
     }
 }

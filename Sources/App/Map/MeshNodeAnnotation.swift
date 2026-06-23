@@ -34,8 +34,14 @@
 
         /// Update mutable fields in place when a node moves or its stats change, so the
         /// annotation (and any open callout) tracks the latest data without a remove/add.
+        /// `coordinate` is KVO-observed by MapKit and reassigning it re-runs collision
+        /// resolution, so only touch it when it actually moved — otherwise a stats-only
+        /// change would needlessly jiggle the marker and its neighbours.
         func apply(_ other: MeshNodeAnnotation) {
-            coordinate = other.coordinate
+            if coordinate.latitude != other.coordinate.latitude
+                || coordinate.longitude != other.coordinate.longitude {
+                coordinate = other.coordinate
+            }
             title = other.title
             isGateway = other.isGateway
             batteryPercent = other.batteryPercent
@@ -57,10 +63,12 @@
     /// so this view stays intentionally minimal.
     final class MeshNodeAnnotationView: MKAnnotationView {
         static let reuseID = "MeshNodeAnnotationView"
+        private static let clusterID = "mesh-node-cluster"
 
         override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
             super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
             collisionMode = .circle
+            clusteringIdentifier = Self.clusterID
             // Selection opens our own NodeDetailPopover (Task 5), not a system callout.
             canShowCallout = false
             frame = CGRect(x: 0, y: 0, width: 16, height: 16)
@@ -72,14 +80,17 @@
             nil
         }
 
-        func configure(for annotation: MeshNodeAnnotation) {
+        func configure(for annotation: MeshNodeAnnotation, declutterLevel: MapDeclutterLevel) {
             self.annotation = annotation
-            // Co-located nodes are de-collided by Spiderfier (Task 3), not MapKit's
-            // built-in clustering — clustering would collapse a stacked site into a
-            // single bubble you can't tap into. We fan them out instead, so no
-            // clusteringIdentifier and every marker is always individually selectable.
-            clusteringIdentifier = nil
-            displayPriority = .required
+            displayPriority = annotation.isGateway ? .defaultHigh : .defaultLow
+            applyDeclutterAppearance(for: annotation, declutterLevel: declutterLevel)
+        }
+
+        /// Region-change callbacks can arrive while MapKit is updating its cluster tables.
+        /// Keep clustering/display priority stable there; changing either mid-update can
+        /// crash MapKit with a nil cluster-id dictionary key.
+        func applyDeclutterAppearance(for annotation: MeshNodeAnnotation, declutterLevel: MapDeclutterLevel) {
+            alphaValue = declutterLevel == .overview ? 0.82 : 1
             toolTip = annotation.title
             guard let layer else { return }
             let color = Self.color(for: annotation)

@@ -55,7 +55,9 @@ public struct ReplayReconstructor: Sendable {
         observations: [TimelineObservation],
         playhead: Instant,
         speed: PlaybackSpeed,
-        positions: [Int64: GeoPoint]
+        positions: [Int64: GeoPoint],
+        relayGuessing: RelayGuessingPolicy = .nearestCandidate,
+        nonRelayNodes: Set<Int64> = []
     ) -> ReplayFrame {
         let upTo = observations
             .filter { $0.rxTime <= playhead }
@@ -68,9 +70,51 @@ public struct ReplayReconstructor: Sendable {
         for observation in upTo {
             collector.ingest(decoded(observation))
         }
-        let traces = collector.traces(positions: positions, stagger: stagger)
+        let traces = collector.traces(
+            positions: positions,
+            stagger: stagger,
+            relayGuessing: relayGuessing,
+            nonRelayNodes: nonRelayNodes
+        )
         let elapsed = playhead.secondsSince(oldest.rxTime)
         return ReplayFrame(traces: traces, clock: max(0, elapsed) * speed.rawValue)
+    }
+
+    /// Reconstruct one full logical packet, regardless of where the timeline
+    /// playhead sits. This is the packet-focus replay path: every reception of the
+    /// selected packet is folded into one trace, and `clock` is supplied by the
+    /// caller's loop cursor so the same packet can restart deterministically.
+    public func focusedPacketFrame(
+        observations: [TimelineObservation],
+        packetID: UInt32,
+        clock: Double,
+        positions: [Int64: GeoPoint],
+        relayGuessing: RelayGuessingPolicy = .nearestCandidate,
+        nonRelayNodes: Set<Int64> = []
+    ) -> ReplayFrame {
+        let packetObservations = observations
+            .filter { $0.packetID == packetID }
+            .sorted { lhs, rhs in
+                if lhs.rxTime == rhs.rxTime {
+                    return (lhs.gatewayNode ?? 0) < (rhs.gatewayNode ?? 0)
+                }
+                return lhs.rxTime < rhs.rxTime
+            }
+        guard !packetObservations.isEmpty else { return .empty }
+
+        var collector = LivePacketTraceCollector(maxPackets: 1)
+        for observation in packetObservations {
+            collector.ingest(decoded(observation))
+        }
+        return ReplayFrame(
+            traces: collector.traces(
+                positions: positions,
+                stagger: stagger,
+                relayGuessing: relayGuessing,
+                nonRelayNodes: nonRelayNodes
+            ),
+            clock: max(0, clock)
+        )
     }
 
     /// The oldest observation that survives the sliding window at the playhead —

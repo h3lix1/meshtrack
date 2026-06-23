@@ -141,7 +141,12 @@ public struct IngestPipeline: Sendable {
             packet_id: Int64(packet.packetID),
             transport: Persistence.Transport(rawValue: frame.transport.rawValue) ?? .mqtt,
             gateway_id: frame.gatewayID,
-            rx_time: packet.rxTime.nanosecondsSinceEpoch,
+            // The observation's rx_time keeps the node's CLAIMED (firmware) time so the
+            // descriptive receive→publish latency (`ingest_time − rx_time`, SPEC §2.11)
+            // stays real. Everything that orders/places packets reads our own clock
+            // instead (the timeline reads ingest_time; live traces read packet.rxTime).
+            // Falls back to our frame-receipt clock when the firmware omitted its time.
+            rx_time: (packet.nodeRxTime ?? packet.rxTime).nanosecondsSinceEpoch,
             rx_rssi: packet.rxRssi,
             rx_snr: packet.rxSnr,
             hop_start: packet.hopStart.map(Int.init),

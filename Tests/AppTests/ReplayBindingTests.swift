@@ -116,4 +116,22 @@ struct ReplayBindingTests {
         viewModel.tick(delta: TimelineWindowBuilder.dayInSeconds) // run off the end
         #expect(!viewModel.isReviewing) // returned to live
     }
+
+    @Test
+    func `focused packet replay exposes a moving frame clock for the map binding`() async throws {
+        let viewModel = try await model(seededStore(count: 2, spacingSeconds: 600, endOffset: 600))
+        try await viewModel.load()
+        #expect(viewModel.focusPacket(0xA1, autoplay: true))
+        #expect(viewModel.isReviewing)
+        #expect(viewModel.traces.map(\.id) == [0xA1])
+
+        let startClock = viewModel.clock
+        viewModel.tick(delta: 0.5)
+
+        #expect(viewModel.clock > startClock)
+        #expect(viewModel.traces.map(\.id) == [0xA1])
+        viewModel.goLive()
+        #expect(!viewModel.isReviewing)
+        #expect(viewModel.focusedPacketID == nil)
+    }
 }

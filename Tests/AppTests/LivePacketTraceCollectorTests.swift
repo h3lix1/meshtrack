@@ -10,11 +10,18 @@ struct LivePacketTraceCollectorTests {
         0x0000_00EE: GeoPoint(latitude: 37.3, longitude: -121.8) // gateway B
     ]
 
-    private func packet(id: UInt32, gateway: UInt32, relay: UInt8 = 0) -> DecodedPacket {
+    private func packet(
+        id: UInt32,
+        gateway: UInt32,
+        to: UInt32 = 0xFFFF_FFFF,
+        relay: UInt8 = 0,
+        hopStart: UInt8 = 3,
+        hopLimit: UInt8 = 1
+    ) -> DecodedPacket {
         DecodedPacket(
-            from: 0x0000_0001, to: 0xFFFF_FFFF, packetID: id, channel: 0,
+            from: 0x0000_0001, to: to, packetID: id, channel: 0,
             port: .telemetry, payload: [], rxTime: .epoch,
-            hopStart: 3, hopLimit: 1, relayNode: relay, gatewayID: gateway
+            hopStart: hopStart, hopLimit: hopLimit, relayNode: relay, gatewayID: gateway
         )
     }
 
@@ -33,6 +40,65 @@ struct LivePacketTraceCollectorTests {
         collector.ingest(packet(id: 0xAA, gateway: 0x0000_00EE))
         #expect(collector.packetCount == 1)
         #expect(collector.traces(positions: positions).first?.edges.count == 2)
+    }
+
+    @Test
+    func `many gateway reports for one packet stay in the receiver roster`() throws {
+        let positionedGateways = (0 ..< 24).map { UInt32(0x0000_1000 + $0) }
+        let unpositionedGateways = (0 ..< 8).map { UInt32(0x0000_2000 + $0) }
+        let destination: UInt32 = 0x0000_00D5
+        var positions: [Int64: GeoPoint] = [
+            0x0000_0001: GeoPoint(latitude: 37.0, longitude: -122.0),
+            Int64(destination): GeoPoint(latitude: 37.9, longitude: -122.0),
+            0x0000_0BAD: GeoPoint(latitude: 38.1, longitude: -122.0) // silent overhearer
+        ]
+        for (offset, gateway) in positionedGateways.enumerated() {
+            positions[Int64(gateway)] = GeoPoint(
+                latitude: 37.1 + Double(offset) * 0.01,
+                longitude: -122.2
+            )
+        }
+
+        var collector = LivePacketTraceCollector(maxPackets: 4)
+        for gateway in positionedGateways + unpositionedGateways {
+            collector.ingest(packet(
+                id: 0xFEED_FACE,
+                gateway: gateway,
+                to: destination,
+                relay: 0,
+                hopStart: 3,
+                hopLimit: 1
+            ))
+        }
+
+        let trace = try #require(collector.traces(positions: positions).first)
+        let drawnGateways = Set(trace.receivers.filter(\.isGateway).map(\.nodeID))
+        let listedGateways = Set(trace.unpositionedReceivers.filter { $0.kind == .gateway }.map(\.nodeID))
+        let destinationReceiver = try #require(trace.receivers.first { $0.nodeID == Int64(destination) })
+
+        #expect(drawnGateways == Set(positionedGateways.map(Int64.init)))
+        #expect(listedGateways == Set(unpositionedGateways.map(Int64.init)))
+        #expect(destinationReceiver.kind == .destination)
+        #expect(destinationReceiver.hop == 2)
+        #expect(!trace.receivers.contains { $0.nodeID == 0x0000_0BAD })
+        #expect(!trace.unpositionedReceivers.contains { $0.nodeID == 0x0000_0BAD })
+    }
+
+    @Test
+    func `ambiguous relay guesses can be suppressed through the collector`() throws {
+        let ambiguousPositions = positions.merging([
+            0x0000_11AB: GeoPoint(latitude: 37.4, longitude: -122.0),
+            0x0000_22AB: GeoPoint(latitude: 37.1, longitude: -122.0)
+        ]) { _, new in new }
+
+        var collector = LivePacketTraceCollector()
+        collector.ingest(packet(id: 0xABCD, gateway: 0x0000_00FF, relay: 0xAB))
+
+        let trace = try #require(
+            collector.traces(positions: ambiguousPositions, relayGuessing: .unambiguousOnly).first
+        )
+        #expect(trace.edges.map(\.kind) == [.observed])
+        #expect(!trace.receivers.contains { $0.kind == .relay })
     }
 
     @Test

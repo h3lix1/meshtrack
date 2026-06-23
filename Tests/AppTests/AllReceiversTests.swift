@@ -166,6 +166,46 @@ struct ReceivedByTests {
     }
 
     @Test
+    func `large rosters remain ordered by reception hop then node id`() {
+        let point = GeoPoint(latitude: 37.0, longitude: -122.0)
+        let positioned = (0 ..< 80).reversed().map { index in
+            TraceReceiver(
+                nodeID: Int64(0x0001_0000 + index),
+                position: point,
+                hop: index % 8 + 1,
+                kind: index.isMultiple(of: 3) ? .gateway : .relay
+            )
+        }
+        let unpositioned = (80 ..< 130).reversed().map { index in
+            UnpositionedReceiver(
+                nodeID: Int64(0x0001_0000 + index),
+                hop: index % 8 + 1,
+                kind: index.isMultiple(of: 5) ? .destination : .relay
+            )
+        }
+        let trace = PacketTrace(
+            id: 0xCAFE_BABE,
+            sourceNode: 0x0000_0001,
+            edges: [],
+            hops: 8,
+            startedAt: 0,
+            receivers: positioned,
+            unpositionedReceivers: unpositioned
+        )
+
+        let rows = VizLegend.receivedBy(trace)
+        #expect(rows.count == 130)
+        #expect(rows.map(\.onMap).contains(true))
+        #expect(rows.map(\.onMap).contains(false))
+
+        for (previous, next) in zip(rows, rows.dropFirst()) {
+            let ordered = previous.hop < next.hop
+                || (previous.hop == next.hop && previous.nodeID < next.nodeID)
+            #expect(ordered)
+        }
+    }
+
+    @Test
     func `onMap flag distinguishes drawn from listed-only receivers`() throws {
         let rows = try VizLegend.receivedBy(trace())
         let drawn = try #require(rows.first { $0.nodeID == 0x0000_00FF })

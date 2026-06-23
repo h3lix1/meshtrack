@@ -30,7 +30,8 @@ public extension AppModel {
         adminLink: (any AdminLink)? = nil,
         packetInspector: PacketInspectorViewModel? = nil,
         portStats: PortStatsViewModel? = nil,
-        offenders: OffendersViewModel? = nil
+        offenders: OffendersViewModel? = nil,
+        onRelayGuessingChange: ((RelayGuessingPolicy) -> Void)? = nil
     ) {
         let viz = VizSettings()
         // The production OTA channel factory over the live admin link (Finding 8). The
@@ -52,7 +53,14 @@ public extension AppModel {
                     // the map's latency overlay (Finding 17).
                     latencyMillis: packetInspector?.latencyMillis ?? [:],
                     availablePresets: presets,
-                    store: store
+                    store: store,
+                    clockOverride: replayClock,
+                    selectedPacketID: focusedPacketID,
+                    onSelectPacket: { [self] packetID in
+                        focusedPacketID = packetID
+                        onPacketFocusChange?(packetID)
+                    },
+                    onRelayGuessingPolicyChange: onRelayGuessingChange
                 ))
             }
         #endif

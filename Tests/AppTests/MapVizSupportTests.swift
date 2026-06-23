@@ -3,6 +3,11 @@ import CoreGraphics
 import Domain
 import Testing
 
+#if canImport(AppKit)
+    import AppKit
+    import SwiftUI
+#endif
+
 @Suite("RelayConfidence")
 struct RelayConfidenceTests {
     /// Three nodes whose ids end in 0x11; one ending in 0x22.
@@ -127,6 +132,36 @@ struct PacketFocusTests {
     }
 
     @Test
+    func `a pinned focused packet stays in the legend after live-window retirement`() throws {
+        let selected = try #require(traces.first { $0.id == focusID })
+        let liveAfterRetirement = traces.filter { $0.id != focusID }
+
+        let pinned = PacketFocus.pinSelectedTrace(
+            liveAfterRetirement,
+            selectedPacketID: focusID,
+            pinnedTrace: selected
+        )
+
+        #expect(pinned.contains { $0.id == focusID })
+        #expect(PacketFocus.focusTraces(pinned, selectedPacketID: focusID) == [selected])
+        #expect(VizLegend.entries(for: pinned).contains { entry in
+            entry.id == focusID && PacketFocus.isFocused(entry.id, selectedPacketID: focusID)
+        })
+    }
+
+    @Test
+    func `pinning does not duplicate a selected packet still in the live trace window`() throws {
+        let selected = try #require(traces.first { $0.id == focusID })
+        let pinned = PacketFocus.pinSelectedTrace(
+            traces,
+            selectedPacketID: focusID,
+            pinnedTrace: selected
+        )
+        #expect(pinned.count(where: { $0.id == focusID }) == 1)
+        #expect(pinned == traces)
+    }
+
+    @Test
     func `toggling focus selects then resets`() {
         let focused = PacketFocus.toggled(focusID, current: nil)
         #expect(focused == focusID)
@@ -209,6 +244,57 @@ struct MapProjectionTests {
     }
 }
 
+@Suite("MapDeclutterPolicy")
+struct MapDeclutterPolicyTests {
+    @Test
+    func `broad zoom clusters annotations and uses lightweight trace detail`() {
+        let level = MapDeclutterPolicy.level(metersPerPoint: 300, visibleNodeCount: 24)
+
+        #expect(level == .overview)
+        #expect(level.clustersAnnotations)
+        #expect(!level.allowsSpiderfy)
+        let detail = MapDeclutterPolicy.traceDetail(isInteracting: false, declutterLevel: level)
+        #expect(detail == .interactive)
+    }
+
+    @Test
+    func `sparse close zoom restores individual annotations and full overlay detail`() {
+        let level = MapDeclutterPolicy.level(metersPerPoint: 30, visibleNodeCount: 24)
+
+        #expect(level == .individual)
+        #expect(!level.clustersAnnotations)
+        #expect(level.allowsSpiderfy)
+        let detail = MapDeclutterPolicy.traceDetail(isInteracting: false, declutterLevel: level)
+        #expect(detail == .full)
+    }
+
+    @Test
+    func `dense maps stay clustered until zoomed closer`() {
+        let midZoom = MapDeclutterPolicy.level(metersPerPoint: 30, visibleNodeCount: 600)
+        let closeZoom = MapDeclutterPolicy.level(metersPerPoint: 15, visibleNodeCount: 600)
+
+        #expect(midZoom == .clustered)
+        #expect(midZoom.clustersAnnotations)
+        #expect(closeZoom == .individual)
+    }
+
+    @Test
+    func `active map interaction always uses lightweight trace detail`() {
+        let level = MapDeclutterPolicy.level(metersPerPoint: 10, visibleNodeCount: 12)
+
+        #expect(level == .individual)
+        let detail = MapDeclutterPolicy.traceDetail(isInteracting: true, declutterLevel: level)
+        #expect(detail == .interactive)
+    }
+
+    @Test
+    func `invalid zoom input falls back to overview decluttering`() {
+        let level = MapDeclutterPolicy.level(metersPerPoint: .nan, visibleNodeCount: 12)
+
+        #expect(level == .overview)
+    }
+}
+
 @Suite("VizSettings")
 @MainActor
 struct VizSettingsTests {
@@ -234,4 +320,80 @@ struct VizSettingsTests {
         settings.equaliseFinish = true
         #expect(settings.mode == .equaliseFinish)
     }
+
+    @Test
+    func `relay guessing exposes all collisions mode and preserves the old toggle`() {
+        let settings = VizSettings(relayGuessingPolicy: .allCandidates)
+        #expect(settings.relayGuessingPolicy == .allCandidates)
+        #expect(settings.relayGuessingDetail.contains("colliding"))
+
+        settings.ignoreAmbiguousRelayGuesses = true
+        #expect(settings.relayGuessingPolicy == .unambiguousOnly)
+
+        settings.ignoreAmbiguousRelayGuesses = false
+        #expect(settings.relayGuessingPolicy == .nearestCandidate)
+    }
 }
+
+#if canImport(AppKit)
+    @Suite("VizSettingsPanel headless render")
+    @MainActor
+    struct VizSettingsPanelRenderTests {
+        private func renderedByteCount(_ view: some View, width: CGFloat, height: CGFloat) -> Int {
+            let renderer = ImageRenderer(content: view.frame(width: width, height: height))
+            renderer.scale = 1
+            guard let image = renderer.nsImage,
+                  let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:])
+            else { return 0 }
+            return png.count
+        }
+
+        private func traceWithManyReceivers(count: Int = 130) -> PacketTrace {
+            let source = GeoPoint(latitude: 37.0, longitude: -122.0)
+            let gateway = GeoPoint(latitude: 37.8, longitude: -122.4)
+            var receivers: [TraceReceiver] = []
+            receivers.reserveCapacity(count)
+            for index in 0 ..< count {
+                let position = GeoPoint(
+                    latitude: 37.1 + Double(index) * 0.001,
+                    longitude: -122.1 - Double(index) * 0.001
+                )
+                let kind: TraceReceiver.Kind = index.isMultiple(of: 5) ? .gateway : .relay
+                receivers.append(TraceReceiver(
+                    nodeID: Int64(0x0001_0000 + index),
+                    position: position,
+                    hop: index % 6 + 1,
+                    kind: kind
+                ))
+            }
+            return PacketTrace(
+                id: 0xCAFE_BABE,
+                sourceNode: 0x0000_0001,
+                edges: [TraceEdge(from: source, to: gateway, kind: .observed, hopIndex: 1)],
+                hops: 6,
+                startedAt: 0,
+                receivers: receivers
+            )
+        }
+
+        @Test
+        func `panel renders a bounded scrollable roster with one hundred plus receivers`() {
+            let trace = traceWithManyReceivers()
+            let settings = VizSettings(
+                hopDuration: 1.2,
+                equaliseFinish: false,
+                showAllReceivers: true
+            )
+            let panel = VizSettingsPanel(
+                settings: settings,
+                traces: [trace],
+                selectedPacketID: trace.id,
+                maxHeight: 360
+            )
+            let bytes = renderedByteCount(panel, width: 280, height: 380)
+            #expect(bytes > 1000, "panel rendered only \(bytes) bytes")
+        }
+    }
+#endif

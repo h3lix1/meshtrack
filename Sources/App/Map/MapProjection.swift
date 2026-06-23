@@ -41,6 +41,70 @@ public protocol TraceProjection {
 extension GeoProjection: TraceProjection {}
 extension MapProjection: TraceProjection {}
 
+/// Zoom-dependent decluttering for the live map.
+///
+/// The thresholds are intentionally expressed in metres per screen point so the
+/// decision is independent of MapKit and can be tested headlessly. MapKit supplies
+/// that single scalar; everything else here is pure policy.
+public enum MapDeclutterLevel: Sendable, Equatable {
+    /// Broad overview: cluster/count markers and keep the trace overlay lightweight.
+    case overview
+    /// Mid-range map: still cluster dense areas; individual rings/labels are too noisy.
+    case clustered
+    /// Close enough that individual nodes, spiderfied mast sites, labels and receiver
+    /// rings are useful instead of clutter.
+    case individual
+
+    public var clustersAnnotations: Bool {
+        self != .individual
+    }
+
+    public var allowsSpiderfy: Bool {
+        self == .individual
+    }
+
+    public var settledTraceDetail: TraceRenderDetail {
+        self == .individual ? .full : .interactive
+    }
+}
+
+public enum MapDeclutterPolicy {
+    /// Above this, the user is reading fleet distribution rather than individual sites.
+    public static let overviewMetersPerPoint = 250.0
+    /// Sparse maps can show individual nodes earlier than dense MQTT captures.
+    public static let sparseIndividualMetersPerPoint = 70.0
+    /// Dense captures need a tighter zoom before labels/rings become readable.
+    public static let denseIndividualMetersPerPoint = 35.0
+    /// Very dense profiling/live captures stay clustered until almost site-level.
+    public static let burstIndividualMetersPerPoint = 20.0
+
+    public static func level(metersPerPoint: Double, visibleNodeCount: Int) -> MapDeclutterLevel {
+        let mpp = metersPerPoint.isFinite ? max(0, metersPerPoint) : .greatestFiniteMagnitude
+        guard mpp < overviewMetersPerPoint else { return .overview }
+        let nodeCount = max(0, visibleNodeCount)
+        let individualThreshold = individualMetersPerPoint(forNodeCount: nodeCount)
+        return mpp >= individualThreshold ? .clustered : .individual
+    }
+
+    public static func traceDetail(
+        isInteracting: Bool,
+        declutterLevel: MapDeclutterLevel
+    ) -> TraceRenderDetail {
+        isInteracting ? .interactive : declutterLevel.settledTraceDetail
+    }
+
+    private static func individualMetersPerPoint(forNodeCount nodeCount: Int) -> Double {
+        switch nodeCount {
+        case 0 ..< 150:
+            sparseIndividualMetersPerPoint
+        case 150 ..< 500:
+            denseIndividualMetersPerPoint
+        default:
+            burstIndividualMetersPerPoint
+        }
+    }
+}
+
 /// Caches projection results within one render pass.
 ///
 /// Live map drawing often asks for the same endpoint several times in a frame:
