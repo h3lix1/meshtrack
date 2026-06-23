@@ -63,17 +63,17 @@ public struct TraceRenderer {
         bounds.insetBy(dx: -margin, dy: -margin).contains(point)
     }
 
-    /// True if the segment a→b's bounding box intersects `bounds` expanded by `margin`.
+    /// True if the segment start→end's bounding box intersects `bounds` expanded by `margin`.
     /// Conservative: keeps any edge that crosses or merely touches the viewport so we
     /// never drop a line that is partially on-screen.
     static func isSegmentVisible(
-        from a: CGPoint, to b: CGPoint, in bounds: CGRect, margin: CGFloat
+        from start: CGPoint, to end: CGPoint, in bounds: CGRect, margin: CGFloat
     ) -> Bool {
         let box = CGRect(
-            x: min(a.x, b.x),
-            y: min(a.y, b.y),
-            width: abs(a.x - b.x),
-            height: abs(a.y - b.y)
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(start.x - end.x),
+            height: abs(start.y - end.y)
         )
         return bounds.insetBy(dx: -margin, dy: -margin).intersects(box)
     }

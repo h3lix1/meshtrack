@@ -111,7 +111,7 @@ public struct TraceAnimationSchedule: TimelineSchedule {
 
         var dates: [Date] = []
         dates.reserveCapacity(boundedSteps + 1)
-        for step in 0...boundedSteps {
+        for step in 0 ... boundedSteps {
             dates.append(startDate.addingTimeInterval(Double(step) * frameInterval))
         }
         return dates

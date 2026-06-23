@@ -19,6 +19,11 @@ opt_in_rules:
   - first_where
   - last_where
 
+# The 400-line budget measures CODE, not the architectural commentary several files
+# carry by design (the composition root, the timeline VM). Comment-only lines don't count.
+file_length:
+  ignore_comment_only_lines: true
+
 # Universally-fine short names: GRDB closure params (db, t) and record ids.
 identifier_name:
   excluded:

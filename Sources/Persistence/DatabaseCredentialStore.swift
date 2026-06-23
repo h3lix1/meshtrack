@@ -71,7 +71,9 @@ public final class DatabaseCredentialStore: CredentialStore {
     }
 
     private static func persist(_ credentials: [String: String], _ writer: any DatabaseWriter) throws {
-        let json = try String(decoding: JSONEncoder().encode(credentials), as: UTF8.self)
+        guard let json = try String(bytes: JSONEncoder().encode(credentials), encoding: .utf8) else {
+            throw StoreError.encodingFailed(details: "broker credentials JSON was not valid UTF-8")
+        }
         try writer.write { db in
             try db.execute(
                 sql: """
