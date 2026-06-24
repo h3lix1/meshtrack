@@ -6,9 +6,9 @@ cd "$(dirname "$0")/.."
 echo "==> Installing dev tooling"
 
 if command -v brew >/dev/null 2>&1; then
-    brew install swiftformat swiftlint || true
+    brew install swiftformat swiftlint protobuf swift-protobuf || true
 else
-    echo "⚠️  Homebrew not found; install swiftformat + swiftlint manually."
+    echo "⚠️  Homebrew not found; install swiftformat, swiftlint, protobuf, and swift-protobuf manually."
 fi
 
 # protoc + protoc-gen-swift drive reproducible protobuf codegen (Phase 0).
